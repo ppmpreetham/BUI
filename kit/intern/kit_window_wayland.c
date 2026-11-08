@@ -325,11 +325,10 @@ static void present(BKWindow *win, Buf *b, int all)
   const uint32_t *px = BUI_raster_pixels(win->raster);
   const int(*rects)[4] = NULL;
   const int n = all ? 0 : BUI_raster_damage(win->raster, &rects);
+  const bool damaged_all = all || n > MAX_RECTS;
   /* this buffer holds the frame before the last: it needs that frame's damage too */
-  const bool whole = all || !b->valid || win->last_full || n > MAX_RECTS;
-  if (whole) {
+  if (damaged_all || !b->valid || win->last_full) {
     memcpy(b->data, px, (size_t)w * (size_t)h * 4);
-    wl_surface_damage_buffer(win->surface, 0, 0, w, h);
   }
   else {
     for (int i = 0; i < win->last_n; i++) {
@@ -337,11 +336,18 @@ static void present(BKWindow *win, Buf *b, int all)
     }
     for (int i = 0; i < n; i++) {
       copy_rect(b, px, w, rects[i]);
-      wl_surface_damage_buffer(win->surface, rects[i][0], rects[i][1], rects[i][2], rects[i][3]);
     }
   }
-  win->last_full = whole;
-  win->last_n = whole ? 0 : n;
+  /* the surface changed only where this frame's raster did */
+  if (damaged_all) {
+    wl_surface_damage_buffer(win->surface, 0, 0, w, h);
+  }
+  for (int i = 0; !damaged_all && i < n; i++) {
+    wl_surface_damage_buffer(win->surface, rects[i][0], rects[i][1], rects[i][2], rects[i][3]);
+  }
+  /* the frame's own damage, not the copy: a full copy must not make every later copy full */
+  win->last_full = damaged_all;
+  win->last_n = damaged_all ? 0 : n;
   for (int i = 0; i < win->last_n; i++) {
     memcpy(win->last_rects[i], rects[i], sizeof(int) * 4);
   }
