@@ -6,10 +6,48 @@ All notable changes to **blenderui** (BUI). The format follows
 
 ## [Unreleased]
 
+### Added
+- **Linux window requests** that Win32 and Cocoa already had, through `BK_window_wm` (Python `Window.wm`):
+  `"state"` 2 and 0 hide and show a window on X11 and Wayland; `"override"` removes the frame (`_MOTIF_WM_HINTS`
+  on X11, client-side decorations on Wayland) and `"topmost"` keeps an X11 window above others
+  (`_NET_WM_STATE_ABOVE`), both ported from `GHOST_WindowX11`.
+- **Transparent windows on Linux:** `wm "transparent"` before `show` gives per-pixel alpha, with no region
+  background, through a 32-bit ARGB visual on X11 and ARGB8888 buffers on Wayland. The software raster can keep
+  premultiplied alpha (`BUI_raster_set_alpha`, `BUI_raster_alpha`, `BUI_raster_clear`); opaque frames are
+  unchanged byte for byte and draw as fast as before. Transparent windows keep the software renderer.
+- **Layer-shell windows on Wayland:** `wm "layer"` (layer 0 background to 3 overlay, keyboard interactivity) and
+  `"anchor"` (edges, exclusive zone) make a wlr-layer-shell surface, on KDE Plasma, wlroots compositors and
+  COSMIC (not GNOME). `wm_get("layer")` says whether the compositor has it. The protocol file (MIT) is in
+  `kit/extern/wayland_protocols`.
+- **Focus callback:** `BKWindowCallbacks.on_focus` reports when a window gets or loses the keyboard focus, on
+  Win32, Cocoa, X11 and Wayland (Python `Window.on_focus`). Losing it cancels an open pie, as Blender's
+  `WINDEACTIVATE` does.
+- **Hit test:** `BK_hit_at(ctx, x, y)` gives the interactive node under a point (Python `ctx.hit`, Lua `ctx:hit`).
+- **Pie menus as in Blender** (`pie_handler`, `pie_menu_begin`): opened while a key is held, releasing the key
+  picks the item in the pointer's direction, and a quick tap keeps the pie open for a click; an item with a
+  submenu opens a sub-pie at the pointer; past 8 items, the 8th is "More" with the rest
+  (`pie_menu_level_create`); items get underlined accelerator letters (`menu_block_set_keyaccels`); and the
+  items grow out of the center over 60 ms (`pie_animation_timeout`, off with reduced motion).
+- **Dear ImGui:** `ImGui_ImplBUI_AbandonFrame()` (C: `cImGui_ImplBUI_AbandonFrame`) ends a frame that a binding's
+  callback left early on an error, with Dear ImGui's error recovery.
+
+### Changed
+- `BK_open_pie` takes the pie's center (`at_x`, `at_y`; `-100000` for the pointer, as in `BK_open_menu`).
+  Python `PieMenu.show(..., at=(x, y))` and `ctx.open_pie(..., at=)`, Lua `ctx:open_pie(items, title, x, y)`.
+- Pie number keys are directions on the numpad (8 north, 6 east, 2 south, 4 west, the diagonals on 7, 9, 1 and 3),
+  as in Blender. They were item positions.
+- `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
+
 ### Fixed
 - **macOS:** the npm `bui-runtime` (and the release build of the addon) failed to link with `Undefined symbols: ___isPlatformVersionAtLeast`: the
   Cocoa host asked for ProMotion with `@available`, which needs a symbol from clang's runtime that a Rust binary linked with
   `-nodefaultlibs` does not have. It asks by selector now.
+- **Wayland:** a new window drew nothing until a later turn of the event loop, because the host did not wait for
+  the compositor's first configure. It waits now, as `GHOST_WindowWayland` does (`buipy_render` failed on
+  Wayland sessions).
+- **Dear ImGui from Python:** an exception after `Begin()` in a frame callback aborted the process in builds with
+  asserts ("Missing End()"). The frame is unwound now and the exception reaches Python.
+- Pies with more than 8 items dropped the rest; they now get Blender's "More" item.
 
 ## [0.5.0] - 2026-11-08
 
