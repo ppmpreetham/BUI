@@ -91,7 +91,10 @@
   F(XStoreName) \
   F(XWarpPointer) \
   F(XIconifyWindow) \
-  F(XWithdrawWindow)
+  F(XWithdrawWindow) \
+  F(XMatchVisualInfo) \
+  F(XCreateColormap) \
+  F(XFreeColormap)
 
 #  define BK_X11_DECL(f) static __typeof__(&f) p_##f;
 BK_X11_FUNCS(BK_X11_DECL)
@@ -167,6 +170,9 @@ static int x11_load(void)
 #  define XWarpPointer (*p_XWarpPointer)
 #  define XIconifyWindow (*p_XIconifyWindow)
 #  define XWithdrawWindow (*p_XWithdrawWindow)
+#  define XMatchVisualInfo (*p_XMatchVisualInfo)
+#  define XCreateColormap (*p_XCreateColormap)
+#  define XFreeColormap (*p_XFreeColormap)
 
 #  define MAX_TIMERS 64
 
@@ -183,6 +189,10 @@ struct BKWindow {
   BKWindowCallbacks cb;
   XImage *image;
   GC gc;
+  Visual *visual;  /* the window's: 32-bit ARGB when transparent */
+  int depth;
+  Colormap cmap;   /* for the ARGB visual, else None */
+  char *title;
   int render_pending, frames, cursor, tip_id, next_timer, full;
   int want_frame, frame_vsync;
   double frame_start;
@@ -430,12 +440,12 @@ static void present(BKWindow *win, int all)
       win->image->data = NULL; /* the raster owns the pixels */
       XDestroyImage(win->image);
     }
-    Visual *vis = DefaultVisual(g_dpy, DefaultScreen(g_dpy));
-    win->image = XCreateImage(g_dpy, vis, 24, ZPixmap, 0, NULL, (unsigned)w, (unsigned)h, 32,
-                              w * 4);
+    win->image = XCreateImage(g_dpy, win->visual, (unsigned)win->depth, ZPixmap, 0, NULL,
+                              (unsigned)w, (unsigned)h, 32, w * 4);
     all = 1;
   }
-  /* 0xAARRGGBB words are B, G, R, A bytes: the 24-bit TrueColor layout */
+  /* 0xAARRGGBB words are B, G, R, A bytes: the 24-bit TrueColor layout, and the 32-bit ARGB
+   * visual's (premultiplied, as compositors read it) */
   win->image->data = (char *)BUI_raster_pixels(win->raster);
   if (all) {
     XPutImage(g_dpy, win->xid, win->gc, win->image, 0, 0, 0, 0, (unsigned)w, (unsigned)h);
@@ -667,6 +677,62 @@ static void handle_event(XEvent *ev)
 
 /* -- windows -- */
 
+/* The X window, with the default visual or, transparent, a 32-bit ARGB one (GHOST's
+ * alpha background). A window's visual is fixed, so "transparent" makes a new window. */
+static bool create_xid(BKWindow *win, bool transparent)
+{
+  const int screen = DefaultScreen(g_dpy);
+  const Window root = RootWindow(g_dpy, screen);
+  XSetWindowAttributes attr;
+  memset(&attr, 0, sizeof(attr));
+  attr.event_mask = ExposureMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask |
+                    ButtonReleaseMask | KeyPressMask | KeyReleaseMask | LeaveWindowMask |
+                    FocusChangeMask;
+  unsigned long mask = CWBackPixel | CWEventMask;
+  XVisualInfo vi;
+  win->visual = DefaultVisual(g_dpy, screen);
+  win->depth = 24;
+  win->cmap = None;
+  if (transparent && XMatchVisualInfo(g_dpy, screen, 32, TrueColor, &vi)) {
+    win->visual = vi.visual;
+    win->depth = 32;
+    win->cmap = XCreateColormap(g_dpy, root, vi.visual, AllocNone);
+    attr.colormap = win->cmap;
+    mask |= CWColormap | CWBorderPixel; /* a visual other than the parent's needs both */
+  }
+  else {
+    attr.background_pixel = BlackPixel(g_dpy, screen);
+  }
+  win->xid = XCreateWindow(g_dpy, root, 0, 0, (unsigned)win->w, (unsigned)win->h, 0,
+                           win->depth == 32 ? 32 : CopyFromParent, InputOutput,
+                           win->depth == 32 ? win->visual : CopyFromParent, mask, &attr);
+  if (!win->xid) {
+    return false;
+  }
+  XSetWMProtocols(g_dpy, win->xid, &a_delete, 1);
+  win->gc = XCreateGC(g_dpy, win->xid, 0, NULL);
+  BK_window_set_title(win, win->title);
+  BUI_raster_set_alpha(win->raster, win->depth == 32);
+  return true;
+}
+
+/* Drop the X window and what was made for it, before a new one (the window stays open). */
+static void destroy_xid(BKWindow *win)
+{
+  BUI_raster_gpu_release(win->raster);
+  if (win->image) {
+    win->image->data = NULL;
+    XDestroyImage(win->image);
+    win->image = NULL;
+  }
+  XFreeGC(g_dpy, win->gc);
+  XDestroyWindow(g_dpy, win->xid);
+  if (win->cmap) {
+    XFreeColormap(g_dpy, win->cmap);
+  }
+  win->xid = 0;
+}
+
 BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height)
 {
   if (!open_display()) {
@@ -681,24 +747,13 @@ BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height
   BK_set_scale(win->scale);
   win->w = (int)(width * win->scale);
   win->h = (int)(height * win->scale);
-  const int screen = DefaultScreen(g_dpy);
-  XSetWindowAttributes attr;
-  memset(&attr, 0, sizeof(attr));
-  attr.background_pixel = BlackPixel(g_dpy, screen);
-  attr.event_mask = ExposureMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask |
-                    ButtonReleaseMask | KeyPressMask | KeyReleaseMask | LeaveWindowMask |
-                    FocusChangeMask;
-  win->xid = XCreateWindow(g_dpy, RootWindow(g_dpy, screen), 0, 0, (unsigned)win->w,
-                           (unsigned)win->h, 0, CopyFromParent, InputOutput, CopyFromParent,
-                           CWBackPixel | CWEventMask, &attr);
-  if (!win->xid) {
+  win->title = bk_strdup(title ? title : "");
+  if (!create_xid(win, false)) {
     BUI_raster_free(win->raster);
+    free(win->title);
     free(win);
     return NULL;
   }
-  XSetWMProtocols(g_dpy, win->xid, &a_delete, 1);
-  win->gc = XCreateGC(g_dpy, win->xid, 0, NULL);
-  BK_window_set_title(win, title);
   win->next = g_windows;
   g_windows = win;
   g_open++;
@@ -730,10 +785,14 @@ void BK_window_free(BKWindow *win)
   if (win->gc) {
     XFreeGC(g_dpy, win->gc);
   }
+  if (win->cmap) {
+    XFreeColormap(g_dpy, win->cmap);
+  }
   if (win->ctx) {
     BK_context_set_host(win->ctx, &win->prev);
   }
   BUI_raster_free(win->raster);
+  free(win->title);
   free(win);
 }
 
@@ -767,6 +826,11 @@ void BK_window_set_title(BKWindow *win, const char *title)
     return;
   }
   const char *t = title ? title : "";
+  if (t != win->title) {
+    free(win->title);
+    win->title = bk_strdup(t);
+    t = win->title;
+  }
   XChangeProperty(g_dpy, win->xid, XInternAtom(g_dpy, "_NET_WM_NAME", False), a_utf8, 8,
                   PropModeReplace, (const unsigned char *)t, (int)strlen(t));
   XStoreName(g_dpy, win->xid, t);
@@ -799,7 +863,7 @@ BuiRaster *BK_window_raster(BKWindow *win)
 
 void BK_window_set_gpu(BKWindow *win, int on)
 {
-  if (win && on) {
+  if (win && on && win->depth != 32) { /* a transparent window keeps the software raster */
     gpu_attach(win);
     host_request(win);
   }
@@ -881,6 +945,16 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   if (!strcmp(key, "pos")) {
     XMoveWindow(g_dpy, win->xid, (int)a, (int)b);
+  }
+  else if (!strcmp(key, "transparent")) { /* before show: the window is made again */
+    if ((a != 0) != (win->depth == 32)) {
+      destroy_xid(win);
+      if (!create_xid(win, a != 0)) {
+        g_open--; /* no window: closed */
+        return;
+      }
+      win->full = 1;
+    }
   }
   else if (!strcmp(key, "minsize") || !strcmp(key, "maxsize") || !strcmp(key, "resizable")) {
     XSizeHints *hints = XAllocSizeHints();

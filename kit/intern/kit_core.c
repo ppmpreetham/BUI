@@ -2170,7 +2170,10 @@ static void draw_region(BKContext *ctx, const BKRect *rect)
   const int w = ctx->win_w, h = ctx->win_h;
   bk_clip_reset(w, h);
   bk_clip_push(rect->xmin, rect->ymin, bk_rw(rect), bk_rh(rect));
-  if (!(ctx->root && (ctx->root->flags & NF_OPAQUE))) {
+  if (BUI_raster_alpha(bk_draw.r)) { /* a transparent window: no region background */
+    BUI_raster_clear(bk_draw.r, rect->xmin, rect->ymin, bk_rw(rect), bk_rh(rect));
+  }
+  else if (!(ctx->root && (ctx->root->flags & NF_OPAQUE))) {
     bk_fill(rect->xmin, rect->ymin, bk_rw(rect), bk_rh(rect), bk_theme.region_bg);
   }
   const int top = ctx->header_h, view_h = h - top;

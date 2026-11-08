@@ -245,7 +245,10 @@ static bool buf_create(BKWindow *win, Buf *b, int w, int h)
     return false;
   }
   struct wl_shm_pool *pool = wl_shm_create_pool(g.shm, fd, (int32_t)size);
-  b->buffer = wl_shm_pool_create_buffer(pool, 0, w, h, stride, WL_SHM_FORMAT_XRGB8888);
+  /* ARGB8888 is premultiplied: the raster's frame when it keeps alpha (transparent) */
+  b->buffer = wl_shm_pool_create_buffer(pool, 0, w, h, stride,
+                                        BUI_raster_alpha(win->raster) ? WL_SHM_FORMAT_ARGB8888 :
+                                                                        WL_SHM_FORMAT_XRGB8888);
   wl_shm_pool_destroy(pool);
   close(fd);
   wl_buffer_add_listener(b->buffer, &buffer_listener, win);
@@ -1360,6 +1363,13 @@ void bk_wl_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   if (!strcmp(key, "state")) {
     set_hidden(win, a == 2); /* 2: withdrawn */
+  }
+  else if (!strcmp(key, "transparent") && (a != 0) != BUI_raster_alpha(win->raster)) {
+    BUI_raster_set_alpha(win->raster, a != 0);
+    buf_destroy(&win->bufs[0]); /* new buffers in the other format */
+    buf_destroy(&win->bufs[1]);
+    win->full = 1;
+    win->render_pending = 1;
   }
   if (!win->toplevel) {
     wl_display_flush(g.display);

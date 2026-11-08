@@ -277,7 +277,7 @@ class Window:
     def wm(self, key: str, a: float = 0.0, b: float = 0.0) -> None:
         """Window-manager request: pos, minsize, maxsize, resizable, topmost,
         alpha, override, state (0 normal, 1 iconic, 2 withdrawn, 3 zoomed),
-        lift, lower, focus."""
+        lift, lower, focus, transparent (native Linux windows, before show)."""
         if self.native:
             self._win.wm(key, float(a), float(b))
             return
