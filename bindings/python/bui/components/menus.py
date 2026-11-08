@@ -93,10 +93,10 @@ class Menu:
 
 
 class PieMenu:
-    """Radial menu around the pointer: ``PieMenu.show(ctx, items, "Mode")``.
+    """Radial menu around the pointer or ``at=(x, y)``: ``PieMenu.show(ctx, items, "Mode")``.
     Up to 8 items in Blender's order W, E, S, N, NW, NE, SW, SE; move toward
     an item and click, or press 1-8."""
 
     @staticmethod
-    def show(ctx, items, title: str = "") -> None:
-        ctx.open_pie(menu_items(items), title or None)
+    def show(ctx, items, title: str = "", at=None) -> None:
+        ctx.open_pie(menu_items(items), title or None, at)

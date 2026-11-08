@@ -1151,16 +1151,18 @@ const BKClass bk_cls_pie = {.name = "pie",
                             .move = pie_move,
                             .key = pie_key};
 
-void BK_open_pie(BKContext *ctx, const BKMenuSpec *items, int n, const char *title)
+void BK_open_pie(
+    BKContext *ctx, const BKMenuSpec *items, int n, const char *title, int at_x, int at_y)
 {
+  const bool at = at_x > PLACE_NONE && at_y > PLACE_NONE;
   BKNode *pie = bk_node_new_cls(&bk_cls_pie);
   PieData *pd = (PieData *)calloc(1, sizeof(PieData));
   place_init(&pd->menu.place);
   pd->menu.all = bk_menuspec_copy(items, BK_MIN(n, 8));
   pd->menu.nall = BK_MIN(n, 8);
   pd->menu.title = title ? bk_strdup(title) : NULL;
-  pd->at_x = ctx->pointer_x;
-  pd->at_y = ctx->pointer_y;
+  pd->at_x = at ? at_x : ctx->pointer_x;
+  pd->at_y = at ? at_y : ctx->pointer_y;
   pie->ext = pd;
   pie->hot = -1;
   bk_open_popup(ctx, pie, ctx->root, NULL);

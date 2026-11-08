@@ -1798,11 +1798,17 @@ static PyObject *kitctx_open_menu(KitContextObject *self, PyObject *args, PyObje
   Py_RETURN_NONE;
 }
 
-static PyObject *kitctx_open_pie(KitContextObject *self, PyObject *args)
+static PyObject *kitctx_open_pie(KitContextObject *self, PyObject *args, PyObject *kw)
 {
+  static char *kwlist[] = {"items", "title", "at", NULL};
   PyObject *items;
   const char *title = NULL;
-  if (!PyArg_ParseTuple(args, "O|z:open_pie", &items, &title)) {
+  PyObject *at = Py_None;
+  if (!PyArg_ParseTupleAndKeywords(args, kw, "O|zO:open_pie", kwlist, &items, &title, &at)) {
+    return NULL;
+  }
+  int ax = -100000, ay = -100000;
+  if (at != Py_None && !PyArg_ParseTuple(at, "ii", &ax, &ay)) {
     return NULL;
   }
   BKMenuSpec *specs;
@@ -1810,7 +1816,7 @@ static PyObject *kitctx_open_pie(KitContextObject *self, PyObject *args)
   if (!build_specs(items, &specs, &n)) {
     return NULL;
   }
-  BK_open_pie(self->ctx, specs, n, title);
+  BK_open_pie(self->ctx, specs, n, title, ax, ay);
   free_specs(specs, n);
   Py_RETURN_NONE;
 }
@@ -1902,7 +1908,8 @@ static PyMethodDef kitctx_methods[] = {
     {"picker_part", (PyCFunction)kitctx_picker_part, METH_VARARGS, "Color picker part."},
     {"open_menu", (PyCFunction)(void (*)(void))kitctx_open_menu, METH_VARARGS | METH_KEYWORDS,
      "open_menu(owner, items, title=None, at=None)"},
-    {"open_pie", (PyCFunction)kitctx_open_pie, METH_VARARGS, "open_pie(items, title=None)"},
+    {"open_pie", (PyCFunction)(void (*)(void))kitctx_open_pie, METH_VARARGS | METH_KEYWORDS,
+     "open_pie(items, title=None, at=None)"},
     {NULL, NULL, 0, NULL},
 };
 

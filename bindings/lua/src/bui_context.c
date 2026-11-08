@@ -555,7 +555,9 @@ static int l_ctx_open_pie(lua_State *L) {
   BKMenuSpec *specs;
   int n = luabui_build_menuspec(L, 2, &specs);
   const char *title = luaL_optstring(L, 3, NULL);
-  if (specs) BK_open_pie(cud->ctx, specs, n, title);
+  int ax = (int)luaL_optinteger(L, 4, -100000);
+  int ay = (int)luaL_optinteger(L, 5, -100000);
+  if (specs) BK_open_pie(cud->ctx, specs, n, title, ax, ay);
   return 0;
 }
 

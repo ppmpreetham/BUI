@@ -487,6 +487,18 @@ def test_pie_menu():
     assert got == ["N"] and not d.popups()
 
 
+def test_pie_menu_at():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(10, 10)
+    PieMenu.show(d.ctx, [MenuItem(n, (lambda n=n: got.append(n))) for n in "WESN"], at=(300, 250))
+    d.frame()
+    d.app.motion(430, 250, mods())                     # east of the given centre
+    d.app.press(430, 250, mods())
+    assert got == ["E"] and not d.popups()
+
+
 # -- color ------------------------------------------------------------------------------
 
 

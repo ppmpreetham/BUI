@@ -268,7 +268,9 @@ void BK_open_menu(BKContext *ctx,
                   const char *title,
                   int at_x,
                   int at_y);
-void BK_open_pie(BKContext *ctx, const BKMenuSpec *items, int n, const char *title);
+/* The pie centre is (at_x, at_y) in window pixels, or the pointer when either is -100000. */
+void BK_open_pie(
+    BKContext *ctx, const BKMenuSpec *items, int n, const char *title, int at_x, int at_y);
 
 /* -- geometry managers (children of a "frame") ------------------------------------
  * Tk's pack / grid / place, also used for Qt layouts. Keys (numbers):
