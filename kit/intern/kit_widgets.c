@@ -774,7 +774,6 @@ static void panel_draw(BKNode *n)
   /* title: paneltitle style (soft shadow) for panels, widget style for sub-panels;
    * its rect reaches 2 px below the header (title_rect.ymin - 2) */
   BKRect tr = {(int)tx - bk_pad(), n->y, n->x + n->w - (sub ? 0 : (int)uu), n->y + hh + 2};
-  extern int bk_text_shadow;
   const int shadow = bk_text_shadow;
   bk_text_shadow = sub ? 1 : 3;
   bk_text_in(&tr, n->text, bk_theme.text, BK_ALIGN_LEFT, false);
@@ -3498,7 +3497,7 @@ void bk_html_te_draw(BKTextEdit *te, const BKRect *cr, const uchar color[4])
     bk_text(tx, base, s, len, white, false);
     bk_clip_pop();
   }
-  else { /* Chrome hides the caret over a range selection */
+  else if (bk_te_caret_visible(te)) { /* Chrome hides the caret over a range selection, and blinks it */
     bk_fill(floorf(tx + caret_px), (float)cr->ymin, html_bw(), (float)h, color);
   }
   bk_clip_pop();
@@ -3646,9 +3645,11 @@ static void html_text_draw(BKNode *n)
 {
   const BKRect r = bk_node_rect(n);
   const int hs = html_state(n);
-  html_field_frame(&r, hs, n->edit != NULL);
+  if (!(n->flags & NF_BARE)) { /* `border: none`: no frame and no focus ring, as in Chrome */
+    html_field_frame(&r, hs, n->edit != NULL);
+  }
   const BKRect cr = html_inset(&r, 4, 3, 4, 3);
-  const uchar *tc = hs == HS_DISABLED ? kHtmlFieldTextDisabled : kHtmlText;
+  const uchar *tc = hs == HS_DISABLED ? kHtmlFieldTextDisabled : n->text_color[3] ? n->text_color : kHtmlText;
   if (n->edit) {
     bk_html_te_draw(n->edit, &cr, tc);
     return;
