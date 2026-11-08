@@ -1764,29 +1764,7 @@ void bk_close_popups_after(BKContext *ctx, BKNode *after)
   while (ctx->npopups > keep) {
     BKNode *p = ctx->popups[--ctx->npopups];
     bk_invalidate(p);
-    /* clear references into the popup before freeing it */
-    if (ctx->hover && is_within(ctx->hover, p)) {
-      ctx->hover = NULL;
-    }
-    if (ctx->grab && is_within(ctx->grab, p)) {
-      ctx->grab = NULL;
-    }
-    if (ctx->focus && is_within(ctx->focus, p)) {
-      BKNode *f = ctx->focus;
-      ctx->focus = NULL;
-      bk_te_free(f->edit);
-      f->edit = NULL;
-    }
-    if (ctx->tip_node && is_within(ctx->tip_node, p)) {
-      ctx->tip_node = NULL;
-      ctx->tip_shown = 0;
-    }
-    if (ctx->last_click_node && is_within(ctx->last_click_node, p)) {
-      ctx->last_click_node = NULL;
-    }
-    if (ctx->modal && is_within(ctx->modal, p)) {
-      ctx->modal = NULL;
-    }
+    bk_forget(ctx, p); /* references into the popup, its animations, its undo steps */
     /* The popover panel's body belongs to its owner, not the popup. */
     if (p->cls == &bk_cls_popover_panel && p->nkids) {
       BKNode *body = p->kids[0];

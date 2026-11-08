@@ -52,6 +52,8 @@ All notable changes to **blenderui** (BUI). The format follows
 - `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
 
 ### Fixed
+- **Closing a pie during its open animation** freed it while the animation still pointed at it, so the next render read freed
+  memory (`bui_lua_context` crashed in CI). Closing a popup now clears everything that refers into it through `bk_forget`.
 - **Wayland frames copied the whole window every frame** after the first full one: the double-buffer copy kept
   its own full copy as the next frame's damage. It copies and reports only what changed now.
 - **Setting a node's geometry or a flag property** (`visible`, `enabled` ...) **to the value it already has** relaid out
