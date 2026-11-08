@@ -947,7 +947,8 @@ impl Window {
                     return Err("could not create a native window".into());
                 }
                 let cb = sys::BKWindowCallbacks { data: id as *mut c_void, on_timer: Some(on_timer),
-                                                  on_close: Some(on_close), on_frame: Some(on_frame) };
+                                                  on_close: Some(on_close), on_frame: Some(on_frame),
+                                                  on_focus: None };
                 sys::BK_window_set_callbacks(n, &cb);
                 win.scale = sys::BK_scale().max(0.5);
                 win.phys = ((w * win.scale).round() as i32, (h * win.scale).round() as i32);

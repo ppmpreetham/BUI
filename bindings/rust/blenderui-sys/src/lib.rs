@@ -215,6 +215,7 @@ pub struct BKWindowCallbacks {
     pub on_timer: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow, id: c_int)>,
     pub on_close: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow) -> c_int>,
     pub on_frame: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow)>,
+    pub on_focus: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow, active: c_int)>,
 }
 
 unsafe extern "C" {
