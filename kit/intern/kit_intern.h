@@ -227,6 +227,8 @@ typedef struct BKTextEdit {
   char mask[8]; /* shown instead of each character (password fields), "" = none */
   struct BKTextUndo *undo; /* Blender's interface_undo.cc text stack (Ctrl+Z while typing) */
   BKImeComp ime;
+  double blink_t0;           /* when the caret last moved or the text last changed (bk_time) */
+  int blink_caret, blink_len; /* what blink_t0 was taken at */
 } BKTextEdit;
 
 enum { TE_NONE = 0, TE_CHANGED, TE_CONFIRM, TE_CANCEL, TE_NEXT, TE_PREV };
@@ -240,6 +242,11 @@ void bk_te_drag(BKTextEdit *te, float px);
 void bk_te_select_word(BKTextEdit *te, int index);
 void bk_te_draw(BKTextEdit *te, const BKRect *rect, const uchar color[4]);
 bool bk_te_delete_selection(BKTextEdit *te);
+/* The caret blinks (about every 530 ms, as in browsers): solid right after it moves or the text
+ * changes, then on and off. The draw code asks; the context's frame timer wakes the window at
+ * the next change while a field is edited (bk_ctx_arm_timer). */
+bool bk_te_caret_visible(BKTextEdit *te);
+double bk_te_next_toggle(BKTextEdit *te); /* in bk_time() seconds */
 
 /* -------------------------------------------------------------------- */
 /* Input methods (kit_ime.c). Blender: GHOST_ImeWin32 + the wm/ui IME handlers. */
@@ -370,6 +377,7 @@ enum {
   NF_HTML = 1 << 25,        /* "html": Chrome's default form-control look and interaction */
   NF_ACTIVE_DEFAULT = 1 << 26, /* buttons: UI_BUT_ACTIVE_DEFAULT (drawn with the select colors) */
   NF_DEFAULT_SET = 1 << 27, /* `defval` was set: by "default", or by the first "value" a widget got */
+  NF_BARE = 1 << 28,        /* "bare": an HTML text field with no frame (CSS `border-style: none`) */
 };
 
 #define BK_HTML(n) (((n)->flags & NF_HTML) != 0)
@@ -417,6 +425,7 @@ struct BKNode {
   int scroll_x;       /* horizontal view offset (canvas) */
   int cursor_override; /* hover cursor + 1 (0 = the class's) */
   float font_scale;    /* text size relative to the UI font (0 = 1) */
+  uchar text_color[4]; /* browser-look text fields: the CSS color (alpha 0: Chrome's FieldText) */
   int selmode; /* list/tree: 0 single, 1 multiple (toggle), 2 extended (Ctrl/Shift),
                 * 3 single shown with marks (clearable) */
   unsigned char *marks;   /* list: selected rows when selmode != 0 */
@@ -674,6 +683,7 @@ extern const BKClass bk_cls_column, bk_cls_row, bk_cls_split, bk_cls_grid, bk_cl
  * own measure/draw; they return false for classes without a browser look. */
 #define BK_HTML_FONT (40.0f / 33.0f) /* 13.333px text over the 11px UI text */
 extern float bk_html_text_scale;
+extern int bk_text_shadow; /* 0 none, 1 drop shadow (Blender UI text), 3 blurred; browser-look controls draw none */
 bool bk_html_measure(BKNode *n, int *r_w, int *r_h);
 bool bk_html_draw(BKNode *n);
 /* CSS px -> device px */
