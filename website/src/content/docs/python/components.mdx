@@ -49,11 +49,11 @@ App(title="BUI", size=(420, 640), *children, padding=None, spacing=None, header=
 | Member | What it does |
 | --- | --- |
 | `app.run(native=None)` | Opens the window and runs the event loop until it closes. `native=False` forces the Tk-hosted window. |
-| `app.open(native=None)` | Opens the window without running the loop; returns the window. |
+| `app.open(native=None)` | Opens the window without running the loop; returns the window. Its `wm(key, a, b)` sends window requests (on Linux: `"transparent"`, `"override"`, `"topmost"`, Wayland `"layer"` and `"anchor"`), and `on_focus(active)` reports keyboard focus. |
 | `app.add(*components)` | Appends to the root column. |
 | `app.root` | The root `Column`. |
 | `app.bind("ctrl+s", fn)` | A window hotkey: `"q"`, `"shift+f3"`, `"ctrl+alt+z"` … |
-| `app.ctx` | The kit context: popups, focus, and undo with `app.ctx.undo()` / `app.ctx.redo()`. |
+| `app.ctx` | The kit context: popups, focus, and undo with `app.ctx.undo()` / `app.ctx.redo()`. `app.ctx.hit(x, y)` gives the interactive node under a point. |
 | `app.render_raster(w, h)` | Draws a frame without a window, for tests and screenshots. |
 | `app.press`, `release`, `motion`, `key`, `wheel`, `context_menu` | Simulate input without a window. See [headless testing](../headless-testing/). |
 

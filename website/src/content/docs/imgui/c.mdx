@@ -47,7 +47,7 @@ add_executable(myapp main.c)
 target_link_libraries(myapp PRIVATE bui::cimgui)
 ```
 
-The backend calls `ImGui_NewFrame()`, your `frame(user)` and `ImGui_Render()` itself, and Blender's style and font are on by default. BUI's own C demo is the `bui_imgui_demo_c` target (`examples/imgui_demo_c.c`).
+The backend calls `ImGui_NewFrame()`, your `frame(user)` and `ImGui_Render()` itself, and Blender's style and font are on by default. If `frame` stops early on an error, `cImGui_ImplBUI_AbandonFrame()` ends the frame with Dear ImGui's error recovery. BUI's own C demo is the `bui_imgui_demo_c` target (`examples/imgui_demo_c.c`).
 
 <Figure
   shot="imgui-cpp-blender"
