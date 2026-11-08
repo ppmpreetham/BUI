@@ -43,7 +43,6 @@ That's the whole program. Notice what's missing: no `NewFrame()`, no `Render()`,
 - **`ImGui_ImplBUI_CreateApp(title, width, height, frame, user)`** opens a native window whose whole client area is ImGui. It needs a current ImGui context. An optional last argument takes a config (below).
 - **`ImGui_ImplBUI_RunApp(app)`** runs BUI's message loop until the window closes.
 - **`ImGui_ImplBUI_DestroyApp(app)`** shuts the backend down.
-- **`ImGui_ImplBUI_AbandonFrame()`** ends a frame that your binding's callback left early on an error, with Dear ImGui's error recovery, so the next frame starts clean. The Python binding calls it when `frame` raises.
 - **`user`** is passed to `frame` unchanged: point it at your app's state.
 
 ## Build it with CMake
