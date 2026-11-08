@@ -1200,6 +1200,16 @@ static struct wl_surface_listener surface_listener = {
 
 /* -- windows -- */
 
+/* GHOST_WindowWayland (as SDL does): dispatch until the role's first configure, so the window can
+ * draw at once. A display error ends the wait. */
+static void wait_configure(BKWindow *win)
+{
+  while (!win->configured && wl_display_flush(g.display) != -1 &&
+         wl_display_dispatch(g.display) != -1)
+  {
+  }
+}
+
 static void surface_create(BKWindow *win)
 {
   win->surface = wl_compositor_create_surface(g.compositor);
@@ -1236,7 +1246,7 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
                  host_clipboard_get, host_clipboard_set, host_schedule, host_emit};
   BK_context_set_host(ctx, &host);
   wl_surface_commit(win->surface); /* the first commit asks for the configure */
-  wl_display_flush(g.display);
+  wait_configure(win);
   return win;
 }
 
@@ -1292,6 +1302,7 @@ static void set_hidden(BKWindow *win, int hidden)
   else {
     role_create(win);
     wl_surface_commit(win->surface);
+    wait_configure(win);
     win->full = 1;
   }
 }
