@@ -1958,6 +1958,16 @@ static PyObject *kit_set_scale(PyObject *m, PyObject *arg)
   Py_RETURN_NONE;
 }
 
+static PyObject *kit_set_text_shadow(PyObject *m, PyObject *arg)
+{
+  const int on = PyObject_IsTrue(arg);
+  if (on < 0) {
+    return NULL;
+  }
+  BK_set_text_shadow(on);
+  Py_RETURN_NONE;
+}
+
 static PyObject *kit_scale(PyObject *m, PyObject *unused)
 {
   return PyFloat_FromDouble(BK_scale());
@@ -2281,6 +2291,8 @@ static PyMethodDef kit_functions[] = {
     {"image_set_budget", kit_image_set_budget, METH_O, "Image cache budget in bytes."},
     {"kit_set_scale", kit_set_scale, METH_O, "UI scale (1.0 = 20 px widgets)."},
     {"kit_scale", kit_scale, METH_NOARGS, ""},
+    {"kit_set_text_shadow", kit_set_text_shadow, METH_O,
+     "Blender's UI text shadows (off in Python by default)."},
     {"kit_unit", kit_unit, METH_NOARGS, "U.widget_unit in pixels."},
     {"kit_set_font", kit_set_font, METH_O, "UI font family."},
     {"kit_set_theme", kit_set_theme, METH_O, "Theme: 'dark' (default) or 'light' (Blender's presets)."},
@@ -2699,6 +2711,7 @@ static PyMethodDef window_functions[] = {
 
 int buipy_kit_init(PyObject *module)
 {
+  BK_set_text_shadow(0); /* Python: crisp text without Blender's UI shadow */
   if (PyType_Ready(&KitNode_Type) < 0 || PyType_Ready(&KitTreeItem_Type) < 0 ||
       PyType_Ready(&KitContext_Type) < 0 || PyType_Ready(&KitWindow_Type) < 0)
   {

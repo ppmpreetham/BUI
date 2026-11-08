@@ -265,6 +265,7 @@ BK_custom_set(node, &cls, my_data);
 | Raster alpha | `BUI_raster_set_alpha`, `BUI_raster_alpha`, `BUI_raster_clear`: premultiplied alpha in a CPU raster; opaque rasters draw the same bytes |
 | Meshes and textures | `BUI_texture_create` / `update` / `free`, `BUI_raster_mesh`: indexed triangles, the same pixels on every renderer |
 | Scale | `BK_set_scale(s)`, `BK_scale()`: 1 means Blender's 20 px widgets |
+| Text shadow | `BK_set_text_shadow(on)`, `BK_text_shadow()`: Blender's UI text shadows, on by default |
 
 <Callout type="joke">
 `BK_eval_number` is the same expression evaluator that lets Blender users type `2*pi` into a rotation field. Now your C program can, too. Your calculator app may feel threatened.

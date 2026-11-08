@@ -1092,6 +1092,17 @@ float bk_text_baseline(const BKRect *rect)
  * 0 none, 1 a sharp drop shadow (the widget style), 3 a 3x3 blurred one (panel
  * titles). Black at half the text's alpha, 1 px down (shady = -1). */
 int bk_text_shadow = 1;
+static bool g_text_shadow_on = true; /* BK_set_text_shadow */
+
+void BK_set_text_shadow(int on)
+{
+  g_text_shadow_on = on != 0;
+}
+
+int BK_text_shadow(void)
+{
+  return g_text_shadow_on;
+}
 
 void bk_text_f(float x, float baseline, const char *s, int len, const float c[4], bool bold)
 {
@@ -1106,11 +1117,12 @@ void bk_text_f(float x, float baseline, const char *s, int len, const float c[4]
   }
   BUI_raster_set_font(bk_draw.r, text_family(), bold ? BUI_FONT_BOLD : 0);
   const float px = floorf(x + 0.5f), py = floorf(baseline + 0.5f);
-  if (bk_text_shadow == 1) {
+  const int shadow = g_text_shadow_on ? bk_text_shadow : 0;
+  if (shadow == 1) {
     const float sc[4] = {0.0f, 0.0f, 0.0f, 0.5f * c[3]};
     BUI_raster_text(bk_draw.r, px, py + 1.0f, s, len, bk_font_size(), sc);
   }
-  else if (bk_text_shadow == 3) {
+  else if (shadow == 3) {
     /* BLF's 3x3 blur kernel (1 2 1 / 2 4 2 / 1 2 1) / 16 as weighted copies */
     static const float k[3] = {1.0f, 2.0f, 1.0f};
     for (int dy = -1; dy <= 1; dy++) {

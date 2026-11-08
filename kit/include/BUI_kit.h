@@ -133,6 +133,9 @@ void BK_set_ref_hooks(void (*retain)(void *ref), void (*release)(void *ref));
 /* -- global look ------------------------------------------------------------ */
 void BK_set_scale(float scale); /* Blender's resolution scale (1 = 20 px widgets) */
 float BK_scale(void);
+/* Blender's UI text shadows (drop shadow, soft one on panel titles); on by default */
+void BK_set_text_shadow(int on);
+int BK_text_shadow(void);
 int BK_unit(void);              /* U.widget_unit in pixels */
 void BK_set_font(const char *family);
 /* Themes: Blender's two presets, "dark" (Blender_Dark.xml = the built-in
