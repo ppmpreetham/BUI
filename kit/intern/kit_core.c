@@ -2775,6 +2775,7 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
   BKEvent e = make_event(ctx, NULL, ctx->pointer_x, ctx->pointer_y, mods);
   e.text = text ? text : "";
   e.keysym = keysym ? keysym : "";
+  snprintf(ctx->key_held, sizeof(ctx->key_held), "%s", e.keysym);
   ctx->interaction++;
   for (BKNode *n = ctx->focus ? ctx->focus : ctx->hover; n; n = n->parent) {
     if (n->flags & NF_EVENTS) { /* Tk/Qt key bindings see the key first */
@@ -3381,6 +3382,13 @@ int BK_key_release(BKContext *ctx, const char *keysym, int mods)
   BKEvent e = make_event(ctx, NULL, ctx->pointer_x, ctx->pointer_y, mods);
   e.text = "";
   e.keysym = keysym ? keysym : "";
+  if (bk_keysym_is(e.keysym, ctx->key_held)) {
+    ctx->key_held[0] = '\0';
+  }
+  BKNode *top = ctx->npopups ? ctx->popups[ctx->npopups - 1] : NULL;
+  if (top && top->cls->key_up && top->cls->key_up(top, &e)) {
+    return 1;
+  }
   for (BKNode *n = ctx->focus ? ctx->focus : ctx->hover; n; n = n->parent) {
     if (BK_IS_CUSTOM(n) && NODE_ENABLED(n)) {
       BKCustomEvent ce;

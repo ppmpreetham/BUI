@@ -304,6 +304,7 @@ typedef struct BKClass {
   int (*move)(BKNode *n, BKEvent *e);
   int (*leave)(BKNode *n);
   int (*key)(BKNode *n, BKEvent *e);
+  int (*key_up)(BKNode *n, BKEvent *e); /* a key release, sent to the top popup */
   int (*wheel)(BKNode *n, BKEvent *e);
   int (*cursor_at)(BKNode *n, int x, int y);
   void (*finish_edit)(BKNode *n, bool confirm);
@@ -556,6 +557,7 @@ struct BKContext {
   int press_x, press_y, off_x, off_y, skip_x, skip_y;
   int ungrab_x, ungrab_y; /* where a continuous drag puts the pointer back */
   int press_button;       /* the button that started the grab (1, 2, 3) */
+  char key_held[32];      /* wmWindow.pie_event_type_last: the key down now, "" = none */
   bool has_ungrab;
   bool has_skip;
   int pointer_x, pointer_y;

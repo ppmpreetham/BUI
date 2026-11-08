@@ -870,12 +870,22 @@ const char *BK_menu_row_text(BKNode *menu, int i)
 static const int g_pie_rdir[8] = {6, 2, 4, 0, 7, 1, 5, 3};
 static const short g_pie_angle[8] = {90, 45, 0, 315, 270, 225, 180, 135};
 
+/* pie_menu_begin / pie_handler (interface_handlers.cc): U.pie_tap_timeout (20 cs) and
+ * PIE_CLICK_THRESHOLD_SQ (interface_intern.hh). */
+#define PIE_TAP_TIMEOUT_S 0.2
+#define PIE_CLICK_THRESHOLD_SQ 50.0f
+
 typedef struct PieData {
   MenuData menu; /* items in menu.all */
   float cx, cy;
   int at_x, at_y;
-  float dir[2];   /* pie_data->pie_dir: normalized pointer direction, y-up */
-  bool dir_valid; /* !(flags & PIE_INVALID_DIR) */
+  int init_x, init_y; /* pie_center_init: the pointer at open */
+  float dir[2];       /* pie_data->pie_dir: normalized pointer direction, y-up */
+  bool dir_valid;     /* !(flags & PIE_INVALID_DIR) */
+  bool click_style;   /* PIE_CLICK_STYLE: pick on click, not on the key release */
+  bool drag_style;    /* PIE_DRAG_STYLE: moved, so a quick release still picks */
+  char key[32];       /* pie_data->event_type: the key that opened the pie */
+  double opened;      /* bk_time at open (the scroll timer's time_duration) */
 } PieData;
 
 #define PIE(n) ((PieData *)(n)->ext)
@@ -1024,6 +1034,10 @@ static void pie_pick(BKNode *n, int i)
 static int pie_move(BKNode *n, BKEvent *e)
 {
   PieData *pd = PIE(n);
+  const float ix = (float)(e->x - pd->init_x), iy = (float)(e->y - pd->init_y);
+  if (!pd->click_style && ix * ix + iy * iy > PIE_CLICK_THRESHOLD_SQ) {
+    pd->drag_style = true;
+  }
   const bool was_valid = pd->dir_valid;
   const int hot = pie_dir_hot(n, e->x, e->y);
   /* the center sector tracks the pointer direction, so redraw whenever it is shown */
@@ -1060,6 +1074,10 @@ static int pie_press(BKNode *n, BKEvent *e)
 
 static int pie_key(BKNode *n, BKEvent *e)
 {
+  PieData *pd = PIE(n);
+  if (!pd->click_style && bk_keysym_is(e->keysym, pd->key)) {
+    return 1; /* auto-repeat of the held pie key */
+  }
   if (e->text && e->text[0] >= '1' && e->text[0] <= '8' && !e->text[1]) {
     pie_pick(n, e->text[0] - '1');
     return 1;
@@ -1069,6 +1087,22 @@ static int pie_key(BKNode *n, BKEvent *e)
     return 1;
   }
   return 0;
+}
+
+/* pie_handler, event_type release: a quick tap without a drag keeps the pie open as a click
+ * pie, a later release picks the item in the pointer direction (none: cancel). */
+static int pie_key_up(BKNode *n, BKEvent *e)
+{
+  PieData *pd = PIE(n);
+  if (pd->click_style || !bk_keysym_is(e->keysym, pd->key)) {
+    return 0;
+  }
+  if (bk_time() - pd->opened < PIE_TAP_TIMEOUT_S && !pd->drag_style) {
+    pd->click_style = true;
+    return 1;
+  }
+  pie_pick(n, pie_dir_hot(n, e->x, e->y));
+  return 1;
 }
 
 static void pie_draw(BKNode *n)
@@ -1149,7 +1183,8 @@ const BKClass bk_cls_pie = {.name = "pie",
                             .hit = pie_hit,
                             .press = pie_press,
                             .move = pie_move,
-                            .key = pie_key};
+                            .key = pie_key,
+                            .key_up = pie_key_up};
 
 void BK_open_pie(
     BKContext *ctx, const BKMenuSpec *items, int n, const char *title, int at_x, int at_y)
@@ -1163,6 +1198,12 @@ void BK_open_pie(
   pd->menu.title = title ? bk_strdup(title) : NULL;
   pd->at_x = at ? at_x : ctx->pointer_x;
   pd->at_y = at ? at_y : ctx->pointer_y;
+  pd->init_x = ctx->pointer_x;
+  pd->init_y = ctx->pointer_y;
+  /* pie_menu_begin: opened while a key is down, its release picks; else click style */
+  snprintf(pd->key, sizeof(pd->key), "%s", ctx->key_held);
+  pd->click_style = !pd->key[0];
+  pd->opened = bk_time();
   pie->ext = pd;
   pie->hot = -1;
   bk_open_popup(ctx, pie, ctx->root, NULL);

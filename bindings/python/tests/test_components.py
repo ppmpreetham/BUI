@@ -487,6 +487,47 @@ def test_pie_menu():
     assert got == ["N"] and not d.popups()
 
 
+def _pie_on_q(got):
+    from bui.components import MenuItem, PieMenu
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(300, 250)
+    d.app.bind("q", lambda: PieMenu.show(d.ctx, [
+        MenuItem(n, (lambda n=n: got.append(n))) for n in "WESN"]))
+    d.app.key("q", "q", 0, mods())
+    d.frame()
+    return d
+
+
+def test_pie_hold_release():
+    import time
+    got = []
+    d = _pie_on_q(got)
+    d.app.key("q", "q", 0, mods())                     # auto-repeat is ignored
+    d.app.motion(301, 249, mods())                     # still inside the click threshold
+    time.sleep(0.25)                                   # past pie_tap_timeout
+    d.app.motion(300, 120, mods())
+    d.ctx.key_release("q")
+    assert got == ["N"] and not d.popups()
+
+
+def test_pie_drag_release():
+    got = []
+    d = _pie_on_q(got)
+    d.app.motion(430, 250, mods())                     # a drag: release picks at once
+    d.ctx.key_release("q")
+    assert got == ["E"] and not d.popups()
+
+
+def test_pie_tap_stays_open():
+    got = []
+    d = _pie_on_q(got)
+    d.ctx.key_release("q")                             # a quick tap: click style
+    assert d.popups() == 1 and not got
+    d.app.motion(170, 250, mods())
+    d.app.press(170, 250, mods())
+    assert got == ["W"] and not d.popups()
+
+
 def test_pie_menu_at():
     from bui.components import MenuItem, PieMenu
     got = []
