@@ -53,6 +53,13 @@ const uint32_t *BUI_raster_pixels(const BuiRaster *r);
 int BUI_raster_damage(const BuiRaster *r, const int (**r_rects)[4]);
 /* Force the next end_frame to report the full frame as damaged. */
 void BUI_raster_invalidate(BuiRaster *r);
+/* Keep alpha: the frame becomes premultiplied 0xAARRGGBB, starting transparent where
+ * BUI_raster_clear clears it (a transparent window). Off (the default), the alpha byte stays 0
+ * and the frame is opaque 0x00RRGGBB. CPU frames only. */
+void BUI_raster_set_alpha(BuiRaster *r, int on);
+int BUI_raster_alpha(const BuiRaster *r);
+/* Set the pixels of a rect to transparent (0), within the clip. CPU frames only. */
+void BUI_raster_clear(BuiRaster *r, int x, int y, int w, int h);
 
 /* Clip subsequent drawing; w/h <= 0 removes the clip. */
 void BUI_raster_set_clip(BuiRaster *r, int x, int y, int w, int h);
