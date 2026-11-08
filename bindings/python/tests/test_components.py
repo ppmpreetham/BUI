@@ -552,11 +552,24 @@ def test_pie_more_level():
     d.ctx.set_pointer(300, 250)
     PieMenu.show(d.ctx, [MenuItem(str(i), (lambda i=i: got.append(i))) for i in range(10)])
     d.frame()
-    d.app.key("8", "8", 0, mods())                     # the 8th slot is "More"
+    d.app.key("3", "3", 0, mods())                     # numpad SE: the 8th slot, "More"
     d.frame()
     assert d.popups() == 1 and not got
-    d.app.key("3", "3", 0, mods())                     # items 7, 8, 9: the third is 9
+    d.app.key("2", "2", 0, mods())                     # items 7, 8, 9 at W, E, S: S is 9
     assert got == [9] and not d.popups()
+
+
+def test_pie_number_keys():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    PieMenu.show(d.ctx, [MenuItem(n, (lambda n=n: got.append(n))) for n in "WESN"], at=(300, 250))
+    d.frame()
+    d.app.key("5", "5", 0, mods())                     # the centre: no item
+    d.app.key("1", "1", 0, mods())                     # SW: no item there
+    assert d.popups() == 1
+    d.app.key("8", "8", 0, mods())                     # numpad 8 is north
+    assert got == ["N"] and not d.popups()
 
 
 def test_pie_menu_at():

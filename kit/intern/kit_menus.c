@@ -1091,8 +1091,16 @@ static int pie_key(BKNode *n, BKEvent *e)
   if (!pd->click_style && bk_keysym_is(e->keysym, pd->key)) {
     return 1; /* auto-repeat of the held pie key */
   }
-  if (e->text && e->text[0] >= '1' && e->text[0] <= '8' && !e->text[1]) {
-    pie_pick(n, e->text[0] - '1');
+  /* CASE_NUM_TO_DIR: the number keys are the numpad's directions (5 is the centre) */
+  static const int num_rdir[10] = {-1, 5, 4, 3, 6, -1, 2, 7, 0, 1};
+  if (e->text && e->text[0] >= '1' && e->text[0] <= '9' && !e->text[1]) {
+    const int rdir = num_rdir[e->text[0] - '0'];
+    for (int i = 0; i < pd->menu.nall; i++) {
+      if (rdir >= 0 && g_pie_rdir[i] == rdir) {
+        pie_pick(n, i); /* block_pie_dir_activate */
+        return 1;
+      }
+    }
     return 1;
   }
   if (bk_keysym_is(e->keysym, "Return") || bk_keysym_is(e->keysym, "KP_Enter")) {
