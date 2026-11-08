@@ -4,7 +4,8 @@
  * Modelled on Blender's GHOST_SystemWayland / GHOST_WindowWayland: xdg-shell toplevels with
  * server-side decorations when the compositor offers them, a wl_seat with xkbcommon for keys
  * (key repeat is ours, the compositor only sends the rate and delay), the wl_pointer, wl_data_device
- * for the clipboard, wl_cursor for cursors, buffer scale from the output. libwayland-client and
+ * for the clipboard, cursor-shape for cursors (wl_cursor where the compositor has no cursor-shape),
+ * buffer scale from the output. libwayland-client and
  * libwayland-cursor come through Blender's wayland_dynload (extern/wayland_dynload, loaded when the
  * first window opens) and libxkbcommon is dlopen()ed here, so nothing is linked and a build runs
  * where Wayland is absent.
@@ -29,6 +30,9 @@
 #  include <wayland-client.h>
 
 #  include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#  ifdef BUI_WL_CURSOR_SHAPE
+#    include "cursor-shape-v1-client-protocol.h"
+#  endif
 #  include "xdg-decoration-unstable-v1-client-protocol.h"
 #  include "xdg-shell-client-protocol.h"
 
@@ -153,6 +157,10 @@ static struct {
   struct xdg_wm_base *wm_base;
   struct zxdg_decoration_manager_v1 *decoration_manager;
   struct zwlr_layer_shell_v1 *layer_shell;
+#  ifdef BUI_WL_CURSOR_SHAPE
+  struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
+  struct wp_cursor_shape_device_v1 *cursor_shape_device; /* of the pointer, made on first use */
+#  endif
   struct wl_seat *seat;
   struct wl_pointer *pointer;
   struct wl_keyboard *keyboard;
@@ -453,22 +461,64 @@ static void send_key(BKWindow *win, uint32_t evdev, bool press)
 
 /* -- seat: pointer -- */
 
-/* The cursors are xcursor names, as GHOST_SystemWayland's cursor table (X11's shapes). */
+#  ifdef BUI_WL_CURSOR_SHAPE
+/* BK_CURSOR_* as cursor-shape shapes, from gwl_seat_cursor_find_wl_shape_from_ghost. */
+static bool apply_cursor_shape(int c)
+{
+  static const uint32_t shapes[BK_CURSOR_PROGRESS + 1] = {
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,     WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_EW_RESIZE,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NS_RESIZE,   WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_CROSSHAIR,   WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_MOVE,        WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SW_RESIZE,   WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SE_RESIZE,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NOT_ALLOWED, WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_WAIT,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_PROGRESS};
+  if (!g.cursor_shape_manager) {
+    return false;
+  }
+  if (!g.cursor_shape_device) {
+    g.cursor_shape_device = wp_cursor_shape_manager_v1_get_pointer(g.cursor_shape_manager,
+                                                                   g.pointer);
+  }
+  wp_cursor_shape_device_v1_set_shape(g.cursor_shape_device, g.pointer_serial, shapes[c]);
+  return true;
+}
+#  endif
+
+/* The cursor theme, loaded on first use: loading reads every cursor in the theme. */
+static bool cursor_theme_ensure(void)
+{
+  if (!g.cursor_theme && wayland_dynload_cursor_init(false)) {
+    const char *size = getenv("XCURSOR_SIZE");
+    g.cursor_theme = wl_cursor_theme_load(getenv("XCURSOR_THEME"),
+                                          (size ? atoi(size) : 24) * g.cursor_scale, g.shm);
+    g.cursor_surface = wl_compositor_create_surface(g.compositor);
+  }
+  return g.cursor_theme && g.cursor_surface;
+}
+
+/* Without cursor-shape: xcursor names, as GHOST_SystemWayland's cursor table (X11's shapes). */
 static void apply_cursor(BKWindow *win)
 {
   if (!g.pointer || g.pointer_win != win) {
     return;
   }
-  static const char *names[12] = {"left_ptr",   "sb_h_double_arrow", "sb_v_double_arrow",
-                                  "xterm",      "crosshair",         "hand2",
-                                  "fleur",      "left_ptr",          "bottom_left_corner",
-                                  "bottom_right_corner", "X_cursor", "watch"};
-  const int c = BK_CLAMP(win->cursor, 0, 11);
+  static const char *names[BK_CURSOR_PROGRESS + 1] = {
+      "left_ptr",           "sb_h_double_arrow",   "sb_v_double_arrow", "xterm",
+      "crosshair",          "hand2",               "fleur",             "left_ptr",
+      "bottom_left_corner", "bottom_right_corner", "X_cursor",          "watch",
+      "watch"};
+  const int c = BK_CLAMP(win->cursor, 0, BK_CURSOR_PROGRESS);
   if (c == BK_CURSOR_NONE) {
     wl_pointer_set_cursor(g.pointer, g.pointer_serial, NULL, 0, 0);
     return;
   }
-  if (!g.cursor_theme || !g.cursor_surface) {
+#  ifdef BUI_WL_CURSOR_SHAPE
+  if (apply_cursor_shape(c)) {
+    return;
+  }
+#  endif
+  if (!cursor_theme_ensure()) {
     return;
   }
   struct wl_cursor *cursor = wl_cursor_theme_get_cursor(g.cursor_theme, names[c]);
@@ -874,6 +924,11 @@ static void registry_global(void *d, struct wl_registry *reg, uint32_t name, con
     g.layer_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface,
                                      BK_MIN(version, 4u));
   }
+#  ifdef BUI_WL_CURSOR_SHAPE
+  else if (!strcmp(iface, wp_cursor_shape_manager_v1_interface.name)) {
+    g.cursor_shape_manager = wl_registry_bind(reg, name, &wp_cursor_shape_manager_v1_interface, 1);
+  }
+#  endif
   else if (!strcmp(iface, wl_seat_interface.name) && !g.seat) {
     g.seat = wl_registry_bind(reg, name, &wl_seat_interface, BK_MIN(version, 5u));
     wl_seat_add_listener(g.seat, &seat_listener, NULL);
@@ -958,12 +1013,6 @@ static int open_display(void)
   g.cursor_scale = 1;
   for (int i = 0; i < g.noutputs; i++) {
     g.cursor_scale = BK_MAX(g.cursor_scale, g.outputs[i].scale);
-  }
-  if (wayland_dynload_cursor_init(false)) {
-    const char *size = getenv("XCURSOR_SIZE");
-    g.cursor_theme = wl_cursor_theme_load(getenv("XCURSOR_THEME"),
-                                          (size ? atoi(size) : 24) * g.cursor_scale, g.shm);
-    g.cursor_surface = wl_compositor_create_surface(g.compositor);
   }
   g.repeat_rate = 25;
   g.repeat_delay = 600;

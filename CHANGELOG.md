@@ -42,6 +42,9 @@ All notable changes to **blenderui** (BUI). The format follows
   Python `PieMenu.show(..., at=(x, y))` and `ctx.open_pie(..., at=)`, Lua `ctx:open_pie(items, title, x, y)`.
 - Pie number keys are directions on the numpad (8 north, 6 east, 2 south, 4 west, the diagonals on 7, 9, 1 and 3),
   as in Blender. They were item positions.
+- **Wayland cursors** go through the cursor-shape protocol when the compositor has it (KDE, wlroots, GNOME 46+), as in
+  Blender's GHOST: the compositor draws the cursor and no cursor theme is loaded. Elsewhere the theme loads on the first
+  cursor change, not at start-up. Builds with wayland-protocols older than 1.32 keep the theme.
 - `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
 
 ### Fixed
