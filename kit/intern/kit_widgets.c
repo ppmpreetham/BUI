@@ -2034,7 +2034,7 @@ static int multi_drag(BKNode *n, BKEvent *e)
   /* DRAG_MULTINUM_THRESHOLD_DRAG_X: UI_UNIT_Y / 4 */
   const int threshold = BK_MAX(3, (int)(0.25f * u()));
   if (n->dragmode == 2) { /* collecting */
-    BKNode *under = bk_hit_at(ctx, n->x + n->w / 2, e->y);
+    BKNode *under = BK_hit_at(ctx, n->x + n->w / 2, e->y);
     if (under && under != n && is_number(under) && NODE_ENABLED(under) &&
         !(under->flags & NF_SELECTED) && ctx->nmulti < BK_MAX_MULTI)
     {

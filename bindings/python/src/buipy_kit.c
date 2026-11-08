@@ -1769,6 +1769,15 @@ static PyObject *kitctx_picker_part(KitContextObject *self, PyObject *args)
   return node_wrap(p ? BK_picker_part(p, name) : NULL);
 }
 
+static PyObject *kitctx_hit(KitContextObject *self, PyObject *args)
+{
+  int x, y;
+  if (!PyArg_ParseTuple(args, "ii:hit", &x, &y)) {
+    return NULL;
+  }
+  return node_wrap(BK_hit_at(self->ctx, x, y));
+}
+
 static PyObject *kitctx_open_menu(KitContextObject *self, PyObject *args, PyObject *kw)
 {
   static char *kwlist[] = {"owner", "items", "title", "at", NULL};
@@ -1906,6 +1915,7 @@ static PyMethodDef kitctx_methods[] = {
     {"popup_owner", (PyCFunction)kitctx_popup_owner, METH_O, ""},
     {"menu_rows", (PyCFunction)kitctx_menu_rows, METH_O, "[(text, rect)] of menu popup i"},
     {"picker_part", (PyCFunction)kitctx_picker_part, METH_VARARGS, "Color picker part."},
+    {"hit", (PyCFunction)kitctx_hit, METH_VARARGS, "hit(x, y): the node under the point, or None"},
     {"open_menu", (PyCFunction)(void (*)(void))kitctx_open_menu, METH_VARARGS | METH_KEYWORDS,
      "open_menu(owner, items, title=None, at=None)"},
     {"open_pie", (PyCFunction)(void (*)(void))kitctx_open_pie, METH_VARARGS | METH_KEYWORDS,

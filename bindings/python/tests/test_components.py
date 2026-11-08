@@ -499,6 +499,15 @@ def test_pie_menu_at():
     assert got == ["E"] and not d.popups()
 
 
+def test_hit():
+    from bui.components import Button
+    btn = Button("x")
+    d = Driver(btn, size=(300, 200))
+    x, y, w, h = btn.rect
+    assert d.ctx.hit(x + w // 2, y + h // 2) is btn
+    assert d.ctx.hit(-5, -5) is None
+
+
 # -- color ------------------------------------------------------------------------------
 
 

@@ -3733,7 +3733,7 @@ BKNode *bk_next_editable(BKNode *from, int dir)
   return list[(at + dir + count) % count];
 }
 
-BKNode *bk_hit_at(BKContext *ctx, int x, int y)
+BKNode *BK_hit_at(BKContext *ctx, int x, int y)
 {
   return hit_all(ctx, x, y);
 }

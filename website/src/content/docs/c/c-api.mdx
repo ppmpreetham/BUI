@@ -252,7 +252,8 @@ BK_custom_set(node, &cls, my_data);
 
 | Area | API |
 | --- | --- |
-| Menus and pie menus | `BK_open_menu`, `BK_open_pie`, `BK_menubutton_set_items`, all from a `BKMenuSpec` array |
+| Menus and pie menus | `BK_open_menu`, `BK_open_pie`, `BK_menubutton_set_items`, all from a `BKMenuSpec` array; both open at the pointer or at a given point |
+| Hit test | `BK_hit_at(ctx, x, y)`: the interactive node under a point, or `NULL` |
 | Canvas | `BK_canvas_set_item`, `add_item`, `put_item`, `truncate`, `delete`, `raise` |
 | Text areas | `BK_textarea_insert`, `delete`, `caret`, `selection`, `set_spans` (coloured ranges), `index_at`, `see` |
 | Trees | `BK_tree_item_new`, `add`, `set_values`; `BK_tree_set_roots`, `BK_tree_selected` |

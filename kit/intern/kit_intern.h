@@ -617,7 +617,6 @@ void bk_undo_record(BKNode *n, int kind);
 void bk_anim_start(BKNode *n);
 BKNode *bk_next_editable(BKNode *from, int dir);
 void bk_event(BKNode *n, int kind, int mods, const BKEvent *e);
-BKNode *bk_hit_at(BKContext *ctx, int x, int y);
 bool bk_anim_running(const BKNode *n);
 void bk_edit_next(BKNode *from, int dir);
 int bk_textarea_set_text(BKNode *n, const char *s);

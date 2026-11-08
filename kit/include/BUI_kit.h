@@ -268,6 +268,9 @@ void BK_open_menu(BKContext *ctx,
                   const char *title,
                   int at_x,
                   int at_y);
+/* The interactive node under (x, y) in window pixels (ui_but_find_mouse_over): the top popup
+ * first, then the header and the root. NULL over nothing. A pie answers for the whole window. */
+BKNode *BK_hit_at(BKContext *ctx, int x, int y);
 /* The pie centre is (at_x, at_y) in window pixels, or the pointer when either is -100000. */
 void BK_open_pie(
     BKContext *ctx, const BKMenuSpec *items, int n, const char *title, int at_x, int at_y);
