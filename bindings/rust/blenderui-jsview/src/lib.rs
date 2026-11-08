@@ -51,6 +51,8 @@ pub struct WindowConfig {
     pub height: Option<f64>,
     pub resizable: Option<bool>,
     pub gpu: Option<bool>,
+    /// Per-pixel alpha, only the elements show (Linux).
+    pub transparent: Option<bool>,
 }
 
 /// A layout box, logical pixels.
@@ -415,21 +417,26 @@ impl JsView {
 // ==========================================================================
 // Window operations (UI thread)
 
-/// Set up the UI-thread state; `sink` also gets `close` events.
+/// Set up the UI-thread state; `sink` also gets `close`, `focus` and `blur` events.
 pub fn init(cx: &mut App, sink: Sink) {
     cx.set_global(UiState::default());
-    cx.set_global(CloseSink(sink));
+    cx.set_global(WindowSink(sink));
+    cx.on_window_activation(|id, active, cx| {
+        let Some(w) = cx.global::<UiState>().by_native.get(&id.0).copied() else { return };
+        let kind = if active { "focus" } else { "blur" };
+        cx.global::<WindowSink>().0(Event { kind: kind.into(), window: w, ..Default::default() });
+    });
     cx.on_window_closed(|id, cx| {
         let Some(w) = cx.global::<UiState>().by_native.get(&id.0).copied() else { return };
         let st = cx.global_mut::<UiState>();
         st.windows.remove(&w);
         st.by_native.remove(&id.0);
-        let sink = cx.global::<CloseSink>().0.clone();
+        let sink = cx.global::<WindowSink>().0.clone();
         sink(Event { kind: "close".into(), window: w, ..Default::default() });
     });
 }
 
-struct CloseSink(Sink);
+struct WindowSink(Sink);
 
 /// Open window `id` (chosen by JavaScript); its events go to `sink`.
 pub fn open_window(cx: &mut App, id: u32, config: WindowConfig, sink: Sink) {
@@ -441,6 +448,11 @@ pub fn open_window(cx: &mut App, id: u32, config: WindowConfig, sink: Sink) {
         titlebar: config.title.map(|t| TitlebarOptions { title: Some(t.into()) }),
         is_resizable: config.resizable,
         gpu: config.gpu,
+        window_background: if config.transparent == Some(true) {
+            WindowBackgroundAppearance::Transparent
+        } else {
+            WindowBackgroundAppearance::Opaque
+        },
         ..Default::default()
     };
     let handle = cx.open_window(opts, |_, cx| cx.new(|_| JsView::new(id, sink.clone())));

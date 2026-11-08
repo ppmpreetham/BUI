@@ -18,6 +18,8 @@ export interface WindowOptions {
   height?: number
   resizable?: boolean
   gpu?: boolean
+  /** Per-pixel alpha: only the elements show (Linux; CPU renderer). */
+  transparent?: boolean
 }
 
 export type EventType = 'click' | 'mousedown' | 'mouseup' | 'mousemove' | 'mouseenter' | 'mouseleave' |
@@ -199,7 +201,8 @@ export class Window {
   screenshot (): Promise<{ width: number, height: number, data: Buffer }>
   click (x: number, y: number): void
   close (): void
-  on (event: 'close', listener: () => void): this
+  /** `focus` / `blur`: the window got or lost the keyboard focus. */
+  on (event: 'close' | 'focus' | 'blur', listener: () => void): this
 }
 
 export class App {

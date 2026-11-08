@@ -83,6 +83,7 @@ pub struct WindowConfig {
     pub height: Option<f64>,
     pub resizable: Option<bool>,
     pub gpu: Option<bool>,
+    pub transparent: Option<bool>,
 }
 
 #[napi(object)]
@@ -222,6 +223,7 @@ impl NativeApp {
     pub fn open_window(&self, id: u32, config: Option<WindowConfig>) {
         let c = config.map(|c| view::WindowConfig {
             title: c.title, width: c.width, height: c.height, resizable: c.resizable, gpu: c.gpu,
+            transparent: c.transparent,
         }).unwrap_or_default();
         self.link.send(move |cx| {
             let s = sink(cx.global::<Tsfn>());

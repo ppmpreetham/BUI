@@ -397,8 +397,10 @@ fn host_object<'js>(ctx: &Ctx<'js>, argv: Vec<String>) -> rquickjs::Result<Objec
     f!("rss", rss);
     f!("cpuCycles", view::process_cpu_cycles);
     f!("tsc", view::timestamp_counter);
-    f!("openWindow", |id: u32, title: Option<String>, width: f64, height: f64, resizable: Option<bool>, gpu: Option<bool>| {
-        command(Command::Open(id, view::WindowConfig { title, width: Some(width), height: Some(height), resizable, gpu }));
+    f!("openWindow", |id: u32, title: Option<String>, width: f64, height: f64, resizable: Option<bool>, gpu: Option<bool>,
+              transparent: Option<bool>| {
+        command(Command::Open(id, view::WindowConfig { title, width: Some(width), height: Some(height), resizable, gpu,
+                                                       transparent }));
     });
     f!("commit", |w: u32, ops: TypedArray<'js, i32>, strings: Vec<String>, animated: bool| {
         // SAFETY: copied right away, before JavaScript can detach or resize the buffer

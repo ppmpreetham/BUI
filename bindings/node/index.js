@@ -52,7 +52,7 @@ class Window {
     this._strings = []
     this._stringIds = new Map()
     this._scheduled = false
-    this._onClose = new Set()
+    this._on = { close: new Set(), focus: new Set(), blur: new Set() }
     this._frameCallbacks = new Map()
     this._nextFrameId = 1
     this._framePending = false
@@ -65,7 +65,7 @@ class Window {
     this._nodes.set(0, this.body)
     app.native.openWindow(id, {
       title: options.title, width: options.width, height: options.height,
-      resizable: options.resizable, gpu: options.gpu,
+      resizable: options.resizable, gpu: options.gpu, transparent: options.transparent,
     })
   }
 
@@ -154,17 +154,22 @@ class Window {
   }
 
   on (event, fn) {
-    if (event !== 'close') throw new Error(`blenderui: unsupported window event "${event}"`)
-    this._onClose.add(fn)
+    const set = this._on[event]
+    if (!set) throw new Error(`blenderui: unsupported window event "${event}"`)
+    set.add(fn)
     return this
+  }
+
+  _emit (event) {
+    for (const fn of this._on[event]) {
+      try { fn() } catch (err) { queueMicrotask(() => { throw err }) }
+    }
   }
 
   _closed () {
     if (this.closed) return
     this.closed = true
-    for (const fn of this._onClose) {
-      try { fn() } catch (err) { queueMicrotask(() => { throw err }) }
-    }
+    this._emit('close')
     // the native window is gone: free what follows signals or holds listeners
     for (const n of this._nodes.values()) {
       n._unbindAll()
@@ -266,6 +271,10 @@ class App {
     }
     if (raw.kind === 'frame') {
       win._frame()
+      return
+    }
+    if (raw.kind === 'focus' || raw.kind === 'blur') {
+      win._emit(raw.kind)
       return
     }
     win._nodes.get(raw.target)?._dispatch(raw)

@@ -112,7 +112,7 @@
     openWindow (id, c) {
       c = c || {}
       host.openWindow(id, c.title ?? null, c.width ?? 800, c.height ?? 600, c.resizable ?? null,
-        c.gpu ?? this._options.gpu ?? null)
+        c.gpu ?? this._options.gpu ?? null, c.transparent ?? null)
     }
 
     commit (window, ops, strings, animated) { host.commit(window, ops, strings, !!animated) }

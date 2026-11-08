@@ -32,6 +32,8 @@ All notable changes to **blenderui** (BUI). The format follows
   items grow out of the center over 60 ms (`pie_animation_timeout`, off with reduced motion).
 - **Rust:** `App::on_window_activation(|id, active, cx| ...)` reports keyboard focus, and `WindowOptions.window_background =
   WindowBackgroundAppearance::Transparent` opens a transparent window on Linux.
+- **JavaScript** (Node, Bun and `bui build` apps): `app.window({ transparent: true })` and the window events `focus` and
+  `blur`.
 - **Dear ImGui:** `ImGui_ImplBUI_AbandonFrame()` (C: `cImGui_ImplBUI_AbandonFrame`) ends a frame that a binding's
   callback left early on an error, with Dear ImGui's error recovery.
 
