@@ -203,6 +203,16 @@ pub enum WindowBounds {
     Fullscreen(Bounds<Pixels>),
 }
 
+/// How the window's background shows (gpui's `WindowBackgroundAppearance`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WindowBackgroundAppearance {
+    #[default]
+    Opaque,
+    /// Per-pixel alpha: only the elements show. Linux (X11, Wayland) only; the window
+    /// draws on the software raster.
+    Transparent,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TitlebarOptions {
     pub title: Option<SharedString>,
@@ -218,6 +228,7 @@ pub struct WindowOptions {
     /// Draw this window on the GPU (Direct3D 11 / OpenGL 3.3) instead of the software
     /// raster; `None` follows [`Application::gpu`] / the `BUI_GPU` variable.
     pub gpu: Option<bool>,
+    pub window_background: WindowBackgroundAppearance,
 }
 
 /// The application entry point (gpui's `Application`).
@@ -364,6 +375,8 @@ pub struct App {
     remote: Option<(std::sync::mpsc::Sender<RemoteJob>, std::sync::mpsc::Receiver<RemoteJob>)>,
     /// Called when the user closes a window.
     close_hooks: Vec<Box<dyn FnMut(WindowId, &mut App)>>,
+    /// Called when a window gets or loses the keyboard focus.
+    activation_hooks: Vec<Box<dyn FnMut(WindowId, bool, &mut App)>>,
     /// Counts `notify_all` calls (see `WindowHandle::update`).
     notified: u64,
 }
@@ -401,7 +414,8 @@ unsafe extern "C" fn on_wake() {
 impl App {
     fn create(headless: bool) -> App {
         App { windows: Vec::new(), entities: Vec::new(), headless, globals: HashMap::new(), propagate: true,
-              remote: None, close_hooks: Vec::new(), notified: 0 }
+              remote: None, close_hooks: Vec::new(),
+              activation_hooks: Vec::new(), notified: 0 }
     }
 
     /// Create an entity (gpui's `cx.new`).
@@ -448,6 +462,9 @@ impl App {
                 if let Some(m) = options.window_min_size {
                     sys::BK_window_wm(*n, c"minsize".as_ptr(), (m.width.0 * w.scale) as f64,
                                       (m.height.0 * w.scale) as f64);
+                }
+                if options.window_background == WindowBackgroundAppearance::Transparent {
+                    sys::BK_window_wm(*n, c"transparent".as_ptr(), 1.0, 0.0);
                 }
                 if options.gpu == Some(true) {
                     sys::BK_window_set_gpu(*n, 1);
@@ -500,6 +517,12 @@ impl App {
     /// Call `f` whenever the user closes a window.
     pub fn on_window_closed(&mut self, f: impl FnMut(WindowId, &mut App) + 'static) {
         self.close_hooks.push(Box::new(f));
+    }
+
+    /// Call `f` with `true` when a window gets the keyboard focus and `false` when it
+    /// loses it (gpui's `observe_window_activation`).
+    pub fn on_window_activation(&mut self, f: impl FnMut(WindowId, bool, &mut App) + 'static) {
+        self.activation_hooks.push(Box::new(f));
     }
 
     /// Close a window (as if the user had).
@@ -815,14 +838,25 @@ unsafe extern "C" fn on_close(data: *mut c_void, _win: *mut sys::BKWindow) -> c_
         if let Some(w) = app.windows.get_mut(id).and_then(|w| w.as_deref_mut()) {
             w.closed = true;
         }
-        let mut hooks = std::mem::take(&mut app.close_hooks);
-        for h in hooks.iter_mut() {
-            h(WindowId(id), app);
-        }
-        hooks.append(&mut app.close_hooks);
-        app.close_hooks = hooks;
+        run_hooks(app, |a| &mut a.close_hooks, |h, app| h(WindowId(id), app));
     });
     1
+}
+
+unsafe extern "C" fn on_focus(data: *mut c_void, _win: *mut sys::BKWindow, active: c_int) {
+    let id = data as usize;
+    with_running_app(|app| {
+        run_hooks(app, |a| &mut a.activation_hooks, |h, app| h(WindowId(id), active != 0, app));
+    });
+}
+
+/// Call each hook; hooks a hook adds run from the next call.
+fn run_hooks<H: ?Sized>(app: &mut App, list: fn(&mut App) -> &mut Vec<Box<H>>,
+                        mut call: impl FnMut(&mut H, &mut App)) {
+    let mut hooks = std::mem::take(list(app));
+    hooks.iter_mut().for_each(|h| call(h, app));
+    hooks.append(list(app));
+    *list(app) = hooks;
 }
 
 /// Run `f` with the app, unless there is none (before the loop, headless)
@@ -948,7 +982,7 @@ impl Window {
                 }
                 let cb = sys::BKWindowCallbacks { data: id as *mut c_void, on_timer: Some(on_timer),
                                                   on_close: Some(on_close), on_frame: Some(on_frame),
-                                                  on_focus: None };
+                                                  on_focus: Some(on_focus) };
                 sys::BK_window_set_callbacks(n, &cb);
                 win.scale = sys::BK_scale().max(0.5);
                 win.phys = ((w * win.scale).round() as i32, (h * win.scale).round() as i32);
