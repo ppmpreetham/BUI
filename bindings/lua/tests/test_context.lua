@@ -199,7 +199,8 @@ check(clip == "test clipboard" or clip ~= nil,
 
 ctx:bind("ctrl+z", function() end)
 ctx:bind("ctrl+shift+z", function() end)
--- Second bind with same combo replaces first (unrefs old)
+-- BK_bind appends (as in the Python binding); refs are retained by the kit
+-- and released on context free via the binding's ref hooks.
 ctx:bind("ctrl+z", function() print("new") end)
 
 -- ── Timer ────────────────────────────────────────────────────────────

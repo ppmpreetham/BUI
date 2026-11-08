@@ -115,6 +115,9 @@ extern int luabui_host_requested;
 
 void luabui_init_host_callbacks(lua_State *L, BKContext *ctx);
 
+/* Install the engine ref hooks against this state (called from luaopen). */
+void luabui_set_ref_state(lua_State *L);
+
 /* ------------------------------------------------------------------ */
 /* Known numeric property names (for node:get() dispatch)             */
 /* ------------------------------------------------------------------ */

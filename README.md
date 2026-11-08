@@ -1439,6 +1439,12 @@ bui.run()
 `custom`, `canvas`, `list`, `tree`, `gridview`, `ramp`, `curve`, `normal`,
 `histogram`, `radio`, `meter`, `filebrowser`.
 
+**Menus**: item tables (`text`, `icon` by name or id, `shortcut`, `checked` /
+`enabled` as booleans or numbers, `fn`, `sub`) feed `node:set_menus` — on a
+`menubar` that builds one `menubutton` child per menu, like Python's
+`MenuBar` — and `ctx:open_menu` / `ctx:open_pie`; `fn` callbacks are refcounted
+by the kit and released with the items.
+
 **Examples** (26 scripts, `bindings/lua/examples/`):
 
 - **Getting started:** `hello.lua`, `counter.lua`, `forms.lua`, `gallery.lua`

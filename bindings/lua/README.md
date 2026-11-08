@@ -81,6 +81,39 @@ ctx:key("a", "a", 0)
 `canvas`, `list`, `tree`, `gridview`, `ramp`, `curve`, `normal`, `histogram`,
 `radio`, `meter`, `filebrowser`
 
+## Menus
+
+Menu items are plain tables, matching the Python binding's `MenuItem`:
+
+```lua
+mb = bui.Node("menubutton")
+mb:set("text", "File")
+mb:set_menus({
+  {text = "New", icon = "FILE_NEW", fn = new_file},           -- icon: name or id
+  {text = "Bold", checked = true, fn = toggle_bold},           -- checked/enabled: bool or number
+  {text = "Save", shortcut = "Ctrl S", enabled = false},
+  {text = "-"},                                                 -- separator
+  {text = "Recent", sub = {                                    -- submenu
+    {text = "doc1.blend", fn = open_recent},
+  }},
+})
+
+-- A menubar builds one menubutton child per top-level item (like Python's MenuBar)
+bar = bui.Node("menubar")
+bar:set_menus({
+  {text = "File", sub = {{text = "New", fn = new_file}, {text = "Quit", fn = quit}}},
+  {text = "Edit", sub = {{text = "Undo", fn = undo}}},
+})
+
+-- Popup menus from code
+ctx:open_menu(owner, {{text = "Cut", fn = cut}}, "Edit", 120, 90)
+ctx:open_pie({{text = "W", fn = w}, {text = "E", fn = e}}, "Direction")
+```
+
+`fn` callbacks live in the Lua registry for exactly as long as the kit holds a
+copy of the item (menu button, open popup, search filter) — they are released
+automatically when the items are replaced or the node/context is freed.
+
 ## Examples
 
 ```sh

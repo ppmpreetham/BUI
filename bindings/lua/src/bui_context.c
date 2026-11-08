@@ -10,6 +10,12 @@ int luabui_host_requested = 0;
  * This is set during luabui_init_host_callbacks. */
 static lua_State *g_host_L = NULL;
 
+/* The module's Lua state, set at module load. Menu refs can be created
+ * (set_menus) before any context exists, so the ref hooks run against this
+ * state from the start, mirroring the Python binding installing its hooks
+ * at module init. */
+static lua_State *g_ref_L = NULL;
+
 /* Forward: host callbacks */
 static void host_request(void *data);
 static void host_set_cursor(void *data, int cursor);
@@ -17,6 +23,13 @@ static char *host_clipboard_get(void *data);
 static void host_clipboard_set(void *data, const char *text);
 static void host_schedule(void *data, int ms, int timer);
 static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, double b);
+static void ref_retain(void *ref);
+static void ref_release(void *ref);
+
+void luabui_set_ref_state(lua_State *L) {
+  g_ref_L = L;
+  BK_set_ref_hooks(ref_retain, ref_release);
+}
 
 /* ------------------------------------------------------------------ */
 /* BKHost implementation                                              */
@@ -106,21 +119,67 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 
 /* ------------------------------------------------------------------ */
 /* Ref hooks (retain/release for BKMenuSpec refs embedded in menu
- * copies).  Lua registry refs are permanent so retain is a no-op;
- * release calls luaL_unref to let the GC reclaim the closure.       */
+ * copies).  Same model as the Python binding's Py_INCREF/DECREF hooks:
+ * every copy the engine makes (bk_menuspec_copy / menu_filter / pick
+ * across close) retains, every free (bk_menuspec_free / pie_free)
+ * releases.  A registry ref is owned by the builder's luaL_ref and by
+ * exactly the live engine copies, so the last release unrefs it.       */
 /* ------------------------------------------------------------------ */
 
-/* Retain/release hooks are intentionally NOT set up.  The BUI engine calls
- * bk_retain / bk_release when deep-copying menu specs (bk_menuspec_copy /
- * bk_menuspec_free) and the menubutton stores a persistent copy in its own
- * MenuButtonData.  If we set up ref hooks here, the same Lua registry ref
- * would be freed twice — once when the menu popup copy is released and
- * again when the menubutton's persistent copy is released.
- *
- * Instead, Lua refs are freed manually: the menubutton's refs are tracked
- * in _menu_refs and freed on the next set_menus call (see l_node_set_menus);
- * one-shot open_menu / open_pie refs are small and reclaimed on context
- * close. */
+/* Registry table ref-id -> live-copy count.  Refs the engine never
+ * retained (host-owned BK_bind keys) are absent and stay untouched. */
+#define LUABUI_MENU_REFCNT "bui._menu_refcnt"
+
+static void ref_retain(void *ref) {
+  lua_State *L = g_ref_L ? g_ref_L : g_host_L;
+  int r = (int)(intptr_t)ref;
+  if (!L || !r) return;
+  int top = lua_gettop(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, LUABUI_MENU_REFCNT);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_newtable(L);
+    lua_pushvalue(L, -1);
+    lua_setfield(L, LUA_REGISTRYINDEX, LUABUI_MENU_REFCNT);
+  }
+  lua_pushinteger(L, r);
+  lua_rawget(L, -2);
+  lua_Integer count = lua_isnil(L, -1) ? 0 : (lua_Integer)lua_tointeger(L, -1);
+  lua_pop(L, 1);
+  lua_pushinteger(L, r);
+  lua_pushinteger(L, count + 1);
+  lua_rawset(L, -3);
+  lua_settop(L, top);
+}
+
+static void ref_release(void *ref) {
+  lua_State *L = g_ref_L ? g_ref_L : g_host_L;
+  int r = (int)(intptr_t)ref;
+  if (!L || !r) return;
+  int top = lua_gettop(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, LUABUI_MENU_REFCNT);
+  if (lua_istable(L, -1)) {
+    lua_pushinteger(L, r);
+    lua_rawget(L, -2);
+    if (!lua_isnil(L, -1)) {
+      lua_Integer count = (lua_Integer)lua_tointeger(L, -1) - 1;
+      lua_pop(L, 1);
+      if (count <= 0) {
+        luaL_unref(L, LUA_REGISTRYINDEX, r);
+        lua_pushinteger(L, r);
+        lua_pushnil(L);
+        lua_rawset(L, -3);
+      } else {
+        lua_pushinteger(L, r);
+        lua_pushinteger(L, count);
+        lua_rawset(L, -3);
+      }
+    } else {
+      lua_pop(L, 1);
+    }
+  }
+  lua_settop(L, top);
+}
 
 /* ------------------------------------------------------------------ */
 /* Initialization                                                     */
@@ -301,39 +360,16 @@ static int l_ctx_timer(lua_State *L) {
   return 0;
 }
 
-/* Registry key for the bind-refs table: combo string -> {ref, prev_ref} */
-#define LUABUI_BIND_REFS "bui._bind_refs"
-
+/* Hotkey ref: BK_bind retains it and BK_context_free releases it, so the
+ * registry ref's lifetime is owned by the engine (as in the Python
+ * binding, which hands the callable straight to BK_bind). */
 static int l_ctx_bind(lua_State *L) {
   luabui_Context *cud = CHECK_CTX(L, 1);
   if (!cud->ctx) return 0;
   const char *combo = luaL_checkstring(L, 2);
   luaL_checktype(L, 3, LUA_TFUNCTION);
-
-  /* Unref any previous bind for this combo */
-  lua_getfield(L, LUA_REGISTRYINDEX, LUABUI_BIND_REFS);
-  if (lua_isnil(L, -1)) {
-    lua_pop(L, 1);
-    lua_newtable(L);
-    lua_pushvalue(L, -1);
-    lua_setfield(L, LUA_REGISTRYINDEX, LUABUI_BIND_REFS);
-  }
-  lua_pushstring(L, combo);
-  lua_rawget(L, -2);
-  if (!lua_isnil(L, -1)) {
-    int old_ref = (int)lua_tointeger(L, -1);
-    luaL_unref(L, LUA_REGISTRYINDEX, old_ref);
-  }
-  lua_pop(L, 1); /* pop old ref value or nil */
-
-  /* Store new ref */
-  lua_pushvalue(L, 3); /* copy function for luaL_ref */
+  lua_pushvalue(L, 3);
   int ref = luaL_ref(L, LUA_REGISTRYINDEX);
-  lua_pushstring(L, combo);
-  lua_pushinteger(L, ref);
-  lua_rawset(L, -3); /* bind_refs[combo] = ref */
-  lua_pop(L, 1); /* bind_refs table */
-
   BK_bind(cud->ctx, combo, (void *)(intptr_t)ref);
   return 0;
 }
@@ -559,50 +595,31 @@ static int l_ctx_open_pie(lua_State *L) {
   return 0;
 }
 
-/* Nullify all node userdata pointers in the node map. Called before freeing
- * a context so that node __gc (which runs later) sees ud->node == NULL and
- * does not try to access freed C memory. */
-/* Only nullify nodes that belong to `ctx`.  Nodes from other contexts
- * must stay valid — a filebrowser or popup context can be freed without
- * disrupting the main UI context. */
-static void nullify_ctx_nodes(lua_State *L, BKContext *ctx) {
-  lua_getfield(L, LUA_REGISTRYINDEX, LUABUI_NODE_MAP);
-  lua_pushnil(L);
-  while (lua_next(L, -2)) {
-    if (lua_isuserdata(L, -1) && luaL_testudata(L, -1, LUABUI_NODE_MT)) {
-      luabui_Node *ud = (luabui_Node *)lua_touserdata(L, -1);
-      if (ud->node && bk_ctx(ud->node) == ctx) {
-        ud->node = NULL;
-      }
-    }
+/* Invalidate the Lua wrappers of the nodes BK_context_free is about to
+ * free: the open popups (menus, pies, pickers) and their internal parts.
+ * Every other node — the root and its whole tree — outlives the context
+ * (Lua / the host owns them) and must stay usable after ctx:free().  The
+ * popover panel's body is borrowed from its owner, so the panel's kids
+ * are not ours to free and their wrappers stay valid. */
+static void nullify_popup_subtree(lua_State *L, BKNode *n, int depth) {
+  if (luabui_lookup_node(L, n)) {
+    luabui_Node *ud = (luabui_Node *)lua_touserdata(L, -1);
+    if (ud && luaL_testudata(L, -1, LUABUI_NODE_MT)) ud->node = NULL;
     lua_pop(L, 1);
   }
-  lua_pop(L, 1);
+  if (depth >= 32 || n->cls == &bk_cls_popover_panel) return;
+  for (int i = 0; i < n->nkids; i++) nullify_popup_subtree(L, n->kids[i], depth + 1);
 }
 
-/* Clear all callback refs from the context */
-static void unref_bind_refs(lua_State *L) {
-  lua_getfield(L, LUA_REGISTRYINDEX, LUABUI_BIND_REFS);
-  if (lua_istable(L, -1)) {
-    lua_pushnil(L);
-    while (lua_next(L, -2)) {
-      /* key (combo), value (ref) */
-      int ref = (int)lua_tointeger(L, -1);
-      luaL_unref(L, LUA_REGISTRYINDEX, ref);
-      lua_pop(L, 1); /* pop value, keep key for next */
-    }
-    lua_pushnil(L);
-    lua_setfield(L, LUA_REGISTRYINDEX, LUABUI_BIND_REFS);
-  }
-  lua_pop(L, 1);
+static void nullify_ctx_nodes(lua_State *L, BKContext *ctx) {
+  for (int i = 0; i < ctx->npopups; i++) nullify_popup_subtree(L, ctx->popups[i], 0);
 }
 
 static int l_ctx_free(lua_State *L) {
   luabui_Context *cud = CHECK_CTX(L, 1);
   if (cud->ctx) {
-    unref_bind_refs(L);
     nullify_ctx_nodes(L, cud->ctx);
-    BK_context_free(cud->ctx);
+    BK_context_free(cud->ctx); /* releases bind + menu refs via the hooks */
     cud->ctx = NULL;
   }
   return 0;
@@ -611,7 +628,6 @@ static int l_ctx_free(lua_State *L) {
 static int l_ctx_gc(lua_State *L) {
   luabui_Context *cud = (luabui_Context *)luaL_checkudata(L, 1, LUABUI_CONTEXT_MT);
   if (cud->ctx) {
-    unref_bind_refs(L);
     nullify_ctx_nodes(L, cud->ctx);
     BK_context_free(cud->ctx);
     cud->ctx = NULL;

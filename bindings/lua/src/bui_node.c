@@ -748,6 +748,23 @@ static int l_node_set_grid_colors(lua_State *L) {
   return 0;
 }
 
+/* Truthy field with a numeric default (Python's PyObject_IsTrue): nil
+ * means absent (dflt), booleans are 0/1, numbers pass through, any
+ * other value is truthy. */
+static int opt_flag(lua_State *L, int idx, int dflt) {
+  if (lua_isnoneornil(L, idx)) return dflt;
+  if (lua_isboolean(L, idx)) return lua_toboolean(L, idx);
+  if (lua_isnumber(L, idx)) return (int)lua_tointeger(L, idx);
+  return 1;
+}
+
+/* Icon field: a number (icon id) or a string (icon name, BK_icon_id). */
+static int opt_icon(lua_State *L, int idx) {
+  if (lua_isstring(L, idx)) return BK_icon_id(lua_tostring(L, idx));
+  if (lua_isnumber(L, idx)) return (int)lua_tointeger(L, idx);
+  return 0;
+}
+
 /* Recursive menu-spec builder.
  *
  * `idx` — absolute stack index of a Lua array-of-tables (items table).
@@ -756,6 +773,9 @@ static int l_node_set_grid_colors(lua_State *L) {
  * on the Lua stack (above the parent).  Caller must keep the stack intact
  * until the menu is installed (e.g. BK_menubutton_set_items has completed
  * its deep copy), then pop everything at once.
+ *
+ * `fn` values become registry refs; the kit's ref hooks (ref_retain /
+ * ref_release in bui_context.c) balance them, as in the Python binding.
  *
  * Returns the number of items, writes `*out` to the BKMenuSpec pointer. */
 
@@ -771,10 +791,10 @@ int luabui_build_menuspec(lua_State *L, int idx, BKMenuSpec **out) {
     if (!lua_istable(L, -1)) { lua_pop(L, 1); continue; }
 
     lua_getfield(L, -1, "text");    specs[i].text = lua_tostring(L, -1); lua_pop(L, 1);
-    lua_getfield(L, -1, "icon");    specs[i].icon = (int)luaL_optinteger(L, -1, 0); lua_pop(L, 1);
+    lua_getfield(L, -1, "icon");    specs[i].icon = opt_icon(L, -1); lua_pop(L, 1);
     lua_getfield(L, -1, "shortcut");specs[i].shortcut = lua_tostring(L, -1); lua_pop(L, 1);
-    lua_getfield(L, -1, "checked"); specs[i].checked = (int)luaL_optinteger(L, -1, -1); lua_pop(L, 1);
-    lua_getfield(L, -1, "enabled"); specs[i].enabled = (int)luaL_optinteger(L, -1, 1); lua_pop(L, 1);
+    lua_getfield(L, -1, "checked"); specs[i].checked = opt_flag(L, -1, -1); lua_pop(L, 1);
+    lua_getfield(L, -1, "enabled"); specs[i].enabled = opt_flag(L, -1, 1); lua_pop(L, 1);
     lua_getfield(L, -1, "fn");
     if (lua_isfunction(L, -1)) {
       specs[i].ref = (void *)(intptr_t)luaL_ref(L, LUA_REGISTRYINDEX);
@@ -799,43 +819,70 @@ int luabui_build_menuspec(lua_State *L, int idx, BKMenuSpec **out) {
   return n;
 }
 
+/* Drop the menubutton children a previous set_menus built into this
+ * menubar (tracked as lightuserdata in the uservalue's _bar_btns). */
+static void clear_bar_buttons(lua_State *L, luabui_Node *ud) {
+  lua_getuservalue(L, 1);
+  if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
+  lua_getfield(L, -1, "_bar_btns");
+  if (lua_istable(L, -1)) {
+    for (int j = (int)lua_rawlen(L, -1); j >= 1; j--) {
+      lua_rawgeti(L, -1, j);
+      BKNode *btn = (BKNode *)lua_touserdata(L, -1);
+      lua_pop(L, 1);
+      if (!btn) continue;
+      if (luabui_lookup_node(L, btn)) { /* invalidate any live wrapper */
+        luabui_Node *w = (luabui_Node *)lua_touserdata(L, -1);
+        if (w && luaL_testudata(L, -1, LUABUI_NODE_MT)) w->node = NULL;
+        lua_pop(L, 1);
+      }
+      luabui_unmap_node(L, btn);
+      BK_node_remove(ud->node, btn);
+      BK_node_free(btn);
+    }
+  }
+  lua_pop(L, 2); /* _bar_btns, uservalue */
+  lua_getuservalue(L, 1);
+  if (lua_istable(L, -1)) {
+    lua_pushnil(L);
+    lua_setfield(L, -2, "_bar_btns");
+  }
+  lua_pop(L, 1);
+}
+
+/* set_menus(items): menu items on a menubutton / dropdown / enum, or, on a
+ * menubar, one menubutton child per top-level item — the same composition
+ * as Python's MenuBar (the kit menubar lays out menubutton children). */
 static int l_node_set_menus(lua_State *L) {
   luabui_Node *ud = CHECK_NODE(L, 1);
   if (!ud->node) return luaL_error(L, "attempt to use freed node");
 
-  /* Free old refs stored in the uservalue table */
-  lua_getuservalue(L, 1);
-  lua_getfield(L, -1, "_menu_refs");
-  if (lua_istable(L, -1)) {
-    for (int j = 0;; j++) {
-      lua_rawgeti(L, -1, j + 1);
-      if (lua_isnil(L, -1)) { lua_pop(L, 1); break; }
-      int old_ref = (int)lua_tointeger(L, -1);
-      luaL_unref(L, LUA_REGISTRYINDEX, old_ref);
-      lua_pop(L, 1);
-    }
-  }
-  lua_pop(L, 1); /* pop refs array or nil */
-  /* Create new refs array */
-  lua_newtable(L);
-  lua_setfield(L, -2, "_menu_refs");
-  lua_pop(L, 1); /* pop uservalue */
-
   BKMenuSpec *specs;
-  int n = luabui_build_menuspec(L, 2, &specs);
-  if (specs) {
-    /* Collect refs from the tree into _menu_refs for cleanup on the next call.
-     * We walk the built tree rather than re-parsing the Lua table. */
-    lua_getuservalue(L, 1);
-    lua_getfield(L, -1, "_menu_refs");
-    for (int i = 0; i < n; i++) {
-      if (specs[i].ref) {
-        lua_pushinteger(L, (lua_Integer)(intptr_t)specs[i].ref);
-        lua_rawseti(L, -2, lua_rawlen(L, -2) + 1);
-      }
-    }
-    lua_pop(L, 2); /* pop _menu_refs, uservalue */
+  int n = luabui_build_menuspec(L, 2, &specs); /* specs (+subs) live on the stack */
 
+  if (strcmp(BK_node_type(ud->node), "menubar") == 0) {
+    clear_bar_buttons(L, ud);
+    lua_getuservalue(L, 1);
+    if (!lua_istable(L, -1)) {
+      lua_pop(L, 1);
+      lua_newtable(L);
+      lua_setuservalue(L, 1);
+      lua_getuservalue(L, 1);
+    }
+    lua_newtable(L); /* fresh _bar_btns */
+    for (int i = 0; i < n; i++) {
+      BKNode *btn = BK_node_new("menubutton");
+      if (!btn) break;
+      if (specs[i].text) BK_set_str(btn, "text", specs[i].text);
+      if (specs[i].icon) BK_set_num(btn, "icon", specs[i].icon);
+      BK_menubutton_set_items(btn, specs[i].sub, specs[i].nsub);
+      BK_node_add(ud->node, btn, -1);
+      lua_pushlightuserdata(L, btn);
+      lua_rawseti(L, -2, i + 1);
+    }
+    lua_setfield(L, -2, "_bar_btns");
+    lua_pop(L, 1); /* uservalue */
+  } else {
     BK_menubutton_set_items(ud->node, specs, n);
   }
   return 0;
