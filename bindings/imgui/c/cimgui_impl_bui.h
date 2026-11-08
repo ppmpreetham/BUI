@@ -48,6 +48,7 @@ CIMGUI_API bool    cImGui_ImplBUI_Init(BKNode* node, cImGui_ImplBUI_FrameFn fram
 CIMGUI_API void    cImGui_ImplBUI_Shutdown(void);
 CIMGUI_API BKNode* cImGui_ImplBUI_GetNode(void);
 CIMGUI_API void    cImGui_ImplBUI_RequestFrames(int n);
+CIMGUI_API void    cImGui_ImplBUI_AbandonFrame(void); /* a frame callback stopped on an error */
 CIMGUI_API void    cImGui_ImplBUI_RequestFrameIn(int ms);
 CIMGUI_API int     cImGui_ImplBUI_FrameCount(void);
 

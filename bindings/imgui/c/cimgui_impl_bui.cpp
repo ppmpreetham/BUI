@@ -72,6 +72,7 @@ CIMGUI_API bool cImGui_ImplBUI_Init(BKNode* node, cImGui_ImplBUI_FrameFn frame, 
 CIMGUI_API void cImGui_ImplBUI_Shutdown(void) { ImGui_ImplBUI_Shutdown(); }
 CIMGUI_API BKNode* cImGui_ImplBUI_GetNode(void) { return reinterpret_cast<BKNode*>(ImGui_ImplBUI_GetNode()); }
 CIMGUI_API void cImGui_ImplBUI_RequestFrames(int n) { ImGui_ImplBUI_RequestFrames(n); }
+CIMGUI_API void cImGui_ImplBUI_AbandonFrame(void) { ImGui_ImplBUI_AbandonFrame(); }
 CIMGUI_API void cImGui_ImplBUI_RequestFrameIn(int ms) { ImGui_ImplBUI_RequestFrameIn(ms); }
 CIMGUI_API int cImGui_ImplBUI_FrameCount(void) { return ImGui_ImplBUI_FrameCount(); }
 
