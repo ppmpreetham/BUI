@@ -998,7 +998,7 @@ table editor with a tree view, search, undo/redo and export:
 
 Without a window system the same script renders headless (`bui-lua --headless
 app.lua`), which is also how the Lua tests and documentation screenshots
-work; all 26 examples run this way. Guide:
+work; all 27 examples run this way. Guide:
 [bindings/lua/README.md](bindings/lua/README.md).
 
 </details>
@@ -1513,13 +1513,13 @@ bui.run()
 `MenuBar` — and `ctx:open_menu` / `ctx:open_pie`; `fn` callbacks are refcounted
 by the kit and released with the items.
 
-**Examples** (26 scripts, `bindings/lua/examples/`):
+**Examples** (27 scripts, `bindings/lua/examples/`):
 
 - **Getting started:** `hello.lua`, `counter.lua`, `forms.lua`, `gallery.lua`
 - **Layout:** `split.lua`, `grid.lua`, `box.lua`, `dashboard.lua`
 - **Text and data:** `textarea.lua`, `enum.lua`, `listview.lua`, `data_table.lua`
 - **Menus and popups:** `menus.lua`, `menubar.lua`, `popover.lua`
-- **Color and drawing:** `color_picker.lua`, `ramp.lua`, `curve.lua`, `histogram.lua`, `canvas.lua`
+- **Color and drawing:** `color_picker.lua`, `ramp.lua`, `curve.lua`, `histogram.lua`, `canvas.lua`, `ph_nutrients.lua`
 - **Animation:** `anim.lua`
 - **Tools:** `todos.lua`, `filebrowser_demo.lua`, `image_viewer.lua`, `editor_screenshot.lua`, `lua_table_editor.lua`
 
@@ -1997,7 +1997,7 @@ How each was counted: [Coverage](https://bui.preetham.top/docs/reference/coverag
 | [`bindings/node/examples/counter.js`](bindings/node/examples/counter.js)                                                                                                                                                      | JavaScript: the DOM-like API                                                                                                                                                                                                                                    |
 | [`bindings/react/examples/counter.jsx`](bindings/react/examples/counter.jsx)                                                                                                                                                  | React in JSX (`bun examples/counter.jsx`)                                                                                                                                                                                                                       |
 | [`bindings/svelte/examples/Counter.svelte`](bindings/svelte/examples/Counter.svelte)                                                                          | Svelte 5 (`node --import ./bindings/svelte/register.js bindings/svelte/examples/counter.js`)                                                                                                                                                                    |
-| Lua (26 in [`bindings/lua/examples/`](bindings/lua/examples/))                                                                                               | 26 examples covering every BUI widget type: `hello.lua`, `counter.lua`, `forms.lua`, `gallery.lua`, `split.lua`, `grid.lua`, `box.lua`, `dashboard.lua`, `textarea.lua`, `enum.lua`, `listview.lua`, `data_table.lua`, `menus.lua`, `menubar.lua`, `popover.lua`, `color_picker.lua`, `ramp.lua`, `curve.lua`, `histogram.lua`, `canvas.lua`, `anim.lua`, `todos.lua`, `filebrowser_demo.lua`, `image_viewer.lua`, `editor_screenshot.lua`, `lua_table_editor.lua` |
+| Lua (27 in [`bindings/lua/examples/`](bindings/lua/examples/))                                                                                               | 27 examples covering every BUI widget type: `hello.lua`, `counter.lua`, `forms.lua`, `gallery.lua`, `split.lua`, `grid.lua`, `box.lua`, `dashboard.lua`, `textarea.lua`, `enum.lua`, `listview.lua`, `data_table.lua`, `menus.lua`, `menubar.lua`, `popover.lua`, `color_picker.lua`, `ramp.lua`, `curve.lua`, `histogram.lua`, `canvas.lua`, `anim.lua`, `todos.lua`, `filebrowser_demo.lua`, `image_viewer.lua`, `editor_screenshot.lua`, `lua_table_editor.lua`, `ph_nutrients.lua` |
 
 ---
 
@@ -2085,7 +2085,7 @@ ship. The tables below have the details.
 | **Accessibility**                    | Screen-reader support through UI Automation (Windows), AT-SPI (Linux) and NSAccessibility (macOS)                                                           |
 | **Qt parity**                        | Measure against PySide6, run the same programs on Qt and BUI, fill in the missing classes, then `install()` so `import PySide6` programs run unchanged      |
 | **More JavaScript frameworks**       | Vue and Angular, as thin adapters over `@blender-ui/native` (the layer React and Svelte share)                                                              |
-| **More languages**                   | Lua (26 examples, every widget), Ruby, Go (through cgo), C#, Zig, Swift, Kotlin and MyGo over the same C header; Godot, Unity and Bevy; Flutter |
+| **More languages**                   | Lua (27 examples, every widget), Ruby, Go (through cgo), C#, Zig, Swift, Kotlin and MyGo over the same C header; Godot, Unity and Bevy; Flutter |
 
 Our roadmap has no dates on it. Like a good render, it's done when the noise
 goes away.
@@ -2167,7 +2167,7 @@ headless there. Python can always fall back to the Tk window
 <summary><b>Can I use BUI from Vue, Angular, Ruby, Go or Lua?</b></summary>
 Lua is now supported: <code>cmake -DBUI_BUILD_LUA_BINDINGS=ON</code> builds
 <code>bui-lua</code> (a standalone host) and <code>bui.so</code> / <code>bui.dll</code>
-(a loadable module) for Lua 5.4, LuaJIT or LuaRocks. There are 26 examples and
+(a loadable module) for Lua 5.4, LuaJIT or LuaRocks. There are 27 examples and
 every BUI widget type works. Vue and Angular would be thin adapters over
 <code>@blender-ui/native</code>, the layer React and Svelte already share
 (<a href="docs/javascript.md">how to add a framework</a>). Ruby and Go

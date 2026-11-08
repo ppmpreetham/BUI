@@ -138,4 +138,10 @@ automatically when the items are replaced or the node/context is freed.
                                                        # collapsible panel, undo/redo,
                                                        # search/filter, export, metatable
                                                        # display, Ctrl+Z / Ctrl+Shift+Z)
+./bui-lua bindings/lua/examples/ph_nutrients.lua      # soil pH / nutrient availability chart
+                                                       # (canvas-drawn pH scale, nutrient
+                                                       # availability bands, two overlapping
+                                                       # curves, redraws on window resize via
+                                                       # EV_CONFIGURE, editable via number
+                                                       # fields and sliders)
 ```
