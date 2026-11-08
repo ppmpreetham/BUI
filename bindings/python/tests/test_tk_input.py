@@ -219,6 +219,31 @@ def test_panedwindow_sash_drag():
     app.close()
 
 
+def test_surface_drops_autorepeat_release():
+    # x11 autorepeat: a release and a press at one time must not reach the scene
+    import tkinter
+    from types import SimpleNamespace as Ev
+    from bui._surface import TkSurface
+
+    class Scene:
+        released = []
+        def render(self, w, h): return 0
+        def key(self, *a): pass
+        def key_release(self, keysym, mods): self.released.append(keysym)
+
+    root = tkinter.Tk()
+    surf = TkSurface(root, Scene())
+    scene = surf.scene
+    surf._on_key_release(Ev(keysym="q", time=5, state=0))
+    surf.on_key(Ev(char="q", keysym="q", keycode=0, time=5, state=0))
+    root.update()
+    assert scene.released == [], scene.released
+    surf._on_key_release(Ev(keysym="q", time=9, state=0))
+    root.update()
+    assert scene.released == ["q"], scene.released
+    root.destroy()
+
+
 def main() -> int:
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):
