@@ -886,6 +886,7 @@ typedef struct PieData {
   bool click_style;   /* PIE_CLICK_STYLE: pick on click, not on the key release */
   bool drag_style;    /* PIE_DRAG_STYLE: moved, so a quick release still picks */
   char key[32];       /* pie_data->event_type: the key that opened the pie */
+  char accel[PIE_MAX_ITEMS]; /* Button.menu_key: 'a' .. 'z', or 0 */
   double opened;      /* bk_time at open (the scroll timer's time_duration) */
 } PieData;
 
@@ -1103,6 +1104,16 @@ static int pie_key(BKNode *n, BKEvent *e)
     }
     return 1;
   }
+  /* EVT_AKEY .. EVT_ZKEY with no modifier but Alt: the item with that menu key */
+  if (e->text && isalpha((uchar)e->text[0]) && !e->text[1] && !(e->mods & (BK_SHIFT | BK_CTRL))) {
+    for (int i = 0; i < pd->menu.nall; i++) {
+      if (pd->accel[i] == tolower((uchar)e->text[0])) {
+        pie_pick(n, i);
+        return 1;
+      }
+    }
+    return 1;
+  }
   if (bk_keysym_is(e->keysym, "Return") || bk_keysym_is(e->keysym, "KP_Enter")) {
     pie_pick(n, n->hot);
     return 1;
@@ -1124,6 +1135,48 @@ static int pie_key_up(BKNode *n, BKEvent *e)
   }
   pie_pick(n, pie_dir_hot(n, e->x, e->y));
   return 1;
+}
+
+/* menu_block_set_keyaccels (interface.cc): the first free first letter of a word, then in a
+ * second pass any free letter. */
+static void pie_set_keyaccels(PieData *pd)
+{
+  unsigned mask = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < pd->menu.nall; i++) {
+      const char *s = pd->menu.all[i].text;
+      if (pd->accel[i] || !s || !s[0] || !strcmp(s, "-")) {
+        continue;
+      }
+      do {
+        const int c = tolower((uchar)*s);
+        if (c >= 'a' && c <= 'z' && !(mask & 1u << (c - 'a'))) {
+          mask |= 1u << (c - 'a');
+          pd->accel[i] = (char)c;
+          break;
+        }
+        if (pass == 0) { /* first pass: skip to the next word */
+          while (isalpha((uchar)*s)) {
+            s++;
+          }
+          if (*s) {
+            s++;
+          }
+        }
+        else {
+          s++;
+        }
+      } while (*s);
+    }
+  }
+}
+
+/* widget_draw_text: the accelerator's position in the text, upper case first; -1 none. */
+static int pie_accel_index(const char *text, char accel)
+{
+  const char *p = accel ? strchr(text, accel - 32) : NULL;
+  p = p ? p : (accel ? strchr(text, accel) : NULL);
+  return p ? (int)(p - text) : -1;
 }
 
 static void pie_draw(BKNode *n)
@@ -1172,6 +1225,7 @@ static void pie_draw(BKNode *n)
     bk_shadow(&r, bk_widget_radius(&w));
     BKRect wr = r;
     bk_widget_but(&w, &wr, 0, CNR_ALL);
+    bk_text_underline(it->text ? pie_accel_index(it->text, pd->accel[i]) : -1);
     if (it->icon && it->text && it->text[0]) {
       /* BUT_ICON_LEFT pie item (widget_draw_text_icon): rect.xmin += 0.3 * widget_unit, icon
        * at xmin + 4 * scale, text centered in the space after icon_size + 2 * scale. */
@@ -1185,6 +1239,7 @@ static void pie_draw(BKNode *n)
     else {
       bk_text_icon(&r, it->text, it->icon, w.text, BK_ALIGN_CENTER, it->enabled);
     }
+    bk_text_underline(-1);
   }
 }
 
@@ -1229,6 +1284,7 @@ void BK_open_pie(
   place_init(&pd->menu.place);
   pd->menu.all = bk_menuspec_copy(items, n);
   pd->menu.nall = n;
+  pie_set_keyaccels(pd);
   pd->menu.title = title ? bk_strdup(title) : NULL;
   pd->at_x = at ? at_x : ctx->pointer_x;
   pd->at_y = at ? at_y : ctx->pointer_y;

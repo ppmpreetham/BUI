@@ -95,7 +95,8 @@ class Menu:
 class PieMenu:
     """Radial menu around the pointer or ``at=(x, y)``: ``PieMenu.show(ctx, items, "Mode")``.
     Items in Blender's order W, E, S, N, NW, NE, SW, SE; move toward
-    an item and click, or press a number key in its numpad direction (8 north, 6 east). Opened by a held key, releasing the key picks
+    an item and click, press a number key in its numpad direction (8 north, 6 east),
+    or press its underlined letter. Opened by a held key, releasing the key picks
     the item; a quick tap keeps the pie open, as in Blender. A ``submenu`` item
     opens a sub-pie at the pointer; past 8 items, the 8th slot is "More"."""
 

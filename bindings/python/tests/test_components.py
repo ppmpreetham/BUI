@@ -572,6 +572,21 @@ def test_pie_number_keys():
     assert got == ["N"] and not d.popups()
 
 
+def test_pie_accelerator_keys():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    names = ["Object Mode", "Edit Mode", "Sculpt", "Open Shading"]
+    PieMenu.show(d.ctx, [MenuItem(n, (lambda n=n: got.append(n))) for n in names], at=(300, 250))
+    d.frame()
+    # first letters of words: o, e, s; both of "Open Shading"'s are taken, so the second pass
+    # gives it its first free letter, p
+    d.app.key("m", "m", 0, mods())                     # no item has m
+    assert d.popups() == 1
+    d.app.key("p", "p", 0, mods())
+    assert got == ["Open Shading"] and not d.popups()
+
+
 def test_pie_menu_at():
     from bui.components import MenuItem, PieMenu
     got = []

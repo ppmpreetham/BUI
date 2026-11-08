@@ -1159,6 +1159,12 @@ float bk_line_height(void)
 }
 
 static int g_text_pad = -1; /* bk_text_in_pad: the margin instead of bk_pad() */
+static int g_text_ul = -1;  /* bk_text_underline: the byte to underline, -1 none */
+
+void bk_text_underline(int index)
+{
+  g_text_ul = index;
+}
 
 float bk_text_in_pad(const BKRect *rect, const char *s, const uchar color[4], int align, bool bold,
                      int pad)
@@ -1221,6 +1227,13 @@ float bk_text_in(const BKRect *rect, const char *s, const uchar color[4], int al
   }
   bk_clip_push(rect->xmin, rect->ymin, bk_rw(rect), bk_rh(rect));
   bk_text(x, bk_text_baseline(rect), buf, blen, color, bold);
+  if (g_text_ul >= 0 && g_text_ul < n) {
+    /* widget_draw_text: the menu key's underline, a "_" glyph centered under its character */
+    const float gx = bk_text_width(buf, g_text_ul, bold);
+    const float gw = bk_text_width(buf, g_text_ul + 1, bold) - gx;
+    const float uw = bk_text_width("_", 1, bold);
+    bk_text(x + gx + (gw - uw) * 0.5f, bk_text_baseline(rect) + bk_px(), "_", 1, color, bold);
+  }
   bk_clip_pop();
   return tw;
 }

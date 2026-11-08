@@ -166,6 +166,8 @@ void bk_text(float x, float baseline, const char *s, int len, const uchar color[
 void bk_text_f(float x, float baseline, const char *s, int len, const float c[4], bool bold);
 /* Draw `s` inside rect with alignment; returns drawn width. Ellipsizes. */
 float bk_text_in(const BKRect *rect, const char *s, const uchar color[4], int align, bool bold);
+/* Underline byte `index` of the text the next bk_text_in calls draw (-1: none). */
+void bk_text_underline(int index);
 float bk_text_in_pad(const BKRect *rect, const char *s, const uchar color[4], int align, bool bold,
                      int pad);
 /* Text + optional icon in rect (Blender's widget_draw_text_icon). */

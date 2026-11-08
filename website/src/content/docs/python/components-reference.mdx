@@ -153,7 +153,7 @@ In lists and trees, arrow keys navigate, <Kbd>Left</Kbd> and <Kbd>Right</Kbd> co
 | `MenuButton` | `MenuButton(text, items, *, icon=None)` | A pulldown button (`File`, `Edit` …). |
 | `MenuBar` | `MenuBar(("File", items), ("Edit", items), ..., right=())` | Blender's top bar, for `App(header=...)`. `right` holds components at the right end. |
 | `Menu` | `Menu.show(ctx, owner, items, title=None, at=None, on_pick=None)` | Opens a popup menu from code, by `owner` or at `at=(x, y)`. Plain-string items call `on_pick(text)`. |
-| `PieMenu` | `PieMenu.show(ctx, items, title="", at=None)` | A pie around the pointer, or around `at=(x, y)`: up to 8 items, placed W, E, S, N, NW, NE, SW, SE. Flick toward one and click, or press the number key in its numpad direction (<Kbd>8</Kbd> north). Opened by a key: release the key to pick; a quick tap keeps it open. A `submenu` item opens a sub-pie; past 8 items the 8th is **More**. |
+| `PieMenu` | `PieMenu.show(ctx, items, title="", at=None)` | A pie around the pointer, or around `at=(x, y)`: up to 8 items, placed W, E, S, N, NW, NE, SW, SE. Flick toward one and click, or press the number key in its numpad direction (<Kbd>8</Kbd> north) or its underlined letter. Opened by a key: release the key to pick; a quick tap keeps it open. A `submenu` item opens a sub-pie; past 8 items the 8th is **More**. |
 
 Items in any menu are `MenuItem`s, plain strings, or `"-"` for a separator.
 
