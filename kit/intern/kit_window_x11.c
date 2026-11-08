@@ -94,7 +94,8 @@
   F(XWithdrawWindow) \
   F(XMatchVisualInfo) \
   F(XCreateColormap) \
-  F(XFreeColormap)
+  F(XFreeColormap) \
+  F(XGetWindowAttributes)
 
 #  define BK_X11_DECL(f) static __typeof__(&f) p_##f;
 BK_X11_FUNCS(BK_X11_DECL)
@@ -173,6 +174,7 @@ static int x11_load(void)
 #  define XMatchVisualInfo (*p_XMatchVisualInfo)
 #  define XCreateColormap (*p_XCreateColormap)
 #  define XFreeColormap (*p_XFreeColormap)
+#  define XGetWindowAttributes (*p_XGetWindowAttributes)
 
 #  define MAX_TIMERS 64
 
@@ -193,6 +195,7 @@ struct BKWindow {
   int depth;
   Colormap cmap;   /* for the ARGB visual, else None */
   char *title;
+  bool frameless, above; /* "override", "topmost": kept for a new X window */
   int render_pending, frames, cursor, tip_id, next_timer, full;
   int want_frame, frame_vsync;
   double frame_start;
@@ -677,6 +680,43 @@ static void handle_event(XEvent *ev)
 
 /* -- windows -- */
 
+/* GHOST_WindowX11::netwmMaximized: ask the window manager to add or remove two _NET_WM_STATE
+ * properties (the second may be NULL). Before the window is mapped, the client sets the property
+ * itself (EWMH), so an add is appended there. */
+static void net_wm_state(BKWindow *win, bool add, const char *prop1, const char *prop2)
+{
+  XWindowAttributes wa;
+  if (XGetWindowAttributes(g_dpy, win->xid, &wa) && wa.map_state == IsUnmapped) {
+    if (add) {
+      const Atom atoms[2] = {XInternAtom(g_dpy, prop1, False),
+                             prop2 ? XInternAtom(g_dpy, prop2, False) : None};
+      XChangeProperty(g_dpy, win->xid, XInternAtom(g_dpy, "_NET_WM_STATE", False), XA_ATOM, 32,
+                      PropModeAppend, (const unsigned char *)atoms, prop2 ? 2 : 1);
+    }
+    return;
+  }
+  XEvent xev;
+  memset(&xev, 0, sizeof(xev));
+  xev.xclient.type = ClientMessage;
+  xev.xclient.send_event = True;
+  xev.xclient.window = win->xid;
+  xev.xclient.message_type = XInternAtom(g_dpy, "_NET_WM_STATE", False);
+  xev.xclient.format = 32;
+  xev.xclient.data.l[0] = add ? 1 : 0; /* _NET_WM_STATE_ADD / _REMOVE */
+  xev.xclient.data.l[1] = (long)XInternAtom(g_dpy, prop1, False);
+  xev.xclient.data.l[2] = prop2 ? (long)XInternAtom(g_dpy, prop2, False) : 0;
+  XSendEvent(g_dpy, RootWindow(g_dpy, DefaultScreen(g_dpy)), False,
+             SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+}
+
+/* GHOST_WindowX11::motifShowWindowFrame: _MOTIF_WM_HINTS decorations on or off. */
+static void motif_frame(BKWindow *win, bool show)
+{
+  const long hints[4] = {1L << 1 /* MWM_HINTS_DECORATIONS */, 0, show ? 1 : 0, 0};
+  const Atom a = XInternAtom(g_dpy, "_MOTIF_WM_HINTS", False);
+  XChangeProperty(g_dpy, win->xid, a, a, 32, PropModeReplace, (const unsigned char *)hints, 4);
+}
+
 /* The X window, with the default visual or, transparent, a 32-bit ARGB one (GHOST's
  * alpha background). A window's visual is fixed, so "transparent" makes a new window. */
 static bool create_xid(BKWindow *win, bool transparent)
@@ -713,6 +753,12 @@ static bool create_xid(BKWindow *win, bool transparent)
   win->gc = XCreateGC(g_dpy, win->xid, 0, NULL);
   BK_window_set_title(win, win->title);
   BUI_raster_set_alpha(win->raster, win->depth == 32);
+  if (win->frameless) {
+    motif_frame(win, false);
+  }
+  if (win->above) {
+    net_wm_state(win, true, "_NET_WM_STATE_ABOVE", NULL);
+  }
   return true;
 }
 
@@ -919,24 +965,6 @@ void *BK_window_handle(BKWindow *win)
   return (void *)(uintptr_t)win->xid;
 }
 
-/* GHOST_WindowX11::netwmMaximized: ask the window manager to add or remove two _NET_WM_STATE
- * properties (the second may be NULL). */
-static void net_wm_state(BKWindow *win, bool add, const char *prop1, const char *prop2)
-{
-  XEvent xev;
-  memset(&xev, 0, sizeof(xev));
-  xev.xclient.type = ClientMessage;
-  xev.xclient.send_event = True;
-  xev.xclient.window = win->xid;
-  xev.xclient.message_type = XInternAtom(g_dpy, "_NET_WM_STATE", False);
-  xev.xclient.format = 32;
-  xev.xclient.data.l[0] = add ? 1 : 0; /* _NET_WM_STATE_ADD / _REMOVE */
-  xev.xclient.data.l[1] = (long)XInternAtom(g_dpy, prop1, False);
-  xev.xclient.data.l[2] = prop2 ? (long)XInternAtom(g_dpy, prop2, False) : 0;
-  XSendEvent(g_dpy, RootWindow(g_dpy, DefaultScreen(g_dpy)), False,
-             SubstructureRedirectMask | SubstructureNotifyMask, &xev);
-}
-
 /* GHOST_WindowX11: size hints for minsize / maxsize / resizable, moves for pos */
 void BK_window_wm(BKWindow *win, const char *key, double a, double b)
 {
@@ -945,6 +973,14 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   if (!strcmp(key, "pos")) {
     XMoveWindow(g_dpy, win->xid, (int)a, (int)b);
+  }
+  else if (!strcmp(key, "override")) { /* no frame (not override_redirect: that gets no keys) */
+    win->frameless = a != 0;
+    motif_frame(win, !win->frameless);
+  }
+  else if (!strcmp(key, "topmost")) {
+    win->above = a != 0;
+    net_wm_state(win, win->above, "_NET_WM_STATE_ABOVE", NULL);
   }
   else if (!strcmp(key, "transparent")) { /* before show: the window is made again */
     if ((a != 0) != (win->depth == 32)) {

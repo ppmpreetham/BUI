@@ -119,6 +119,7 @@ struct BKWindow {
   Buf bufs[2];
   char *title;
   int open, configured, hidden;
+  bool frameless; /* "override": no server-side frame (BUI draws none either) */
   int render_pending, frames, cursor, tip_id, next_timer, full;
   int want_frame, frame_vsync;
   double frame_start, hold_until;
@@ -1176,6 +1177,16 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
   return win;
 }
 
+/* GHOST asks for server-side decorations; "override" asks for client-side ones, of which BUI
+ * draws none, so the window has no frame. */
+static void set_frame(BKWindow *win)
+{
+  zxdg_toplevel_decoration_v1_set_mode(win->decoration,
+                                       win->frameless ?
+                                           ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE :
+                                           ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+}
+
 /* The xdg_toplevel role. A new role needs a surface with no buffer, and a commit after it
  * asks for the configure. */
 static void role_create(BKWindow *win)
@@ -1190,8 +1201,7 @@ static void role_create(BKWindow *win)
   if (g.decoration_manager) { /* title bar and borders from the compositor, as GHOST asks */
     win->decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(g.decoration_manager,
                                                                          win->toplevel);
-    zxdg_toplevel_decoration_v1_set_mode(win->decoration,
-                                         ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+    set_frame(win);
   }
 }
 
@@ -1363,6 +1373,12 @@ void bk_wl_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   if (!strcmp(key, "state")) {
     set_hidden(win, a == 2); /* 2: withdrawn */
+  }
+  else if (!strcmp(key, "override")) {
+    win->frameless = a != 0;
+    if (win->decoration) {
+      set_frame(win);
+    }
   }
   else if (!strcmp(key, "transparent") && (a != 0) != BUI_raster_alpha(win->raster)) {
     BUI_raster_set_alpha(win->raster, a != 0);
