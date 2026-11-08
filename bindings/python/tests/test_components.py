@@ -528,6 +528,37 @@ def test_pie_tap_stays_open():
     assert got == ["W"] and not d.popups()
 
 
+def test_pie_sub_menu():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(300, 250)
+    leaf = [MenuItem(n, (lambda n=n: got.append(n))) for n in "wesn"]
+    PieMenu.show(d.ctx, [MenuItem("W"), MenuItem("Sub", submenu=leaf)])
+    d.frame()
+    d.app.motion(430, 250, mods())                     # east: "Sub"
+    d.app.press(430, 250, mods())
+    assert d.popups() == 1 and not got                 # the sub-pie, centred at the pointer
+    d.frame()
+    d.app.motion(430, 120, mods())                     # north of the new centre
+    d.app.press(430, 120, mods())
+    assert got == ["n"] and not d.popups()
+
+
+def test_pie_more_level():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(300, 250)
+    PieMenu.show(d.ctx, [MenuItem(str(i), (lambda i=i: got.append(i))) for i in range(10)])
+    d.frame()
+    d.app.key("8", "8", 0, mods())                     # the 8th slot is "More"
+    d.frame()
+    assert d.popups() == 1 and not got
+    d.app.key("3", "3", 0, mods())                     # items 7, 8, 9: the third is 9
+    assert got == [9] and not d.popups()
+
+
 def test_pie_menu_at():
     from bui.components import MenuItem, PieMenu
     got = []

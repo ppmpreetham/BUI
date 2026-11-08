@@ -873,6 +873,7 @@ static const short g_pie_angle[8] = {90, 45, 0, 315, 270, 225, 180, 135};
 /* pie_menu_begin / pie_handler (interface_handlers.cc): U.pie_tap_timeout (20 cs) and
  * PIE_CLICK_THRESHOLD_SQ (interface_intern.hh). */
 #define PIE_TAP_TIMEOUT_S 0.2
+#define PIE_MAX_ITEMS 8
 #define PIE_CLICK_THRESHOLD_SQ 50.0f
 
 typedef struct PieData {
@@ -971,7 +972,7 @@ static bool pie_isect_seg(PieData *pd, int i, int mask)
 static int pie_dir_hot(BKNode *n, int x, int y)
 {
   PieData *pd = PIE(n);
-  const int count = BK_MIN(8, pd->menu.nall);
+  const int count = pd->menu.nall;
   const float dx = x - pd->cx, dy = pd->cy - y; /* y-up */
   const float len = hypotf(dx, dy);
   pd->dir_valid = len >= pie_threshold();
@@ -1014,8 +1015,20 @@ static void pie_pick(BKNode *n, int i)
   if (!ctx) {
     return;
   }
-  if (i < 0 || i >= BK_MIN(8, pd->menu.nall) || !pd->menu.all[i].enabled) {
+  if (i < 0 || i >= pd->menu.nall || !pd->menu.all[i].enabled) {
     BK_close_popups(ctx);
+    return;
+  }
+  if (pd->menu.all[i].nsub) {
+    /* pie_menu_level_invoke / wm.call_menu_pie: the sub-pie opens at the pointer, titled by its
+     * item. Copied first: closing the pie frees its items. */
+    const int nsub = pd->menu.all[i].nsub;
+    BKMenuSpec *sub = bk_menuspec_copy(pd->menu.all[i].sub, nsub);
+    char *title = bk_strdup(pd->menu.all[i].text);
+    BK_close_popups(ctx);
+    BK_open_pie(ctx, sub, nsub, title, PLACE_NONE, PLACE_NONE);
+    bk_menuspec_free(sub, nsub);
+    free(title);
     return;
   }
   void (*fn)(void *) = pd->menu.all[i].fn;
@@ -1118,7 +1131,7 @@ static void pie_draw(BKNode *n)
   pie_draw_disk(pd->cx, pd->cy, 0.0f, 2.0f * (float)M_PI, r_in, r_out, c);
   if (pd->dir_valid) {
     int mask = 0;
-    for (int i = 0; i < BK_MIN(8, pd->menu.nall); i++) {
+    for (int i = 0; i < pd->menu.nall; i++) {
       mask |= 1 << g_pie_rdir[i];
     }
     const bool has_aligned = (mask & 0x55) != 0, has_diagonal = (mask & 0xAA) != 0;
@@ -1138,7 +1151,7 @@ static void pie_draw(BKNode *n)
     bk_widget_menu_back(&tr, CNR_ALL);
     bk_text_in(&tr, pd->menu.title, bk_theme.menu_back.text, BK_ALIGN_CENTER, false);
   }
-  for (int i = 0; i < BK_MIN(8, pd->menu.nall); i++) {
+  for (int i = 0; i < pd->menu.nall; i++) {
     BKRect r = pie_item_rect(n, i);
     const BKMenuSpec *it = &pd->menu.all[i];
     int st = (i == n->hot ? ST_HOVER : 0) | (it->enabled ? 0 : ST_DISABLED);
@@ -1190,11 +1203,24 @@ void BK_open_pie(
     BKContext *ctx, const BKMenuSpec *items, int n, const char *title, int at_x, int at_y)
 {
   const bool at = at_x > PLACE_NONE && at_y > PLACE_NONE;
+  /* pie_menu_level_create: past PIE_MAX_ITEMS, the last slot is "More" with the rest */
+  BKMenuSpec level[PIE_MAX_ITEMS];
+  if (n > PIE_MAX_ITEMS) {
+    memcpy(level, items, sizeof(BKMenuSpec) * (PIE_MAX_ITEMS - 1));
+    level[PIE_MAX_ITEMS - 1] = (BKMenuSpec){.text = "More",
+                                            .icon = BK_icon_id("PLUS"),
+                                            .checked = -1,
+                                            .enabled = 1,
+                                            .sub = items + PIE_MAX_ITEMS - 1,
+                                            .nsub = n - (PIE_MAX_ITEMS - 1)};
+    items = level;
+    n = PIE_MAX_ITEMS;
+  }
   BKNode *pie = bk_node_new_cls(&bk_cls_pie);
   PieData *pd = (PieData *)calloc(1, sizeof(PieData));
   place_init(&pd->menu.place);
-  pd->menu.all = bk_menuspec_copy(items, BK_MIN(n, 8));
-  pd->menu.nall = BK_MIN(n, 8);
+  pd->menu.all = bk_menuspec_copy(items, n);
+  pd->menu.nall = n;
   pd->menu.title = title ? bk_strdup(title) : NULL;
   pd->at_x = at ? at_x : ctx->pointer_x;
   pd->at_y = at ? at_y : ctx->pointer_y;
