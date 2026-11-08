@@ -7,6 +7,8 @@ All notable changes to **blenderui** (BUI). The format follows
 ## [Unreleased]
 
 ### Added
+- **Rust:** `<input live>` (and `<textarea live>`): the field reports every keystroke to `on_input` / `on_change`, not only on Enter or blur,
+  so a view can follow the typing (a search box, a date field that lights up a calendar).
 - **Linux window requests** that Win32 and Cocoa already had, through `BK_window_wm` (Python `Window.wm`):
   `"state"` 2 and 0 hide and show a window on X11 and Wayland; `"override"` removes the frame (`_MOTIF_WM_HINTS`
   on X11, client-side decorations on Wayland) and `"topmost"` keeps an X11 window above others
@@ -32,6 +34,8 @@ All notable changes to **blenderui** (BUI). The format follows
   callback left early on an error, with Dear ImGui's error recovery.
 
 ### Changed
+- **Text fields:** in the HTML look (browser-style inputs and text areas) the caret blinks like a browser's (about every 530 ms, solid right after it
+  moves or the text changes); Blender's own fields keep Blender's solid caret. The window wakes only for the next toggle, so an idle window still sleeps.
 - `BK_open_pie` takes the pie's center (`at_x`, `at_y`; `-100000` for the pointer, as in `BK_open_menu`).
   Python `PieMenu.show(..., at=(x, y))` and `ctx.open_pie(..., at=)`, Lua `ctx:open_pie(items, title, x, y)`.
 - Pie number keys are directions on the numpad (8 north, 6 east, 2 south, 4 west, the diagonals on 7, 9, 1 and 3),
@@ -39,6 +43,8 @@ All notable changes to **blenderui** (BUI). The format follows
 - `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
 
 ### Fixed
+- **Browser-look text fields** take the CSS `color` and `font-size` the field itself is given (one that differs from its parent's); without them they keep Chrome's black 13.33px, as before.
+- **Browser-look form controls** drew their text with Blender's UI drop shadow, which made it look heavy next to the page's text. They draw none now, as in a browser.
 - **macOS:** the npm `bui-runtime` (and the release build of the addon) failed to link with `Undefined symbols: ___isPlatformVersionAtLeast`: the
   Cocoa host asked for ProMotion with `@available`, which needs a symbol from clang's runtime that a Rust binary linked with
   `-nodefaultlibs` does not have. It asks by selector now.
@@ -122,6 +128,8 @@ All notable changes to **blenderui** (BUI). The format follows
 - **Benchmarks on Linux:** `bindings/rust/bench/common/measure.rs` measures CPU time (`CLOCK_PROCESS_CPUTIME_ID`) and memory (`/proc/self/status`) on Linux, so `bui-bench`, `bench_frames` and `cargo test` build there; Windows is unchanged. (concprog, pull request #10)
 
 ### Fixed
+- **Browser-look text fields** take the CSS `color` and `font-size` the field itself is given (one that differs from its parent's); without them they keep Chrome's black 13.33px, as before.
+- **Browser-look form controls** drew their text with Blender's UI drop shadow, which made it look heavy next to the page's text. They draw none now, as in a browser.
 - **Python: an intermittent crash (access violation) when a native window and Tk share a thread.** The C callbacks the kit
   makes into Python (host hooks, window timer and close, reference counting) ran without the GIL when a window message
   was dispatched from inside Tk's `update()`, which releases the GIL around Tcl and whose notifier dispatches every
@@ -198,6 +206,8 @@ All notable changes to **blenderui** (BUI). The format follows
 - **Svelte** now publishes from CI like the other npm packages (its trusted publisher is set up).
 
 ### Fixed
+- **Browser-look text fields** take the CSS `color` and `font-size` the field itself is given (one that differs from its parent's); without them they keep Chrome's black 13.33px, as before.
+- **Browser-look form controls** drew their text with Blender's UI drop shadow, which made it look heavy next to the page's text. They draw none now, as in a browser.
 - **Backspace over a Blender value resets it to its default, not to zero** (number fields, sliders,
   vector fields, checkboxes; the right-click "Reset to Default Value" already did, and the docs always
   said Backspace resets to the default). A widget's default is the value it was made with, or an
@@ -598,6 +608,8 @@ The newest work. Details for some items follow in the sections below.
 - **C:** `BK_window_wake_init` / `BK_window_wake` (a cross-thread wake through a message-only window) and `BK_window_set_keep_alive`.
 
 ### Fixed
+- **Browser-look text fields** take the CSS `color` and `font-size` the field itself is given (one that differs from its parent's); without them they keep Chrome's black 13.33px, as before.
+- **Browser-look form controls** drew their text with Blender's UI drop shadow, which made it look heavy next to the page's text. They draw none now, as in a browser.
 - **GPU text:** `BUI_gpu_slug()` read the environment on every text run, which pushed the GPU raster from 1.6 to 9.4 ms per frame at 3,000 cells. It now reads it once.
 - **`WindowHandle::update`:** `cx.notify()` inside the closure didn't re-render that window.
 - **Python, hidden Tk root:** BUI's hidden Tk root (started before the first window on macOS, and by the Tk host) became `tkinter._default_root`, so a real tkinter program's `StringVar()` bound to the hidden interpreter and its widgets never saw the value.

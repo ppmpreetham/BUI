@@ -467,7 +467,14 @@ void bk_draw_tree(BKNode *n)
   if (n->cls->draw) {
     const float saved = bk_text_scale;
     bk_text_scale = n->font_scale > 0.0f ? n->font_scale : 1.0f;
-    if (!(BK_HTML(n) && bk_html_draw(n))) {
+    bool done = false;
+    if (BK_HTML(n)) { /* a browser draws no text shadow */
+      const int shadow = bk_text_shadow;
+      bk_text_shadow = 0;
+      done = bk_html_draw(n);
+      bk_text_shadow = shadow;
+    }
+    if (!done) {
       n->cls->draw(n);
     }
     bk_text_scale = saved;
@@ -779,6 +786,7 @@ static const struct {
     {"viewevents", NF_VIEWEVENTS, false}, {"noscrollbar", NF_NOSCROLLBAR, true},
     {"opaque", NF_OPAQUE, false},
     {"html", NF_HTML, true}, /* Chrome's form-control look (kit_widgets.c) */
+    {"bare", NF_BARE, false},
     {"active_default", NF_ACTIVE_DEFAULT, false},
 };
 
@@ -1036,6 +1044,15 @@ int BK_set_num(BKNode *n, const char *key, double v)
   }
   if (strcmp(key, "selmode") == 0) {
     n->selmode = (int)v;
+    bk_invalidate(n);
+    return 1;
+  }
+  if (strcmp(key, "text_color") == 0) { /* 0xAARRGGBB */
+    const uint32_t argb = (uint32_t)v;
+    n->text_color[0] = (uchar)(argb >> 16);
+    n->text_color[1] = (uchar)(argb >> 8);
+    n->text_color[2] = (uchar)argb;
+    n->text_color[3] = (uchar)(argb >> 24);
     bk_invalidate(n);
     return 1;
   }
@@ -3248,6 +3265,24 @@ void bk_te_select_word(BKTextEdit *te, int index)
   }
 }
 
+#define CARET_BLINK_S 0.53
+
+bool bk_te_caret_visible(BKTextEdit *te)
+{
+  const double now = bk_time();
+  if (te->blink_t0 <= 0.0 || te->caret != te->blink_caret || te->len != te->blink_len) {
+    te->blink_t0 = now;
+    te->blink_caret = te->caret;
+    te->blink_len = te->len;
+  }
+  return (((long)((now - te->blink_t0) / CARET_BLINK_S)) & 1) == 0;
+}
+
+double bk_te_next_toggle(BKTextEdit *te)
+{
+  return te->blink_t0 + (floor((bk_time() - te->blink_t0) / CARET_BLINK_S) + 1.0) * CARET_BLINK_S;
+}
+
 void bk_te_draw(BKTextEdit *te, const BKRect *rect, const uchar color[4])
 {
   const int p = bk_pad();
@@ -3292,6 +3327,7 @@ void bk_te_draw(BKTextEdit *te, const BKRect *rect, const uchar color[4])
     bk_text(tx, bk_text_baseline(rect), te->text, te->len, color, false);
   }
   const float m = 0.2f * h;
+  /* Blender's caret is solid (interface_widgets.cc, ui_draw_but_TEX); only the HTML look blinks. */
   bk_fill(floorf(tx + caret_px), rect->ymin + m, BK_MAX(1.0f, floorf(0.1f * bk_unit() + 0.5f)),
           h - 2 * m, bk_theme.cursor);
   bk_clip_pop();
