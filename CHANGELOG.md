@@ -30,6 +30,8 @@ All notable changes to **blenderui** (BUI). The format follows
   submenu opens a sub-pie at the pointer; past 8 items, the 8th is "More" with the rest
   (`pie_menu_level_create`); items get underlined accelerator letters (`menu_block_set_keyaccels`); and the
   items grow out of the center over 60 ms (`pie_animation_timeout`, off with reduced motion).
+- **Rust:** `App::on_window_activation(|id, active, cx| ...)` reports keyboard focus, and `WindowOptions.window_background =
+  WindowBackgroundAppearance::Transparent` opens a transparent window on Linux.
 - **Dear ImGui:** `ImGui_ImplBUI_AbandonFrame()` (C: `cImGui_ImplBUI_AbandonFrame`) ends a frame that a binding's
   callback left early on an error, with Dear ImGui's error recovery.
 
@@ -43,6 +45,8 @@ All notable changes to **blenderui** (BUI). The format follows
 - `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
 
 ### Fixed
+- **Python Tk host on X11:** a held key no longer sends a release on each auto-repeat, so holding a pie key keeps the pie open
+  until the key is up (the native X11 host already did this).
 - **Browser-look text fields** take the CSS `color` and `font-size` the field itself is given (one that differs from its parent's); without them they keep Chrome's black 13.33px, as before.
 - **Browser-look form controls** drew their text with Blender's UI drop shadow, which made it look heavy next to the page's text. They draw none now, as in a browser.
 - **macOS:** the npm `bui-runtime` (and the release build of the addon) failed to link with `Undefined symbols: ___isPlatformVersionAtLeast`: the
