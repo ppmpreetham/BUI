@@ -666,6 +666,8 @@ typedef struct BKWindowCallbacks {
   /* BK_window_request_frame: called right before the frame renders, so a host
    * can rebuild its UI for exactly the frame that presents it. */
   void (*on_frame)(void *data, BKWindow *win);
+  /* The window got (1) or lost (0) the keyboard focus (GHOST_kEventWindowActivate). */
+  void (*on_focus)(void *data, BKWindow *win, int active);
 } BKWindowCallbacks;
 int BK_window_supported(void);
 BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height);

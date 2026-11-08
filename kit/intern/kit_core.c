@@ -3741,6 +3741,20 @@ BKNode *bk_next_editable(BKNode *from, int dir)
   return list[(at + dir + count) % count];
 }
 
+void bk_window_focus(BKContext *ctx, BKWindow *win, const BKWindowCallbacks *cb, int active)
+{
+  if (!active) {
+    /* pie_handler WINDEACTIVATE: the pie key may be released outside, so cancel the pie */
+    ctx->key_held[0] = '\0';
+    if (ctx->npopups && ctx->popups[ctx->npopups - 1]->cls == &bk_cls_pie) {
+      BK_close_popups(ctx);
+    }
+  }
+  if (cb->on_focus) {
+    cb->on_focus(cb->data, win, active);
+  }
+}
+
 BKNode *BK_hit_at(BKContext *ctx, int x, int y)
 {
   return hit_all(ctx, x, y);

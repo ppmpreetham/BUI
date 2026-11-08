@@ -728,6 +728,9 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
       }
       return 0;
+    case WM_ACTIVATE:
+      bk_window_focus(win->ctx, win, &win->cb, LOWORD(wp) != WA_INACTIVE);
+      break;
     case WM_CLOSE:
       if (win->cb.on_close && !win->cb.on_close(win->cb.data, win)) {
         return 0;

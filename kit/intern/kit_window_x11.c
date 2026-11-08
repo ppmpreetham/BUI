@@ -89,7 +89,9 @@
   F(XSetWMNormalHints) \
   F(XSetWMProtocols) \
   F(XStoreName) \
-  F(XWarpPointer)
+  F(XWarpPointer) \
+  F(XIconifyWindow) \
+  F(XWithdrawWindow)
 
 #  define BK_X11_DECL(f) static __typeof__(&f) p_##f;
 BK_X11_FUNCS(BK_X11_DECL)
@@ -163,6 +165,8 @@ static int x11_load(void)
 #  define XSetWMProtocols (*p_XSetWMProtocols)
 #  define XStoreName (*p_XStoreName)
 #  define XWarpPointer (*p_XWarpPointer)
+#  define XIconifyWindow (*p_XIconifyWindow)
+#  define XWithdrawWindow (*p_XWithdrawWindow)
 
 #  define MAX_TIMERS 64
 
@@ -644,6 +648,13 @@ static void handle_event(XEvent *ev)
       }
       handle_key(win, &ev->xkey, ev->type == KeyPress);
       break;
+    case FocusIn:
+    case FocusOut:
+      /* a pointer or keyboard grab keeps the focus */
+      if (ev->xfocus.mode != NotifyGrab && ev->xfocus.mode != NotifyUngrab) {
+        bk_window_focus(win->ctx, win, &win->cb, ev->type == FocusIn);
+      }
+      break;
     case ClientMessage:
       if ((Atom)ev->xclient.data.l[0] == a_delete) {
         if (!win->cb.on_close || win->cb.on_close(win->cb.data, win)) {
@@ -844,6 +855,24 @@ void *BK_window_handle(BKWindow *win)
   return (void *)(uintptr_t)win->xid;
 }
 
+/* GHOST_WindowX11::netwmMaximized: ask the window manager to add or remove two _NET_WM_STATE
+ * properties (the second may be NULL). */
+static void net_wm_state(BKWindow *win, bool add, const char *prop1, const char *prop2)
+{
+  XEvent xev;
+  memset(&xev, 0, sizeof(xev));
+  xev.xclient.type = ClientMessage;
+  xev.xclient.send_event = True;
+  xev.xclient.window = win->xid;
+  xev.xclient.message_type = XInternAtom(g_dpy, "_NET_WM_STATE", False);
+  xev.xclient.format = 32;
+  xev.xclient.data.l[0] = add ? 1 : 0; /* _NET_WM_STATE_ADD / _REMOVE */
+  xev.xclient.data.l[1] = (long)XInternAtom(g_dpy, prop1, False);
+  xev.xclient.data.l[2] = prop2 ? (long)XInternAtom(g_dpy, prop2, False) : 0;
+  XSendEvent(g_dpy, RootWindow(g_dpy, DefaultScreen(g_dpy)), False,
+             SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+}
+
 /* GHOST_WindowX11: size hints for minsize / maxsize / resizable, moves for pos */
 void BK_window_wm(BKWindow *win, const char *key, double a, double b)
 {
@@ -889,6 +918,20 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   else if (!strcmp(key, "focus")) {
     XSetInputFocus(g_dpy, win->xid, RevertToParent, CurrentTime);
+  }
+  else if (!strcmp(key, "state")) { /* GHOST_WindowX11::setState; 2 hides (ICCCM withdraw) */
+    const int state = BK_CLAMP((int)a, 0, 3);
+    if (state == 1) {
+      XIconifyWindow(g_dpy, win->xid, DefaultScreen(g_dpy));
+    }
+    else if (state == 2) {
+      XWithdrawWindow(g_dpy, win->xid, DefaultScreen(g_dpy));
+    }
+    else {
+      XMapWindow(g_dpy, win->xid);
+      net_wm_state(win, state == 3, "_NET_WM_STATE_MAXIMIZED_HORZ",
+                   "_NET_WM_STATE_MAXIMIZED_VERT");
+    }
   }
   XFlush(g_dpy);
 }

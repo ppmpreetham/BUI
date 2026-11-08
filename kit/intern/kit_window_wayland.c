@@ -117,7 +117,8 @@ struct BKWindow {
   struct zxdg_toplevel_decoration_v1 *decoration;
   struct wl_callback *frame_cb;
   Buf bufs[2];
-  int open, configured;
+  char *title;
+  int open, configured, hidden;
   int render_pending, frames, cursor, tip_id, next_timer, full;
   int want_frame, frame_vsync;
   double frame_start, hold_until;
@@ -597,11 +598,18 @@ static void keyboard_enter(void *d, struct wl_keyboard *kb, uint32_t serial, str
 {
   g.keyboard_win = find_window(s);
   g.serial = serial;
+  if (g.keyboard_win) {
+    bk_window_focus(g.keyboard_win->ctx, g.keyboard_win, &g.keyboard_win->cb, 1);
+  }
 }
 
 static void keyboard_leave(void *d, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *s)
 {
-  if (g.keyboard_win == find_window(s)) {
+  BKWindow *win = find_window(s);
+  if (win) {
+    bk_window_focus(win->ctx, win, &win->cb, 0);
+  }
+  if (g.keyboard_win == win) {
     g.keyboard_win = NULL;
   }
   g.repeat_key = 0;
@@ -1016,6 +1024,29 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 
 /* -- xdg-shell -- */
 
+static void role_destroy(BKWindow *win)
+{
+  if (win->frame_cb) {
+    wl_callback_destroy(win->frame_cb);
+    win->frame_cb = NULL;
+  }
+  if (win->decoration) {
+    zxdg_toplevel_decoration_v1_destroy(win->decoration);
+  }
+  if (win->toplevel) {
+    xdg_toplevel_destroy(win->toplevel);
+  }
+  if (win->xdg_surface) {
+    xdg_surface_destroy(win->xdg_surface);
+  }
+  win->decoration = NULL;
+  win->toplevel = NULL;
+  win->xdg_surface = NULL;
+  win->configured = 0;
+}
+
+static void role_create(BKWindow *win);
+
 static void close_window(BKWindow *win)
 {
   if (!win->open) {
@@ -1029,21 +1060,10 @@ static void close_window(BKWindow *win)
     g.keyboard_win = NULL;
     g.repeat_key = 0;
   }
-  if (win->frame_cb) {
-    wl_callback_destroy(win->frame_cb);
-    win->frame_cb = NULL;
-  }
-  if (win->decoration) {
-    zxdg_toplevel_decoration_v1_destroy(win->decoration);
-  }
-  xdg_toplevel_destroy(win->toplevel);
-  xdg_surface_destroy(win->xdg_surface);
+  role_destroy(win);
   wl_surface_destroy(win->surface);
   buf_destroy(&win->bufs[0]);
   buf_destroy(&win->bufs[1]);
-  win->decoration = NULL;
-  win->toplevel = NULL;
-  win->xdg_surface = NULL;
   win->surface = NULL;
   g_open--;
   wl_display_flush(g.display);
@@ -1133,18 +1153,8 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
   win->lh = height;
   win->surface = wl_compositor_create_surface(g.compositor);
   wl_surface_add_listener(win->surface, &surface_listener, win);
-  win->xdg_surface = xdg_wm_base_get_xdg_surface(g.wm_base, win->surface);
-  xdg_surface_add_listener(win->xdg_surface, &xdg_surface_listener, win);
-  win->toplevel = xdg_surface_get_toplevel(win->xdg_surface);
-  xdg_toplevel_add_listener(win->toplevel, &toplevel_listener, win);
-  const char *app_id = getenv("BUI_APP_ID");
-  xdg_toplevel_set_app_id(win->toplevel, app_id ? app_id : "bui");
-  if (g.decoration_manager) { /* title bar and borders from the compositor, as GHOST asks */
-    win->decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(g.decoration_manager,
-                                                                         win->toplevel);
-    zxdg_toplevel_decoration_v1_set_mode(win->decoration,
-                                         ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-  }
+  win->title = bk_strdup(title ? title : "");
+  role_create(win);
   win->open = 1;
   apply_scale(win, 1);
   /* BUI_UI_SCALE sizes the window in design pixels, as the X11 host does */
@@ -1155,13 +1165,50 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
   win->next = g_windows;
   g_windows = win;
   g_open++;
-  bk_wl_window_set_title(win, title);
   BKHost host = {win,           host_request,       host_set_cursor, host_warp,
                  host_clipboard_get, host_clipboard_set, host_schedule, host_emit};
   BK_context_set_host(ctx, &host);
   wl_surface_commit(win->surface); /* the first commit asks for the configure */
   wl_display_flush(g.display);
   return win;
+}
+
+/* The xdg_toplevel role. A new role needs a surface with no buffer, and a commit after it
+ * asks for the configure. */
+static void role_create(BKWindow *win)
+{
+  win->xdg_surface = xdg_wm_base_get_xdg_surface(g.wm_base, win->surface);
+  xdg_surface_add_listener(win->xdg_surface, &xdg_surface_listener, win);
+  win->toplevel = xdg_surface_get_toplevel(win->xdg_surface);
+  xdg_toplevel_add_listener(win->toplevel, &toplevel_listener, win);
+  const char *app_id = getenv("BUI_APP_ID");
+  xdg_toplevel_set_app_id(win->toplevel, app_id ? app_id : "bui");
+  xdg_toplevel_set_title(win->toplevel, win->title);
+  if (g.decoration_manager) { /* title bar and borders from the compositor, as GHOST asks */
+    win->decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(g.decoration_manager,
+                                                                         win->toplevel);
+    zxdg_toplevel_decoration_v1_set_mode(win->decoration,
+                                         ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+  }
+}
+
+/* Unmap (a NULL buffer, then no role) or map again with a new role. */
+static void set_hidden(BKWindow *win, int hidden)
+{
+  if (win->hidden == hidden) {
+    return;
+  }
+  win->hidden = hidden;
+  if (hidden) {
+    wl_surface_attach(win->surface, NULL, 0, 0);
+    wl_surface_commit(win->surface);
+    role_destroy(win);
+  }
+  else {
+    role_create(win);
+    wl_surface_commit(win->surface);
+    win->full = 1;
+  }
 }
 
 void bk_wl_window_free(BKWindow *win)
@@ -1180,6 +1227,7 @@ void bk_wl_window_free(BKWindow *win)
     BK_context_set_host(win->ctx, &win->prev);
   }
   BUI_raster_free(win->raster);
+  free(win->title);
   free(win);
 }
 
@@ -1191,6 +1239,7 @@ void bk_wl_window_set_callbacks(BKWindow *win, const BKWindowCallbacks *cb)
 void bk_wl_window_show(BKWindow *win)
 {
   if (win->open) { /* a Wayland surface shows with its first buffer, after the configure */
+    set_hidden(win, 0);
     win->full = 1;
     win->render_pending = 1;
   }
@@ -1209,8 +1258,12 @@ int bk_wl_window_is_open(BKWindow *win)
 void bk_wl_window_set_title(BKWindow *win, const char *title)
 {
   if (win->open) {
-    xdg_toplevel_set_title(win->toplevel, title ? title : "");
-    wl_display_flush(g.display);
+    free(win->title);
+    win->title = bk_strdup(title ? title : "");
+    if (win->toplevel) {
+      xdg_toplevel_set_title(win->toplevel, win->title);
+      wl_display_flush(g.display);
+    }
   }
 }
 
@@ -1223,7 +1276,9 @@ void bk_wl_window_set_size(BKWindow *win, int width, int height)
     win->lh = BK_MAX(1, (int)(height * win->ui_scale / win->bscale));
     win->w = win->lw * win->bscale;
     win->h = win->lh * win->bscale;
-    xdg_surface_set_window_geometry(win->xdg_surface, 0, 0, win->lw, win->lh);
+    if (win->xdg_surface) {
+      xdg_surface_set_window_geometry(win->xdg_surface, 0, 0, win->lw, win->lh);
+    }
     win->full = 1;
     win->render_pending = 1;
   }
@@ -1301,6 +1356,13 @@ void *bk_wl_window_handle(BKWindow *win)
 void bk_wl_window_wm(BKWindow *win, const char *key, double a, double b)
 {
   if (!win->open) {
+    return;
+  }
+  if (!strcmp(key, "state")) {
+    set_hidden(win, a == 2); /* 2: withdrawn */
+  }
+  if (!win->toplevel) {
+    wl_display_flush(g.display);
     return;
   }
   if (!strcmp(key, "minsize")) {

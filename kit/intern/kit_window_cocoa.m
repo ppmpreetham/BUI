@@ -616,6 +616,14 @@ static CGColorSpaceRef srgb(void)
 {
   if (bk) {
     bk->flags = [NSEvent modifierFlags]; /* modifiers may have changed elsewhere */
+    bk_window_focus(bk->ctx, bk, &bk->cb, 1);
+  }
+}
+
+- (void)windowDidResignKey:(NSNotification *)notification
+{
+  if (bk) {
+    bk_window_focus(bk->ctx, bk, &bk->cb, 0);
   }
 }
 

@@ -464,6 +464,8 @@ void bk_natural(BKNode *n, int *r_w, int *r_h);
 void bk_arrange(BKNode *n, int x, int y, int w, int h);
 void bk_draw_tree(BKNode *n);
 BKNode *bk_hit(BKNode *n, int x, int y);
+/* Window hosts: the window got or lost the keyboard focus. Calls cb->on_focus. */
+void bk_window_focus(BKContext *ctx, BKWindow *win, const BKWindowCallbacks *cb, int active);
 bool bk_contains(const BKNode *n, int x, int y);
 BKRect bk_node_rect(const BKNode *n);
 bool bk_hovered(const BKNode *n);

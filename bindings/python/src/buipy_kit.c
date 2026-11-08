@@ -2305,6 +2305,7 @@ typedef struct KitWindowObject {
   PyObject *ctx;      /* KitContext (kept alive) */
   PyObject *timers;   /* id -> callable */
   PyObject *on_close; /* callable -> bool, or None */
+  PyObject *on_focus; /* callable(active: bool), or None */
 } KitWindowObject;
 
 static int stop_check(void)
@@ -2343,6 +2344,25 @@ static int win_on_close(void *data, BKWindow *w)
   const int allow = (r == Py_None) ? 0 : PyObject_IsTrue(r); /* Tk protocol: handler decides */
   Py_DECREF(r);
   return allow;
+}
+
+static void win_on_focus(void *data, BKWindow *w, int active)
+{
+  KitWindowObject *self = (KitWindowObject *)data;
+  if (self->on_focus && self->on_focus != Py_None) {
+    PyObject *r = PyObject_CallOneArg(self->on_focus, active ? Py_True : Py_False);
+    if (!r) {
+      stash_error();
+    }
+    Py_XDECREF(r);
+  }
+}
+
+static void win_on_focus_gil(void *data, BKWindow *w, int active)
+{
+  GIL_ENTER;
+  win_on_focus(data, w, active);
+  GIL_LEAVE;
 }
 
 static void win_on_timer_gil(void *data, BKWindow *w, int id)
@@ -2384,7 +2404,9 @@ static int kitwin_init(KitWindowObject *self, PyObject *args, PyObject *kw)
   }
   Py_XSETREF(self->ctx, Py_NewRef(ctx));
   Py_XSETREF(self->timers, PyDict_New());
-  BKWindowCallbacks cb = {self, win_on_timer_gil, win_on_close_gil};
+  BKWindowCallbacks cb = {
+      .data = self, .on_timer = win_on_timer_gil, .on_close = win_on_close_gil,
+      .on_focus = win_on_focus_gil};
   BK_window_set_callbacks(self->win, &cb);
   return 0;
 }
@@ -2399,6 +2421,7 @@ static void kitwin_dealloc(KitWindowObject *self)
   Py_CLEAR(self->ctx);
   Py_CLEAR(self->timers);
   Py_CLEAR(self->on_close);
+  Py_CLEAR(self->on_focus);
   Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -2407,6 +2430,7 @@ static int kitwin_traverse(KitWindowObject *self, visitproc visit, void *arg)
   Py_VISIT(self->ctx);
   Py_VISIT(self->timers);
   Py_VISIT(self->on_close);
+  Py_VISIT(self->on_focus);
   return 0;
 }
 
@@ -2414,6 +2438,7 @@ static int kitwin_clear(KitWindowObject *self)
 {
   Py_CLEAR(self->timers);
   Py_CLEAR(self->on_close);
+  Py_CLEAR(self->on_focus);
   return 0;
 }
 
@@ -2566,14 +2591,16 @@ static PyObject *kitwin_after_cancel(KitWindowObject *self, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-static PyObject *kitwin_get_on_close(KitWindowObject *self, void *c)
+/* A callback attribute; `offset` is the field's offsetof in KitWindowObject. */
+static PyObject *kitwin_get_cb(KitWindowObject *self, void *offset)
 {
-  return Py_NewRef(self->on_close ? self->on_close : Py_None);
+  PyObject *v = *(PyObject **)((char *)self + (size_t)offset);
+  return Py_NewRef(v ? v : Py_None);
 }
 
-static int kitwin_set_on_close(KitWindowObject *self, PyObject *v, void *c)
+static int kitwin_set_cb(KitWindowObject *self, PyObject *v, void *offset)
 {
-  Py_XSETREF(self->on_close, Py_NewRef(v ? v : Py_None));
+  Py_XSETREF(*(PyObject **)((char *)self + (size_t)offset), Py_NewRef(v ? v : Py_None));
   return 0;
 }
 
@@ -2601,8 +2628,12 @@ static PyGetSetDef kitwin_getset[] = {
     {"gpu", (getter)kitwin_get_gpu, (setter)kitwin_set_gpu,
      "True once frames are drawn on the GPU; set True to switch this window to the GPU", NULL},
     {"hwnd", (getter)kitwin_hwnd, NULL, "native handle", NULL},
-    {"on_close", (getter)kitwin_get_on_close, (setter)kitwin_set_on_close,
-     "called on the close button; return True to close", NULL},
+    {"on_close", (getter)kitwin_get_cb, (setter)kitwin_set_cb,
+     "called on the close button; return True to close",
+     (void *)offsetof(KitWindowObject, on_close)},
+    {"on_focus", (getter)kitwin_get_cb, (setter)kitwin_set_cb,
+     "called with True when the window gets the keyboard focus, False when it loses it",
+     (void *)offsetof(KitWindowObject, on_focus)},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
