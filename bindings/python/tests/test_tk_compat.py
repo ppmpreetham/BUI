@@ -510,6 +510,9 @@ def _normalize(v):
 _LOOSE = {"prog_canvas": {"canvasx", "hbar", "xview"}, "prog_widgets": {"lbl_font"},
           "prog_todo": {"sb"}, "prog_editor": {"scrolled", "sb_follows"},
           "prog_scrollable_frame": {"scrolled", "sb", "region_set"}}
+# ... and where Tk 9 changed a default that bui.tksyntax (TkVersion 8.6) keeps: a menu's
+# default tearoff is 0 on every platform
+_LOOSE_TK9 = {"prog_editor": {"view_types"}}
 # ... and what BUI must observe for them (stdlib Tk's depends on window mapping timing)
 _BUI_EXPECT = {"prog_editor": {"scrolled": True, "sb_follows": True},
                "prog_canvas": {"xview": True, "canvasx": 200.0},
@@ -528,6 +531,8 @@ def test_programs_match_stdlib():
             continue
         want = prog(*real)
         loose = _LOOSE.get(prog.__name__, set())
+        if real[0].TkVersion >= 9:
+            loose = loose | _LOOSE_TK9.get(prog.__name__, set())
         for key, ref in want.items():
             if key in loose:
                 continue
