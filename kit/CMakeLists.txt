@@ -173,15 +173,16 @@ elseif(UNIX AND NOT APPLE)
       set(_wl_gen ${CMAKE_CURRENT_BINARY_DIR}/wayland)
       file(MAKE_DIRECTORY ${_wl_gen})
       set(_wl_src)
-      foreach(_p stable/xdg-shell/xdg-shell unstable/xdg-decoration/xdg-decoration-unstable-v1)
-        get_filename_component(_n ${_p} NAME)
+      # wlr-layer-shell is not in wayland-protocols: kit/extern/wayland_protocols has it
+      foreach(_x ${BUI_WL_PROTOCOLS}/stable/xdg-shell/xdg-shell.xml
+                 ${BUI_WL_PROTOCOLS}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml
+                 ${CMAKE_CURRENT_SOURCE_DIR}/extern/wayland_protocols/wlr-layer-shell-unstable-v1.xml)
+        get_filename_component(_n ${_x} NAME_WE)
         add_custom_command(
           OUTPUT ${_wl_gen}/${_n}-client-protocol.h ${_wl_gen}/${_n}-client-protocol.c
-          COMMAND ${BUI_WL_SCANNER} client-header ${BUI_WL_PROTOCOLS}/${_p}.xml
-                  ${_wl_gen}/${_n}-client-protocol.h
-          COMMAND ${BUI_WL_SCANNER} private-code ${BUI_WL_PROTOCOLS}/${_p}.xml
-                  ${_wl_gen}/${_n}-client-protocol.c
-          DEPENDS ${BUI_WL_PROTOCOLS}/${_p}.xml)
+          COMMAND ${BUI_WL_SCANNER} client-header ${_x} ${_wl_gen}/${_n}-client-protocol.h
+          COMMAND ${BUI_WL_SCANNER} private-code ${_x} ${_wl_gen}/${_n}-client-protocol.c
+          DEPENDS ${_x})
         list(APPEND _wl_src ${_wl_gen}/${_n}-client-protocol.c)
       endforeach()
       target_sources(bui_kit PRIVATE intern/kit_window_wayland.c intern/kit_window_linux.c

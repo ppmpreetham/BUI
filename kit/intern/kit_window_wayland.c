@@ -28,6 +28,7 @@
 
 #  include <wayland-client.h>
 
+#  include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #  include "xdg-decoration-unstable-v1-client-protocol.h"
 #  include "xdg-shell-client-protocol.h"
 
@@ -115,11 +116,15 @@ struct BKWindow {
   struct xdg_surface *xdg_surface;
   struct xdg_toplevel *toplevel;
   struct zxdg_toplevel_decoration_v1 *decoration;
+  struct zwlr_layer_surface_v1 *layer_surface;
   struct wl_callback *frame_cb;
   Buf bufs[2];
   char *title;
   int open, configured, hidden;
   bool frameless; /* "override": no server-side frame (BUI draws none either) */
+  /* "layer": a layer-shell layer (0 background .. 3 overlay), -1 a toplevel; its keyboard
+   * interactivity; "anchor": edges (top 1, bottom 2, left 4, right 8), exclusive zone */
+  int layer, keyboard, anchor, exclusive;
   int render_pending, frames, cursor, tip_id, next_timer, full;
   int want_frame, frame_vsync;
   double frame_start, hold_until;
@@ -147,6 +152,7 @@ static struct {
   struct wl_shm *shm;
   struct xdg_wm_base *wm_base;
   struct zxdg_decoration_manager_v1 *decoration_manager;
+  struct zwlr_layer_shell_v1 *layer_shell;
   struct wl_seat *seat;
   struct wl_pointer *pointer;
   struct wl_keyboard *keyboard;
@@ -864,6 +870,10 @@ static void registry_global(void *d, struct wl_registry *reg, uint32_t name, con
   else if (!strcmp(iface, zxdg_decoration_manager_v1_interface.name)) {
     g.decoration_manager = wl_registry_bind(reg, name, &zxdg_decoration_manager_v1_interface, 1);
   }
+  else if (!strcmp(iface, zwlr_layer_shell_v1_interface.name)) {
+    g.layer_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface,
+                                     BK_MIN(version, 4u));
+  }
   else if (!strcmp(iface, wl_seat_interface.name) && !g.seat) {
     g.seat = wl_registry_bind(reg, name, &wl_seat_interface, BK_MIN(version, 5u));
     wl_seat_add_listener(g.seat, &seat_listener, NULL);
@@ -1040,6 +1050,10 @@ static void role_destroy(BKWindow *win)
   if (win->toplevel) {
     xdg_toplevel_destroy(win->toplevel);
   }
+  if (win->layer_surface) {
+    zwlr_layer_surface_v1_destroy(win->layer_surface);
+    win->layer_surface = NULL;
+  }
   if (win->xdg_surface) {
     xdg_surface_destroy(win->xdg_surface);
   }
@@ -1084,11 +1098,10 @@ static void xdg_surface_configure(void *d, struct xdg_surface *s, uint32_t seria
 static struct xdg_surface_listener xdg_surface_listener = {.configure =
                                                                      xdg_surface_configure};
 
-static void toplevel_configure(void *d, struct xdg_toplevel *tl, int32_t w, int32_t h,
-                               struct wl_array *states)
+/* A configure's size in logical units; 0: the client picks. */
+static void configure_size(BKWindow *win, int32_t w, int32_t h)
 {
-  BKWindow *win = (BKWindow *)d;
-  if (w > 0 && h > 0 && (w != win->lw || h != win->lh)) { /* 0: the client picks */
+  if (w > 0 && h > 0 && (w != win->lw || h != win->lh)) {
     win->lw = w;
     win->lh = h;
     win->w = w * win->bscale;
@@ -1097,12 +1110,56 @@ static void toplevel_configure(void *d, struct xdg_toplevel *tl, int32_t w, int3
   }
 }
 
-static void toplevel_close(void *d, struct xdg_toplevel *tl)
+static void close_requested(BKWindow *win)
 {
-  BKWindow *win = (BKWindow *)d;
   if (!win->cb.on_close || win->cb.on_close(win->cb.data, win)) {
     close_window(win);
   }
+}
+
+static void toplevel_configure(void *d, struct xdg_toplevel *tl, int32_t w, int32_t h,
+                               struct wl_array *states)
+{
+  configure_size((BKWindow *)d, w, h);
+}
+
+static void toplevel_close(void *d, struct xdg_toplevel *tl)
+{
+  close_requested((BKWindow *)d);
+}
+
+/* -- wlr-layer-shell -- */
+
+static void layer_configure(void *d, struct zwlr_layer_surface_v1 *ls, uint32_t serial,
+                            uint32_t w, uint32_t h)
+{
+  BKWindow *win = (BKWindow *)d;
+  zwlr_layer_surface_v1_ack_configure(ls, serial);
+  configure_size(win, (int32_t)w, (int32_t)h);
+  win->configured = 1;
+  win->render_pending = 1;
+}
+
+static void layer_closed(void *d, struct zwlr_layer_surface_v1 *ls)
+{
+  close_requested((BKWindow *)d);
+}
+
+static struct zwlr_layer_surface_v1_listener layer_listener = {.configure = layer_configure,
+                                                               .closed = layer_closed};
+
+/* Size, anchor and exclusive zone. An axis anchored at both edges takes the output's size (0). */
+static void layer_place(BKWindow *win)
+{
+  const int a = win->anchor;
+  const bool fill_x = (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) &&
+                      (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+  const bool fill_y = (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) &&
+                      (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM);
+  zwlr_layer_surface_v1_set_size(win->layer_surface, fill_x ? 0 : (uint32_t)win->lw,
+                                 fill_y ? 0 : (uint32_t)win->lh);
+  zwlr_layer_surface_v1_set_anchor(win->layer_surface, (uint32_t)a);
+  zwlr_layer_surface_v1_set_exclusive_zone(win->layer_surface, win->exclusive);
 }
 
 static struct xdg_toplevel_listener toplevel_listener = {.configure = toplevel_configure,
@@ -1143,6 +1200,12 @@ static struct wl_surface_listener surface_listener = {
 
 /* -- windows -- */
 
+static void surface_create(BKWindow *win)
+{
+  win->surface = wl_compositor_create_surface(g.compositor);
+  wl_surface_add_listener(win->surface, &surface_listener, win);
+}
+
 BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int height)
 {
   if (!open_display()) {
@@ -1155,9 +1218,9 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
   win->next_timer = 1;
   win->lw = width;
   win->lh = height;
-  win->surface = wl_compositor_create_surface(g.compositor);
-  wl_surface_add_listener(win->surface, &surface_listener, win);
+  surface_create(win);
   win->title = bk_strdup(title ? title : "");
+  win->layer = -1;
   role_create(win);
   win->open = 1;
   apply_scale(win, 1);
@@ -1191,11 +1254,20 @@ static void set_frame(BKWindow *win)
  * asks for the configure. */
 static void role_create(BKWindow *win)
 {
+  const char *app_id = getenv("BUI_APP_ID");
+  if (win->layer >= 0 && g.layer_shell) {
+    win->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+        g.layer_shell, win->surface, NULL, (uint32_t)win->layer, app_id ? app_id : "bui");
+    zwlr_layer_surface_v1_add_listener(win->layer_surface, &layer_listener, win);
+    zwlr_layer_surface_v1_set_keyboard_interactivity(win->layer_surface,
+                                                     (uint32_t)win->keyboard);
+    layer_place(win);
+    return;
+  }
   win->xdg_surface = xdg_wm_base_get_xdg_surface(g.wm_base, win->surface);
   xdg_surface_add_listener(win->xdg_surface, &xdg_surface_listener, win);
   win->toplevel = xdg_surface_get_toplevel(win->xdg_surface);
   xdg_toplevel_add_listener(win->toplevel, &toplevel_listener, win);
-  const char *app_id = getenv("BUI_APP_ID");
   xdg_toplevel_set_app_id(win->toplevel, app_id ? app_id : "bui");
   xdg_toplevel_set_title(win->toplevel, win->title);
   if (g.decoration_manager) { /* title bar and borders from the compositor, as GHOST asks */
@@ -1292,6 +1364,10 @@ void bk_wl_window_set_size(BKWindow *win, int width, int height)
     if (win->xdg_surface) {
       xdg_surface_set_window_geometry(win->xdg_surface, 0, 0, win->lw, win->lh);
     }
+    if (win->layer_surface) {
+      layer_place(win);
+      wl_surface_commit(win->surface);
+    }
     win->full = 1;
     win->render_pending = 1;
   }
@@ -1374,6 +1450,26 @@ void bk_wl_window_wm(BKWindow *win, const char *key, double a, double b)
   if (!strcmp(key, "state")) {
     set_hidden(win, a == 2); /* 2: withdrawn */
   }
+  else if (!strcmp(key, "layer")) {
+    /* a wl_surface keeps its first role: a new role needs a new surface */
+    const int shown = !win->hidden;
+    set_hidden(win, 1);
+    wl_surface_destroy(win->surface);
+    surface_create(win);
+    win->layer = BK_CLAMP((int)a, -1, 3);
+    win->keyboard = BK_CLAMP((int)b, 0, 2);
+    if (shown) {
+      set_hidden(win, 0);
+    }
+  }
+  else if (!strcmp(key, "anchor")) {
+    win->anchor = (int)a & 15;
+    win->exclusive = (int)b;
+    if (win->layer_surface) {
+      layer_place(win);
+      wl_surface_commit(win->surface);
+    }
+  }
   else if (!strcmp(key, "override")) {
     win->frameless = a != 0;
     if (win->decoration) {
@@ -1426,6 +1522,11 @@ int bk_wl_window_wm_get(BKWindow *win, const char *key, double *r_a, double *r_b
     *r_a = g.px;
     *r_b = g.py;
     return g.pointer_win != NULL;
+  }
+  if (!strcmp(key, "layer")) { /* has the compositor layer shell; the window's layer */
+    *r_a = g.layer_shell != NULL;
+    *r_b = win ? win->layer : -1;
+    return 1;
   }
   return 0; /* "pos", "state": not available to a Wayland client */
 }

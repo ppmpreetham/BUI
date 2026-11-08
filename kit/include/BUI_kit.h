@@ -699,7 +699,12 @@ void *BK_window_handle(BKWindow *win);       /* HWND / X11 Window / NSWindow * *
  * "resizable" (w, h), "topmost" (a), "alpha" (a), "override" (a), "state"
  * (0 normal, 1 iconic, 2 withdrawn, 3 zoomed), "lift", "lower", "focus".
  * "transparent" (a, Linux): per-pixel alpha, no region background; set it before show (X11
- * makes the window again) and keep the software renderer. */
+ * makes the window again) and keep the software renderer.
+ * "layer" (layer, keyboard; Wayland with wlr-layer-shell): a layer surface instead of a
+ * toplevel, layer 0 background .. 3 overlay (-1: a toplevel again), keyboard 0 none,
+ * 1 exclusive, 2 on demand. "anchor" (edges, exclusive zone): edges top 1, bottom 2, left 4,
+ * right 8; anchored at both edges of an axis, the surface fills it. wm_get("layer") gives
+ * (1 when the compositor has layer shell, the window's layer). */
 void BK_window_wm(BKWindow *win, const char *key, double a, double b);
 /* Queries: "pos", "state", "screen" (w, h), "pointer" (x, y), "scale". */
 int BK_window_wm_get(BKWindow *win, const char *key, double *r_a, double *r_b);

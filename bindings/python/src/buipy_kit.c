@@ -2612,9 +2612,9 @@ static PyMethodDef kitwin_methods[] = {
     {"set_size", (PyCFunction)kitwin_set_size, METH_VARARGS, "Logical size (DPI scaled)."},
     {"wm", (PyCFunction)kitwin_wm, METH_VARARGS,
      "wm(key, a=0, b=0): pos, minsize, maxsize, resizable, topmost, alpha, override, state, "
-     "lift, lower, focus, transparent (Linux, before show)."},
+     "lift, lower, focus, transparent (Linux, before show), layer, anchor (Wayland layer shell)."},
     {"wm_get", (PyCFunction)kitwin_wm_get, METH_VARARGS,
-     "wm_get(key) -> (a, b) or None: pos, state, screen, pointer, scale."},
+     "wm_get(key) -> (a, b) or None: pos, state, screen, pointer, scale, layer."},
     {"render_now", (PyCFunction)kitwin_render_now, METH_NOARGS, "Render + present now."},
     {"pixel", (PyCFunction)kitwin_pixel, METH_VARARGS, "Frame buffer pixel (r, g, b)."},
     {"after", (PyCFunction)kitwin_after, METH_VARARGS, "after(ms, fn) -> id (one-shot)."},
