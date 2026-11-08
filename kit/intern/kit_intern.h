@@ -290,6 +290,9 @@ typedef struct BKClass {
   unsigned flags;  /* CLS_* */
   int cursor;      /* hover cursor */
   int drag_cursor; /* while dragged (BK_CURSOR_NONE = continuous grab) */
+  /* bk_anim_start: seconds to animate n->anim to its target, linearly; 0: a panel's
+   * ANIMATION_TIME, eased (do_animate) */
+  double anim_time;
   int drag_group;  /* drag-toggle group (0 = none) */
   void (*init)(BKNode *n);
   void (*free_ext)(BKNode *n);

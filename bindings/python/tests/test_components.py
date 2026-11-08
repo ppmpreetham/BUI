@@ -587,6 +587,30 @@ def test_pie_accelerator_keys():
     assert got == ["Open Shading"] and not d.popups()
 
 
+def test_pie_open_animation():
+    import time
+    from bui.components import MenuItem, PieMenu
+
+    def east_x(d):
+        d.frame()
+        x, y, w, h = dict(d.ctx.menu_rows(-1))["E"]
+        return x + w / 2
+
+    d = Driver(Label("x"), size=(600, 500))
+    buipy.kit_set_animations(True)
+    try:
+        PieMenu.show(d.ctx, [MenuItem(n) for n in "WESN"], at=(300, 250))
+        start = east_x(d)                              # items start at the center
+        time.sleep(0.1)                                # past pie_animation_timeout
+        end = east_x(d)
+        assert start < 330 < 380 < end, (start, end)
+    finally:
+        buipy.kit_set_animations(False)
+    d.ctx.close_popups()
+    PieMenu.show(d.ctx, [MenuItem(n) for n in "WESN"], at=(300, 250))
+    assert east_x(d) == end                            # reduced motion: no animation
+
+
 def test_pie_menu_at():
     from bui.components import MenuItem, PieMenu
     got = []

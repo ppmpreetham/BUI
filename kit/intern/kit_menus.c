@@ -874,6 +874,7 @@ static const short g_pie_angle[8] = {90, 45, 0, 315, 270, 225, 180, 135};
  * PIE_CLICK_THRESHOLD_SQ (interface_intern.hh). */
 #define PIE_TAP_TIMEOUT_S 0.2
 #define PIE_MAX_ITEMS 8
+#define PIE_ANIMATION_TIMEOUT_S 0.06 /* U.pie_animation_timeout (6 cs) */
 #define PIE_CLICK_THRESHOLD_SQ 50.0f
 
 typedef struct PieData {
@@ -926,8 +927,10 @@ static BKRect pie_item_rect(BKNode *n, int i)
   pie_rdir_vec(g_pie_rdir[i], vec);
   const float fx = vec[0] > 0.01f ? 0.0f : (vec[0] < -0.01f ? -1.0f : -0.5f);
   const float fy = vec[1] > 0.99f ? 0.0f : (vec[1] < -0.99f ? -1.0f : -0.5f);
-  const float x = pd->cx + vec[0] * pie_radius() + fx * w;
-  const float y_up = vec[1] * pie_radius() + fy * h; /* bottom edge relative to center, y-up */
+  /* pie_handler's animation: the item's center moves out from the pie center by n->anim */
+  const float fac = n->anim;
+  const float x = pd->cx + (vec[0] * pie_radius() + (fx + 0.5f) * w) * fac - 0.5f * w;
+  const float y_up = (vec[1] * pie_radius() + (fy + 0.5f) * h) * fac - 0.5f * h;
   return bk_rect((int)x, (int)(pd->cy - y_up - h), (int)w, (int)h);
 }
 
@@ -1222,7 +1225,16 @@ static void pie_draw(BKNode *n)
       memcpy(w.text, w.text_sel, 3);
       memcpy(w.inner, w.item, 4);
     }
-    bk_shadow(&r, bk_widget_radius(&w));
+    if (n->anim < 1.0f) { /* widget_menu_pie_itembut: alphafac while the pie animates */
+      uchar *alpha[] = {&w.inner[3], &w.inner_sel[3], &w.item[3],
+                        &w.text[3],  &w.text_sel[3],  &w.outline[3]};
+      for (int k = 0; k < (int)(sizeof(alpha) / sizeof(*alpha)); k++) {
+        *alpha[k] = (uchar)(*alpha[k] * n->anim);
+      }
+    }
+    else {
+      bk_shadow(&r, bk_widget_radius(&w));
+    }
     BKRect wr = r;
     bk_widget_but(&w, &wr, 0, CNR_ALL);
     bk_text_underline(it->text ? pie_accel_index(it->text, pd->accel[i]) : -1);
@@ -1253,6 +1265,7 @@ static void pie_free(BKNode *n)
 
 const BKClass bk_cls_pie = {.name = "pie",
                             .flags = CLS_INTERACTIVE | CLS_POPUP,
+                            .anim_time = PIE_ANIMATION_TIMEOUT_S,
                             .free_ext = pie_free,
                             .arrange = pie_arrange,
                             .draw = pie_draw,
@@ -1296,7 +1309,9 @@ void BK_open_pie(
   pd->opened = bk_time();
   pie->ext = pd;
   pie->hot = -1;
+  pie->anim = 0.0f; /* items grow out of the center (none with reduced motion) */
   bk_open_popup(ctx, pie, ctx->root, NULL);
+  bk_anim_start(pie);
 }
 
 /** \} */

@@ -3685,9 +3685,10 @@ static void anim_step(BKContext *ctx)
   for (int i = ctx->nanim - 1; i >= 0; i--) {
     BKNode *n = ctx->anim[i];
     const float target = (n->flags & NF_COLLAPSED) ? 0.0f : 1.0f;
+    const double time = n->cls->anim_time;
     /* do_animate: fac = (now - starttime) / ANIMATION_TIME; fac = min(sqrt(fac), 1) */
-    float fac = (float)((now - ctx->anim_start[i]) / ANIMATION_TIME);
-    fac = BK_MIN(sqrtf(BK_MAX(fac, 0.0f)), 1.0f);
+    float fac = (float)((now - ctx->anim_start[i]) / (time > 0.0 ? time : ANIMATION_TIME));
+    fac = BK_MIN(time > 0.0 ? BK_MAX(fac, 0.0f) : sqrtf(BK_MAX(fac, 0.0f)), 1.0f);
     n->anim = fac >= 1.0f ? target : ctx->anim_from[i] + (target - ctx->anim_from[i]) * fac;
     if (n->anim == target) {
       const int last = --ctx->nanim;
