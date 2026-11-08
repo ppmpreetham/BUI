@@ -64,7 +64,9 @@ enum { HAS_W = 1, HAS_H = 2, HAS_RW = 4, HAS_RH = 8 };
 
 void BK_geom_set(BKNode *n, const char *key, double v)
 {
+  const bool fresh = !n->geom;
   BKGeom *g = geom_ensure(n);
+  const BKGeom old = *g;
   const int iv = (int)floor(v + 0.5);
 #define K(name) (strcmp(key, name) == 0)
   if (K("side")) g->side = iv;
@@ -94,7 +96,9 @@ void BK_geom_set(BKNode *n, const char *key, double v)
   else if (K("reqheight")) g->reqh = iv;
   else if (K("reset_place")) { g->x = g->y = g->relx = g->rely = 0; g->has = 0; }
 #undef K
-  bk_relayout(n);
+  if (fresh || memcmp(&old, g, sizeof(old)) != 0) { /* unchanged: no relayout */
+    bk_relayout(n);
+  }
 }
 
 double BK_geom_get(const BKNode *n, const char *key)
@@ -977,6 +981,28 @@ void BK_canvas_add_item(BKNode *n, const BKCanvasItem *item)
   canvas_store(n, item, false);
 }
 
+/* Whether slot `c` already holds `it`. Image items never match: a borrowed buffer can change
+ * under the same pointer. */
+static bool citem_same(const CItem *c, const BKCanvasItem *it)
+{
+  const BKCanvasItem *o = &c->it;
+  if (it->type == BK_ITEM_IMAGE || o->type != it->type || o->id != it->id ||
+      o->ncoords != it->ncoords || o->hidden != it->hidden || o->anchor != it->anchor ||
+      o->text_flags != it->text_flags || o->clip_on != it->clip_on || o->family != it->family ||
+      o->width != it->width || o->radius != it->radius || o->size != it->size ||
+      o->start != it->start || o->extent != it->extent)
+  {
+    return false;
+  }
+  if (memcmp(o->fill, it->fill, sizeof(it->fill)) || memcmp(o->outline, it->outline, sizeof(it->outline)) ||
+      memcmp(o->clip, it->clip, sizeof(it->clip)) ||
+      memcmp(c->coords, it->coords, sizeof(float) * (size_t)it->ncoords))
+  {
+    return false;
+  }
+  return (!o->text && !it->text) || (o->text && it->text && strcmp(o->text, it->text) == 0);
+}
+
 void BK_canvas_put_item(BKNode *n, int index, const BKCanvasItem *item)
 {
   if (n->cls != &bk_cls_canvas) {
@@ -991,7 +1017,14 @@ void BK_canvas_put_item(BKNode *n, int index, const BKCanvasItem *item)
     }
     memset(&d->items[d->n++], 0, sizeof(CItem));
   }
+  else if (citem_same(&d->items[index], item)) {
+    return; /* the same item: nothing to redraw */
+  }
+  else {
+    canvas_damage(n, &d->items[index]); /* where it was */
+  }
   citem_assign(&d->items[index], item);
+  canvas_damage(n, &d->items[index]); /* where it is */
   d->idx_valid = false; /* ids may have changed */
 }
 
@@ -1002,11 +1035,11 @@ void BK_canvas_truncate(BKNode *n, int count)
   }
   CanvasData *d = CANVAS(n);
   for (int i = BK_MAX(0, count); i < d->n; i++) {
+    canvas_damage(n, &d->items[i]);
     citem_free(&d->items[i]);
   }
   d->n = BK_CLAMP(count, 0, d->n);
   d->idx_valid = false;
-  bk_invalidate(n);
 }
 
 void BK_canvas_delete(BKNode *n, int id)

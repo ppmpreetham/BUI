@@ -454,7 +454,7 @@ void BK_canvas_set_item(BKNode *canvas, const BKCanvasItem *item); /* insert or 
 void BK_canvas_add_item(BKNode *canvas, const BKCanvasItem *item);
 /* Immediate-mode hosts that rebuild the whole list each frame: overwrite the
  * item at `index` (index == count appends), reusing its buffers, then call
- * BK_canvas_truncate with the new count (drops the rest, redraws once). */
+ * BK_canvas_truncate with the new count (drops the rest). Only items that changed are redrawn. */
 void BK_canvas_put_item(BKNode *canvas, int index, const BKCanvasItem *item);
 void BK_canvas_truncate(BKNode *canvas, int count); /* append, ids not checked */
 void BK_canvas_delete(BKNode *canvas, int id);                     /* id < 0: all */

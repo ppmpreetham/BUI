@@ -920,6 +920,9 @@ int BK_set_num(BKNode *n, const char *key, double v)
   }
   for (size_t i = 0; i < sizeof(g_flag_props) / sizeof(g_flag_props[0]); i++) {
     if (strcmp(key, g_flag_props[i].key) == 0) {
+      if (((n->flags & g_flag_props[i].flag) != 0) == (v != 0)) {
+        return 1; /* unchanged: no relayout, no redraw */
+      }
       if (v != 0) {
         n->flags |= g_flag_props[i].flag;
       }

@@ -48,6 +48,13 @@ All notable changes to **blenderui** (BUI). The format follows
 - `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
 
 ### Fixed
+- **Wayland frames copied the whole window every frame** after the first full one: the double-buffer copy kept
+  its own full copy as the next frame's damage. It copies and reports only what changed now.
+- **Setting a node's geometry or a flag property** (`visible`, `enabled` ...) **to the value it already has** relaid out
+  and redrew the whole window. Unchanged values do nothing now. The Rust binding sets every widget's place each frame,
+  so each Rust frame was a full redraw: 2.7 ms of CPU per frame at 941x982 on Wayland, 0.43 ms now.
+- **`BK_canvas_put_item` / `BK_canvas_truncate`** (display lists rebuilt each frame) redrew the whole canvas. Only items
+  that changed, moved or went away are redrawn now.
 - **Python Tk host on X11:** a held key no longer sends a release on each auto-repeat, so holding a pie key keeps the pie open
   until the key is up (the native X11 host already did this).
 - **Browser-look text fields** take the CSS `color` and `font-size` the field itself is given (one that differs from its parent's); without them they keep Chrome's black 13.33px, as before.
