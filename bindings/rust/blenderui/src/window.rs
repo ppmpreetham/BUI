@@ -18,6 +18,7 @@ use crate::events::*;
 use crate::geometry::{point, px, size, Bounds, Pixels, Size};
 use crate::layout::{id_key, layout, Content, Frame, Key, LayoutCaches, UiState};
 use crate::prof::{self, span, Phase};
+use crate::window_kind::{WindowDecorations, WindowKind};
 use crate::paint::{paint_frame, Painter};
 use crate::widgets::{WKind, Widgets};
 use blenderui_sys as sys;
@@ -228,6 +229,8 @@ pub struct WindowOptions {
     /// raster; `None` follows [`Application::gpu`] / the `BUI_GPU` variable.
     pub gpu: Option<bool>,
     pub window_background: WindowBackgroundAppearance,
+    pub kind: WindowKind,
+    pub window_decorations: WindowDecorations,
 }
 
 /// The application entry point (gpui's `Application`).
@@ -464,6 +467,10 @@ impl App {
                 }
                 if options.window_background == WindowBackgroundAppearance::Transparent {
                     sys::BK_window_wm(*n, c"transparent".as_ptr(), 1.0, 0.0);
+                }
+                for (key, a, b) in options.kind.requests(options.window_decorations) {
+                    let key = CString::new(key).unwrap_or_default();
+                    sys::BK_window_wm(*n, key.as_ptr(), a, b);
                 }
                 if options.gpu == Some(true) {
                     sys::BK_window_set_gpu(*n, 1);
