@@ -63,7 +63,7 @@ fn main() {
 | `impl Render for View` | The same: `fn render(&mut self, window, cx) -> impl IntoElement` |
 | `Entity<T>`, `WeakEntity<T>`, `cx.new` | `Copy` handles into the app's entity slots: `read` (returns `&T`), `update`, `downgrade`; `cx.release(e)` drops a value |
 | `Context<T>`: `notify`, `listener`, `entity` | The same; it derefs to `App` |
-| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size`, `gpu` and `window_background` (`WindowBackgroundAppearance::Transparent` on Linux) |
+| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size`, `gpu` and `window_background` (`WindowBackgroundAppearance::Transparent`) |
 | `cx.set_global`, `cx.global` | The same, plus `try_global` and `global_mut` |
 | `cx.stop_propagation()` | The same |
 | `div().flex().gap_2()`, `.when(..)`, `.when_some(..)`, `.map(..)` | The same, from the `Styled` and `FluentBuilder` traits |

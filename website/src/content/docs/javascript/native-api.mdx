@@ -61,7 +61,7 @@ win.on('close', () => console.log('bye'))
 | `headless` | No native windows: renders off-screen, for tests and CI. |
 | `quitOnLastWindowClosed` | Quit when the last window closes. Default `true`. |
 
-`app.window(options)` takes `title`, `width`, `height`, `resizable`, `gpu` (to choose per window) and `transparent` (per-pixel alpha on Linux, CPU renderer). `app.quit()` closes every window and ends the UI thread, so Node can exit.
+`app.window(options)` takes `title`, `width`, `height`, `resizable`, `gpu` (to choose per window) and `transparent` (per-pixel alpha, CPU renderer). `app.quit()` closes every window and ends the UI thread, so Node can exit.
 
 A window gives you `body`, `createElement(tag)`, `createTextNode(text)`, `requestAnimationFrame(cb)`, `screenshot()`, `click(x, y)`, `close()` and `on(event, fn)` for `close`, `focus` and `blur` (the window got or lost the keyboard focus).
 

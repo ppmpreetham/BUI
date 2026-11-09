@@ -17,6 +17,11 @@ All notable changes to **blenderui** (BUI). The format follows
   background, through a 32-bit ARGB visual on X11 and ARGB8888 buffers on Wayland. The software raster can keep
   premultiplied alpha (`BUI_raster_set_alpha`, `BUI_raster_alpha`, `BUI_raster_clear`); opaque frames are
   unchanged byte for byte and draw as fast as before. Transparent windows keep the software renderer.
+- **Transparent windows on Windows and macOS:** `wm "transparent"` gives per-pixel alpha with the software
+  raster. Windows shows the premultiplied frame through a layered window (`UpdateLayeredWindow`, `AC_SRC_ALPHA`; the
+  window has no frame and `"alpha"` scales the whole window); macOS draws it in a non-opaque window with a clear
+  background. Rust `WindowBackgroundAppearance::Transparent` and JavaScript `transparent: true` use it there too.
+  The Direct3D 11 renderer stays opaque, so a transparent window drops it.
 - **Layer-shell windows on Wayland:** `wm "layer"` (layer 0 background to 3 overlay, keyboard interactivity) and
   `"anchor"` (edges, exclusive zone) make a wlr-layer-shell surface, on KDE Plasma, wlroots compositors and
   COSMIC (not GNOME). `wm_get("layer")` says whether the compositor has it. The protocol file (MIT) is in

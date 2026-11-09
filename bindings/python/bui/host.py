@@ -277,7 +277,7 @@ class Window:
     def wm(self, key: str, a: float = 0.0, b: float = 0.0) -> None:
         """Window-manager request: pos, minsize, maxsize, resizable, topmost,
         alpha, override, state (0 normal, 1 iconic, 2 withdrawn, 3 zoomed),
-        lift, lower, focus, transparent (native Linux windows, before show), layer
+        lift, lower, focus, transparent (before show on Linux), layer
         (layer 0-3 or -1, keyboard 0-2) and anchor (edges, exclusive zone) on Wayland
         compositors with layer shell."""
         if self.native:

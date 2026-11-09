@@ -66,7 +66,7 @@ It follows gpui closely:
 | `impl Render for View`                    | the same: `fn render(&mut self, window, cx) -> impl IntoElement` |
 | `Entity<T>`, `WeakEntity<T>`, `cx.new`    | `Copy` handles into the app's entity slots: `read` (returns `&T`), `update`, `downgrade`; `cx.release(e)` drops a value |
 | `Context<T>`: `notify`, `listener`, `entity` | the same; it derefs to `App`                              |
-| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | the same, plus `is_resizable`, `window_min_size`, `window_background` (`WindowBackgroundAppearance::Transparent` on Linux); `App::on_window_activation` reports focus |
+| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | the same, plus `is_resizable`, `window_min_size`, `window_background` (`WindowBackgroundAppearance::Transparent`); `App::on_window_activation` reports focus |
 | `cx.set_global`, `cx.global`              | the same                                                       |
 | `cx.stop_propagation()`                   | the same                                                       |
 
