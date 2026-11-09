@@ -23,9 +23,10 @@ All notable changes to **blenderui** (BUI). The format follows
   raster. Windows shows the premultiplied frame through a layered window (`UpdateLayeredWindow`, `AC_SRC_ALPHA`; the
   window has no frame and `"alpha"` scales the whole window); macOS draws it in a non-opaque window with a clear
   background. Rust `WindowBackgroundAppearance::Transparent` and JavaScript `transparent: true` use it there too.
-  With the Direct3D 11 renderer the window is made with `WS_EX_NOREDIRECTIONBITMAP` and shown by DirectComposition through a
-  premultiplied composition swap chain (no copy to the CPU, `ClearView` for the redrawn rect); without the device it
-  falls back to `UpdateLayeredWindow`. A window that is not transparent keeps `DXGI_ALPHA_MODE_IGNORE`.
+  With the Direct3D 11 renderer the window uses DWM blur-behind (`DwmEnableBlurBehindWindow` over the client area, the
+  surface cleared to zero alpha) and a bitblt-model swap chain, as SDL does (no copy to the CPU, `ClearView` for the
+  redrawn rect); without the device it falls back to `UpdateLayeredWindow`. A window that is not transparent keeps the
+  flip-model swap chain with `DXGI_ALPHA_MODE_IGNORE`.
 - **Layer-shell windows on Wayland:** `wm "layer"` (layer 0 background to 3 overlay, keyboard interactivity) and
   `"anchor"` (edges, exclusive zone) make a wlr-layer-shell surface, on KDE Plasma, wlroots compositors and
   COSMIC (not GNOME). `wm_get("layer")` says whether the compositor has it. The protocol file (MIT) is in

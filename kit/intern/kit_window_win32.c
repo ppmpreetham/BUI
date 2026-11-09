@@ -22,6 +22,7 @@
 #  endif
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
+#  include <dwmapi.h> /* types only: the calls go through dwm_proc */
 #  include <windowsx.h>
 
 #  include "kit_ime_win32.h"
@@ -32,13 +33,10 @@
 #  define ID_WAKE 3 /* BK_TIMER_CUSTOM: custom nodes' frames */
 #  define ID_GPU 4  /* checks the GPU device until it is ready */
 #  define ID_USER_BASE 1000
-#  ifndef WS_EX_NOREDIRECTIONBITMAP
-#    define WS_EX_NOREDIRECTIONBITMAP 0x00200000L /* Windows 8 */
-#  endif
 
 /* How a transparent window shows its frame: UpdateLayeredWindow copies the software raster
- * (every frame, on the CPU); LAYER_GPU hands the Direct3D 11 frames to DirectComposition
- * (WS_EX_NOREDIRECTIONBITMAP, no copy), and falls back to LAYER_ULW without the device. */
+ * (every frame, on the CPU); LAYER_GPU presents the Direct3D 11 frames to the window and DWM
+ * blends their alpha (blur-behind), and falls back to LAYER_ULW without the device. */
 enum { LAYER_NONE = 0, LAYER_ULW = 1, LAYER_GPU = 2 };
 
 struct BKWindow {
@@ -312,6 +310,17 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 
 /* -- rendering -- */
 
+static FARPROC dwm_proc(const char *name)
+{
+  static HMODULE dwm = NULL;
+  static int loaded = 0;
+  if (!loaded) {
+    loaded = 1;
+    dwm = LoadLibraryW(L"dwmapi.dll");
+  }
+  return dwm ? GetProcAddress(dwm, name) : NULL;
+}
+
 typedef HRESULT(WINAPI *DwmFlushFn)(void);
 
 static void vsync(void)
@@ -320,8 +329,7 @@ static void vsync(void)
   static int loaded = 0;
   if (!loaded) {
     loaded = 1;
-    HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
-    flush = dwm ? (DwmFlushFn)(void *)GetProcAddress(dwm, "DwmFlush") : NULL;
+    flush = (DwmFlushFn)(void *)dwm_proc("DwmFlush");
   }
   if (flush) {
     flush();
@@ -609,6 +617,11 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       return 0;
     }
     case WM_ERASEBKGND:
+      if (win->layered == LAYER_GPU) { /* zero alpha: DWM blends the surface with what is behind */
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        PatBlt((HDC)wp, 0, 0, rc.right, rc.bottom, BLACKNESS);
+      }
       return 1;
     case WM_SIZE:
       host_request(win);
@@ -1074,8 +1087,8 @@ static void set_opacity(BKWindow *win)
   SetLayeredWindowAttributes(win->hwnd, 0, win->opacity, LWA_ALPHA);
 }
 
-/* The same window made again with other extended styles (WS_EX_NOREDIRECTIONBITMAP and
- * WS_EX_LAYERED cannot be changed on a window that exists). */
+/* The same window made again with other extended styles (UpdateLayeredWindow fails once
+ * SetLayeredWindowAttributes was used: WS_EX_LAYERED must be made again). */
 static int reopen(BKWindow *win, LONG_PTR ex)
 {
   HWND old = win->hwnd;
@@ -1100,6 +1113,20 @@ static int reopen(BKWindow *win, LONG_PTR ex)
   return 1;
 }
 
+/* Per-pixel alpha for a window drawn by the GPU: DWM uses the alpha channel of the surface that
+ * Present fills (DwmEnableBlurBehindWindow over the whole client area). */
+static void set_blur_behind(HWND hwnd, int on)
+{
+  typedef HRESULT(WINAPI * BlurFn)(HWND, const DWM_BLURBEHIND *);
+  BlurFn blur = (BlurFn)(void *)dwm_proc("DwmEnableBlurBehindWindow");
+  if (blur) {
+    DWM_BLURBEHIND bb = {
+        DWM_BB_ENABLE | DWM_BB_BLURREGION, on, CreateRectRgn(0, 0, -1, -1), FALSE};
+    blur(hwnd, &bb);
+    DeleteObject(bb.hRgnBlur);
+  }
+}
+
 /* "transparent": per-pixel alpha. The raster keeps alpha and has no frame to draw (the
  * window has none either). The GPU renderer stays only with LAYER_GPU. */
 static void set_layering(BKWindow *win, int mode)
@@ -1108,12 +1135,11 @@ static void set_layering(BKWindow *win, int mode)
     return;
   }
   const int gpu = BUI_raster_is_gpu(win->raster) || BUI_raster_gpu_pending(win->raster);
-  const LONG_PTR style_bit = mode == LAYER_GPU ? WS_EX_NOREDIRECTIONBITMAP :
-                             mode == LAYER_ULW ? WS_EX_LAYERED : 0;
-  const LONG_PTR ex = (GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE) &
-                       ~(LONG_PTR)(WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP)) | style_bit;
+  const LONG_PTR old_ex = GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE);
+  const LONG_PTR ex = (mode == LAYER_ULW) ? old_ex | WS_EX_LAYERED :
+                                            old_ex & ~(LONG_PTR)WS_EX_LAYERED;
   BUI_raster_gpu_release(win->raster); /* the device holds the swap chain of the old window */
-  if (!reopen(win, ex)) {
+  if (ex != old_ex && !reopen(win, ex)) {
     if (gpu) {
       gpu_attach(win);
     }
@@ -1122,9 +1148,15 @@ static void set_layering(BKWindow *win, int mode)
   if (win->layered == LAYER_ULW) {
     layer_free(win);
   }
+  if (win->layered == LAYER_GPU) {
+    set_blur_behind(win->hwnd, FALSE);
+  }
   win->layered = mode;
   BUI_raster_set_alpha(win->raster, mode != LAYER_NONE);
   set_frame(win);
+  if (mode == LAYER_GPU) {
+    set_blur_behind(win->hwnd, TRUE);
+  }
   if (mode == LAYER_NONE && win->opacity != 255) {
     set_opacity(win);
   }
@@ -1187,7 +1219,7 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
       win->full = 1;
       host_request(win);
     }
-    else if (win->layered == LAYER_NONE) { /* DirectComposition frames are not scaled */
+    else if (win->layered == LAYER_NONE) { /* GPU frames with alpha are not scaled */
       set_opacity(win);
     }
   }
