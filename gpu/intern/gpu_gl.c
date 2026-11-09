@@ -2614,7 +2614,8 @@ int bui_gpu_read(BuiGpu *g, uint32_t *dst, int w, int h)
    * 0xAARRGGBB words */
   GL(glReadPixels)(0, 0, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, dst);
   const size_t n = (size_t)w * h;
-  for (size_t i = 0; i < n && !g->alpha; i++) {
+  const size_t keep = g->alpha ? 0 : n; /* a frame with alpha keeps it */
+  for (size_t i = 0; i < keep; i++) {
     dst[i] &= 0xFFFFFFu; /* 0x00RRGGBB like the raster */
   }
   return 1;

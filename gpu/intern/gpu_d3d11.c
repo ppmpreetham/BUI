@@ -1673,11 +1673,12 @@ int bui_gpu_read(BuiGpu *g, uint32_t *dst, int w, int h)
   D3D11_MAPPED_SUBRESOURCE m;
   int ok = 0;
   if (SUCCEEDED(ID3D11DeviceContext_Map(g->ctx, (ID3D11Resource *)st, 0, D3D11_MAP_READ, 0, &m))) {
+    /* like the raster: 0x00RRGGBB, or premultiplied 0xAARRGGBB with alpha */
+    const uint32_t mask = g->alpha ? 0xFFFFFFFFu : 0xFFFFFFu;
     for (int y = 0; y < h; y++) {
       const uint32_t *src = (const uint32_t *)((const uint8_t *)m.pData + (size_t)y * m.RowPitch);
       for (int x = 0; x < w; x++) {
-        /* like the raster: 0x00RRGGBB, or premultiplied 0xAARRGGBB with alpha */
-        dst[(size_t)y * w + x] = g->alpha ? src[x] : src[x] & 0xFFFFFFu;
+        dst[(size_t)y * w + x] = src[x] & mask;
       }
     }
     ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)st, 0);
