@@ -32,6 +32,14 @@
 #  define ID_WAKE 3 /* BK_TIMER_CUSTOM: custom nodes' frames */
 #  define ID_GPU 4  /* checks the GPU device until it is ready */
 #  define ID_USER_BASE 1000
+#  ifndef WS_EX_NOREDIRECTIONBITMAP
+#    define WS_EX_NOREDIRECTIONBITMAP 0x00200000L /* Windows 8 */
+#  endif
+
+/* How a transparent window shows its frame: UpdateLayeredWindow copies the software raster
+ * (every frame, on the CPU); LAYER_GPU hands the Direct3D 11 frames to DirectComposition
+ * (WS_EX_NOREDIRECTIONBITMAP, no copy), and falls back to LAYER_ULW without the device. */
+enum { LAYER_NONE = 0, LAYER_ULW = 1, LAYER_GPU = 2 };
 
 struct BKWindow {
   HWND hwnd;
@@ -48,8 +56,14 @@ struct BKWindow {
   int user_sizing;                /* inside a user move/resize loop */
   DWORD style;                    /* framed style restored by "override" 0 */
   int override;                   /* "override": no frame */
-  int layered;                    /* "transparent": per-pixel alpha (UpdateLayeredWindow) */
+  int layered;                    /* "transparent": a LAYER_* way to show per-pixel alpha */
   BYTE opacity;                   /* "alpha" as 0..255 */
+  struct {                        /* LAYER_ULW: the frame as a DIB section */
+    HDC dc;
+    HBITMAP bmp, old;
+    uint32_t *bits;
+    int w, h;
+  } layer;
   BKImeWin32 ime;                 /* the IME (GHOST_ImeWin32) */
   WPARAM last_vk;                 /* the virtual key of the last WM_KEYDOWN */
 };
@@ -368,10 +382,87 @@ static void ime_sync(BKWindow *win)
 }
 
 /* The raster on screen: a layered window shows the whole frame, the others the damage. */
+static void gpu_window_check(BKWindow *win);
+
+static void layer_free(BKWindow *win)
+{
+  if (win->layer.old) {
+    SelectObject(win->layer.dc, win->layer.old);
+  }
+  if (win->layer.bmp) {
+    DeleteObject(win->layer.bmp);
+  }
+  if (win->layer.dc) {
+    DeleteDC(win->layer.dc);
+  }
+  memset(&win->layer, 0, sizeof(win->layer));
+}
+
+/* The DIB section at the frame's size; true when it was made now (its pixels are empty). */
+static bool layer_fit(BKWindow *win, int w, int h)
+{
+  if (win->layer.bmp && win->layer.w == w && win->layer.h == h) {
+    return false;
+  }
+  layer_free(win);
+  BITMAPINFO bmi;
+  memset(&bmi, 0, sizeof(bmi));
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = w;
+  bmi.bmiHeader.biHeight = -h; /* top-down, like the raster */
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+  win->layer.dc = CreateCompatibleDC(NULL);
+  win->layer.bmp = win->layer.dc ? CreateDIBSection(win->layer.dc, &bmi, DIB_RGB_COLORS,
+                                                    (void **)&win->layer.bits, NULL, 0) :
+                                   NULL;
+  if (!win->layer.bmp) {
+    layer_free(win);
+    return false;
+  }
+  win->layer.old = (HBITMAP)SelectObject(win->layer.dc, win->layer.bmp);
+  win->layer.w = w;
+  win->layer.h = h;
+  return true;
+}
+
+/* LAYER_ULW: the changed pixels go to the DIB, which UpdateLayeredWindow then shows whole.
+ * The raster is premultiplied 0xAARRGGBB, as ULW_ALPHA with AC_SRC_ALPHA needs. */
+static void present_layered(BKWindow *win, int full)
+{
+  BuiRaster *r = win->raster;
+  const int w = BUI_raster_width(r), h = BUI_raster_height(r);
+  const uint32_t *pix = BUI_raster_pixels(r);
+  if (w <= 0 || h <= 0 || !pix) {
+    return;
+  }
+  full |= layer_fit(win, w, h);
+  if (!win->layer.bmp) {
+    return;
+  }
+  const int(*rects)[4];
+  const int n = BUI_raster_damage(r, &rects);
+  if (full) {
+    memcpy(win->layer.bits, pix, (size_t)w * (size_t)h * sizeof(uint32_t));
+  }
+  for (int i = 0; i < n && !full; i++) {
+    for (int y = rects[i][1]; y < rects[i][1] + rects[i][3]; y++) {
+      memcpy(win->layer.bits + (size_t)y * w + rects[i][0], pix + (size_t)y * w + rects[i][0],
+             (size_t)rects[i][2] * sizeof(uint32_t));
+    }
+  }
+  const BLENDFUNCTION blend = {AC_SRC_OVER, 0, win->opacity, AC_SRC_ALPHA};
+  const POINT src = {0, 0};
+  SIZE size = {w, h}; /* a layered window's surface follows this size, not the window's */
+  UpdateLayeredWindow(win->hwnd, NULL, NULL, &size, win->layer.dc, &src, 0,
+                      (BLENDFUNCTION *)&blend, ULW_ALPHA);
+}
+
 static void present(BKWindow *win, int full)
 {
-  if (win->layered) {
-    BUI_raster_present_layered(win->raster, win->hwnd, win->opacity, full);
+  if (win->layered == LAYER_ULW) {
+    present_layered(win, full);
   }
   else {
     BUI_raster_present_native(win->raster, win->hwnd, full);
@@ -380,6 +471,7 @@ static void present(BKWindow *win, int full)
 
 static void do_render(BKWindow *win)
 {
+  gpu_window_check(win);
   RECT rc;
   GetClientRect(win->hwnd, &rc);
   const int w = BK_MAX(1, rc.right - rc.left), h = BK_MAX(1, rc.bottom - rc.top);
@@ -734,6 +826,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
           win->full = 1;
           host_request(win);
         }
+        gpu_window_check(win);
       }
       else if (wp >= ID_USER_BASE) {
         KillTimer(hwnd, wp);
@@ -834,6 +927,7 @@ void BK_window_free(BKWindow *win)
   if (win->ctx) {
     BK_context_set_host(win->ctx, &win->prev);
   }
+  layer_free(win);
   BUI_raster_free(win->raster);
   bk_ime_win32_free(&win->ime);
   free(win);
@@ -901,7 +995,7 @@ BuiRaster *BK_window_raster(BKWindow *win)
 
 void BK_window_set_gpu(BKWindow *win, int on)
 {
-  if (win && on && !win->layered) { /* per-pixel alpha needs the software raster */
+  if (win && on && win->layered != LAYER_ULW) { /* that way of showing alpha is software */
     gpu_attach(win);
     host_request(win);
   }
@@ -980,28 +1074,82 @@ static void set_opacity(BKWindow *win)
   SetLayeredWindowAttributes(win->hwnd, 0, win->opacity, LWA_ALPHA);
 }
 
-/* "transparent": per-pixel alpha. The raster keeps alpha and UpdateLayeredWindow shows it, so
- * the window has no frame and no GPU renderer (Direct3D 11 draws opaque frames). */
-static void set_transparent(BKWindow *win, int on)
+/* The same window made again with other extended styles (WS_EX_NOREDIRECTIONBITMAP and
+ * WS_EX_LAYERED cannot be changed on a window that exists). */
+static int reopen(BKWindow *win, LONG_PTR ex)
 {
-  if (on == win->layered) {
+  HWND old = win->hwnd;
+  RECT rc;
+  wchar_t title[256];
+  GetWindowRect(old, &rc);
+  GetWindowTextW(old, title, 256);
+  const LONG_PTR style = GetWindowLongPtrW(old, GWL_STYLE);
+  HWND h = CreateWindowExW((DWORD)ex, k_class, title, (DWORD)(style & ~WS_VISIBLE), rc.left,
+                           rc.top, rc.right - rc.left, rc.bottom - rc.top, NULL, NULL,
+                           GetModuleHandleW(NULL), NULL);
+  if (!h) {
+    return 0;
+  }
+  SetWindowLongPtrW(old, GWLP_USERDATA, 0); /* the old window's messages end here */
+  SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)win);
+  win->hwnd = h;
+  DestroyWindow(old);
+  if (style & WS_VISIBLE) {
+    ShowWindow(h, SW_SHOW);
+  }
+  return 1;
+}
+
+/* "transparent": per-pixel alpha. The raster keeps alpha and has no frame to draw (the
+ * window has none either). The GPU renderer stays only with LAYER_GPU. */
+static void set_layering(BKWindow *win, int mode)
+{
+  if (mode == win->layered) {
     return;
   }
-  const LONG_PTR ex = GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE) & ~WS_EX_LAYERED;
-  win->layered = on;
-  BUI_raster_set_alpha(win->raster, on);
-  /* UpdateLayeredWindow fails once SetLayeredWindowAttributes ran, until the style is set again */
-  SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, ex);
-  if (on) {
-    BUI_raster_gpu_release(win->raster);
-    SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+  const int gpu = BUI_raster_is_gpu(win->raster) || BUI_raster_gpu_pending(win->raster);
+  const LONG_PTR style_bit = mode == LAYER_GPU ? WS_EX_NOREDIRECTIONBITMAP :
+                             mode == LAYER_ULW ? WS_EX_LAYERED : 0;
+  const LONG_PTR ex = (GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE) &
+                       ~(LONG_PTR)(WS_EX_LAYERED | WS_EX_NOREDIRECTIONBITMAP)) | style_bit;
+  BUI_raster_gpu_release(win->raster); /* the device holds the swap chain of the old window */
+  if (!reopen(win, ex)) {
+    if (gpu) {
+      gpu_attach(win);
+    }
+    return;
   }
-  else if (win->opacity != 255) {
+  if (win->layered == LAYER_ULW) {
+    layer_free(win);
+  }
+  win->layered = mode;
+  BUI_raster_set_alpha(win->raster, mode != LAYER_NONE);
+  set_frame(win);
+  if (mode == LAYER_NONE && win->opacity != 255) {
     set_opacity(win);
   }
-  set_frame(win);
+  if (mode == LAYER_GPU || (mode == LAYER_NONE && gpu)) {
+    gpu_attach(win); /* made with the alpha setting above */
+  }
   win->full = 1;
   host_request(win);
+}
+
+static void set_transparent(BKWindow *win, int on)
+{
+  const int gpu = BUI_raster_is_gpu(win->raster) || BUI_raster_gpu_pending(win->raster);
+  set_layering(win, !on ? LAYER_NONE : gpu ? LAYER_GPU : LAYER_ULW);
+}
+
+/* A LAYER_GPU window shows nothing without its device (it failed to start, or was lost): the
+ * software raster takes over through UpdateLayeredWindow. */
+static void gpu_window_check(BKWindow *win)
+{
+  if (win->layered == LAYER_GPU && !BUI_raster_is_gpu(win->raster) &&
+      !BUI_raster_gpu_pending(win->raster))
+  {
+    set_layering(win, LAYER_ULW);
+  }
 }
 
 void BK_window_wm(BKWindow *win, const char *key, double a, double b)
@@ -1035,11 +1183,11 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   else if (!strcmp(key, "alpha")) {
     win->opacity = (BYTE)(BK_CLAMP(a, 0.0, 1.0) * 255.0 + 0.5);
-    if (win->layered) { /* the next present scales the frame */
+    if (win->layered == LAYER_ULW) { /* the next present scales the frame */
       win->full = 1;
       host_request(win);
     }
-    else {
+    else if (win->layered == LAYER_NONE) { /* DirectComposition frames are not scaled */
       set_opacity(win);
     }
   }

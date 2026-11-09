@@ -701,9 +701,11 @@ void *BK_window_handle(BKWindow *win);       /* HWND / X11 Window / NSWindow * *
 /* Window-manager requests (Tk's wm): "pos" (x, y), "minsize"/"maxsize" (w, h),
  * "resizable" (w, h), "topmost" (a), "alpha" (a), "override" (a), "state"
  * (0 normal, 1 iconic, 2 withdrawn, 3 zoomed), "lift", "lower", "focus".
- * "transparent" (a): per-pixel alpha, no region background, software renderer. On Linux set it
- * before show (X11 makes the window again). On Windows the window has no frame (the raster is
- * shown with UpdateLayeredWindow); on macOS it is a non-opaque window with a clear background.
+ * "transparent" (a): per-pixel alpha, no region background. On Linux set it
+ * before show (X11 makes the window again; the OpenGL renderer uses its 32-bit visual). On Windows
+ * the window has no frame and is made again: with the Direct3D 11 renderer it goes through
+ * DirectComposition, else the raster is shown with UpdateLayeredWindow. On macOS it is a
+ * non-opaque window with a clear background.
  * "layer" (layer, keyboard; Wayland with wlr-layer-shell): a layer surface instead of a
  * toplevel, layer 0 background .. 3 overlay (-1: a toplevel again), keyboard 0 none,
  * 1 exclusive, 2 on demand. "anchor" (edges, exclusive zone): edges top 1, bottom 2, left 4,

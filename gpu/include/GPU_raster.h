@@ -346,13 +346,6 @@ const BuiGpuSink *BUI_raster_sink(BuiRaster *r);
  * window: an HWND on Windows. Returns 0 when unsupported on this platform. */
 int BUI_raster_present_native(BuiRaster *r, void *window_handle, int full);
 
-/* Show a frame that keeps alpha (BUI_raster_set_alpha) in a layered HWND with per-pixel alpha
- * (UpdateLayeredWindow). `opacity` 0..255 scales the whole window. The window needs
- * WS_EX_LAYERED and no frame. Always the whole window, so `full` only refreshes every
- * pixel of the copy kept here. Returns 0 on a GPU frame, a frame without alpha, or
- * a platform other than Windows. */
-int BUI_raster_present_layered(BuiRaster *r, void *window_handle, int opacity, int full);
-
 #ifdef __cplusplus
 }
 #endif
