@@ -1,6 +1,7 @@
 //! Window kinds, decorations and layer-shell options (gpui's `WindowKind`,
 //! `WindowDecorations` and `layer_shell`), sent to the host as window requests.
 
+use std::ffi::CStr;
 use std::ops::BitOr;
 
 use crate::geometry::Pixels;
@@ -52,13 +53,20 @@ pub enum KeyboardInteractivity {
 /// Screen edges a layer surface sticks to: `Anchor::TOP | Anchor::LEFT`. Anchored to both
 /// edges of an axis, the surface fills that axis.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Anchor(pub u8);
+pub struct Anchor(u8);
 
 impl Anchor {
     pub const TOP: Anchor = Anchor(1);
     pub const BOTTOM: Anchor = Anchor(2);
     pub const LEFT: Anchor = Anchor(4);
     pub const RIGHT: Anchor = Anchor(8);
+}
+
+impl Anchor {
+    /// The edges as the host's bit mask.
+    pub(crate) const fn bits(self) -> u8 {
+        self.0
+    }
 }
 
 impl BitOr for Anchor {
@@ -79,21 +87,32 @@ pub struct LayerShellOptions {
     pub keyboard_interactivity: KeyboardInteractivity,
 }
 
-type Request = (&'static str, f64, f64);
+/// A window request: key, then the two numbers `BK_window_wm` takes.
+pub(crate) type Request = (&'static CStr, f64, f64);
 
 impl WindowKind {
-    /// The window requests (key, a, b) that make a new window of this kind and decoration.
+    /// The window requests that make a new window of this kind and decoration.
     pub(crate) fn requests(self, decorations: WindowDecorations) -> impl Iterator<Item = Request> {
         let (first, second) = match self {
             WindowKind::Normal => (None, None),
-            WindowKind::PopUp | WindowKind::Floating => (Some(("topmost", 1.0, 0.0)), None),
+            WindowKind::PopUp | WindowKind::Floating => (Some((c"topmost", 1.0, 0.0)), None),
             WindowKind::LayerShell(o) => (
-                Some(("layer", f64::from(o.layer as u8), f64::from(o.keyboard_interactivity as u8))),
-                Some(("anchor", f64::from(o.anchor.0), f64::from(o.exclusive_zone.map_or(0.0, |z| z.0)))),
+                Some((
+                    c"layer",
+                    f64::from(o.layer as u8),
+                    f64::from(o.keyboard_interactivity as u8),
+                )),
+                Some((
+                    c"anchor",
+                    f64::from(o.anchor.bits()),
+                    f64::from(o.exclusive_zone.map_or(0.0, |z| z.0)),
+                )),
             ),
         };
         let frameless = decorations == WindowDecorations::Client || self == WindowKind::PopUp;
-        [first, second, frameless.then_some(("override", 1.0, 0.0))].into_iter().flatten()
+        [first, second, frameless.then_some((c"override", 1.0, 0.0))]
+            .into_iter()
+            .flatten()
     }
 }
 
@@ -113,12 +132,18 @@ mod tests {
 
     #[test]
     fn floating_is_topmost_and_pop_up_has_no_frame() {
-        assert_eq!(requests(WindowKind::Floating, WindowDecorations::Server), [("topmost", 1.0, 0.0)]);
+        assert_eq!(
+            requests(WindowKind::Floating, WindowDecorations::Server),
+            [(c"topmost", 1.0, 0.0)]
+        );
         assert_eq!(
             requests(WindowKind::PopUp, WindowDecorations::Server),
-            [("topmost", 1.0, 0.0), ("override", 1.0, 0.0)]
+            [(c"topmost", 1.0, 0.0), (c"override", 1.0, 0.0)]
         );
-        assert_eq!(requests(WindowKind::Normal, WindowDecorations::Client), [("override", 1.0, 0.0)]);
+        assert_eq!(
+            requests(WindowKind::Normal, WindowDecorations::Client),
+            [(c"override", 1.0, 0.0)]
+        );
     }
 
     #[test]
@@ -131,7 +156,7 @@ mod tests {
         });
         assert_eq!(
             requests(kind, WindowDecorations::Server),
-            [("layer", 2.0, 2.0), ("anchor", 5.0, 24.0)]
+            [(c"layer", 2.0, 2.0), (c"anchor", 5.0, 24.0)]
         );
     }
 }

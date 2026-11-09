@@ -69,8 +69,8 @@ pub struct LayerShellConfig {
     pub keyboard: Option<String>,
 }
 
-impl LayerShellConfig {
-    fn options(&self) -> LayerShellOptions {
+impl From<&LayerShellConfig> for LayerShellOptions {
+    fn from(c: &LayerShellConfig) -> Self {
         let edge = |name: &str| match name {
             "top" => Anchor::TOP,
             "bottom" => Anchor::BOTTOM,
@@ -79,29 +79,29 @@ impl LayerShellConfig {
             _ => Anchor::default(),
         };
         LayerShellOptions {
-            layer: match self.layer.as_deref() {
+            layer: match c.layer.as_deref() {
                 Some("background") => Layer::Background,
                 Some("bottom") => Layer::Bottom,
                 Some("top") => Layer::Top,
                 _ => Layer::Overlay,
             },
-            anchor: self.anchor.iter().flatten().fold(Anchor::default(), |a, e| a | edge(e)),
-            exclusive_zone: self.exclusive_zone.map(|z| px(z as f32)),
-            keyboard_interactivity: match self.keyboard.as_deref() {
+            anchor: c.anchor.iter().flatten().fold(Anchor::default(), |a, e| a | edge(e)),
+            exclusive_zone: c.exclusive_zone.map(|z| px(z as f32)),
+            keyboard_interactivity: match c.keyboard.as_deref() {
                 Some("exclusive") => KeyboardInteractivity::Exclusive,
                 Some("on-demand") => KeyboardInteractivity::OnDemand,
                 _ => KeyboardInteractivity::None,
             },
         }
     }
+}
 
-    /// The window kind: a layer surface wins over `alwaysOnTop`.
-    fn kind(layer_shell: Option<&LayerShellConfig>, always_on_top: Option<bool>) -> WindowKind {
-        match (layer_shell, always_on_top) {
-            (Some(l), _) => WindowKind::LayerShell(l.options()),
-            (None, Some(true)) => WindowKind::Floating,
-            (None, _) => WindowKind::Normal,
-        }
+/// The window kind: a layer surface wins over `alwaysOnTop`.
+fn window_kind(config: &WindowConfig) -> WindowKind {
+    match (&config.layer_shell, config.always_on_top) {
+        (Some(l), _) => WindowKind::LayerShell(l.into()),
+        (None, Some(true)) => WindowKind::Floating,
+        (None, _) => WindowKind::Normal,
     }
 }
 
@@ -490,6 +490,7 @@ struct WindowSink(Sink);
 
 /// Open window `id` (chosen by JavaScript); its events go to `sink`.
 pub fn open_window(cx: &mut App, id: u32, config: WindowConfig, sink: Sink) {
+    let kind = window_kind(&config);
     let opts = blenderui::WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds {
             origin: point(px(0.0), px(0.0)),
@@ -503,7 +504,7 @@ pub fn open_window(cx: &mut App, id: u32, config: WindowConfig, sink: Sink) {
         } else {
             WindowBackgroundAppearance::Opaque
         },
-        kind: LayerShellConfig::kind(config.layer_shell.as_ref(), config.always_on_top),
+        kind,
         window_decorations: if config.frame == Some(false) {
             WindowDecorations::Client
         } else {

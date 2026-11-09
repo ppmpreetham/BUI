@@ -469,7 +469,6 @@ impl App {
                     sys::BK_window_wm(*n, c"transparent".as_ptr(), 1.0, 0.0);
                 }
                 for (key, a, b) in options.kind.requests(options.window_decorations) {
-                    let key = CString::new(key).unwrap_or_default();
                     sys::BK_window_wm(*n, key.as_ptr(), a, b);
                 }
                 if options.gpu == Some(true) {
