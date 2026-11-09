@@ -44,6 +44,11 @@ All notable changes to **blenderui** (BUI). The format follows
   WindowBackgroundAppearance::Transparent` opens a transparent window on Linux.
 - **JavaScript** (Node, Bun and `bui build` apps): `app.window({ transparent: true })` and the window events `focus` and
   `blur`.
+- **Window kinds in Rust and JavaScript:** Rust `WindowOptions.kind` (`WindowKind::Floating`, `PopUp` and
+  `LayerShell(LayerShellOptions)`) and `window_decorations` (`WindowDecorations::Client`), and JavaScript
+  `app.window({ alwaysOnTop, frame: false, layerShell: { layer, anchor, exclusiveZone, keyboard } })`, send the
+  `topmost`, `override`, `layer` and `anchor` window requests that Python reaches through `Window.wm`. Topmost works on
+  Windows, macOS and X11; a Wayland toplevel cannot ask for it, so use the layer shell there.
 - **Dear ImGui:** `ImGui_ImplBUI_AbandonFrame()` (C: `cImGui_ImplBUI_AbandonFrame`) ends a frame that a binding's
   callback left early on an error, with Dear ImGui's error recovery.
 

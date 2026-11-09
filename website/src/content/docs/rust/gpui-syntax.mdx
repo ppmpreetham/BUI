@@ -63,7 +63,7 @@ fn main() {
 | `impl Render for View` | The same: `fn render(&mut self, window, cx) -> impl IntoElement` |
 | `Entity<T>`, `WeakEntity<T>`, `cx.new` | `Copy` handles into the app's entity slots: `read` (returns `&T`), `update`, `downgrade`; `cx.release(e)` drops a value |
 | `Context<T>`: `notify`, `listener`, `entity` | The same; it derefs to `App` |
-| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size`, `gpu` and `window_background` (`WindowBackgroundAppearance::Transparent`) |
+| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size`, `gpu`, `window_background` (`WindowBackgroundAppearance::Transparent`), `kind` (`WindowKind::Floating` stays on top, `PopUp` is on top without a frame, `LayerShell(LayerShellOptions { layer, anchor, exclusive_zone, keyboard_interactivity })` is a Wayland layer-shell surface) and `window_decorations` (`WindowDecorations::Client`: no frame). A Wayland toplevel cannot stay on top: use `LayerShell` |
 | `cx.set_global`, `cx.global` | The same, plus `try_global` and `global_mut` |
 | `cx.stop_propagation()` | The same |
 | `div().flex().gap_2()`, `.when(..)`, `.when_some(..)`, `.map(..)` | The same, from the `Styled` and `FluentBuilder` traits |
