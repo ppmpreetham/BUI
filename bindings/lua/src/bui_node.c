@@ -67,9 +67,10 @@ static int l_node_remove(lua_State *L) {
   if (!parent->node || !child->node)
     return luaL_error(L, "attempt to use freed node");
   BK_node_remove(parent->node, child->node);
-  /* Also invalidate the child Lua reference */
-  luabui_unmap_node(L, child->node);
-  child->node = NULL;
+  /* Detach only: the C tree owns nodes, remove never frees (BK_node_remove
+   * just unlinks; cf. buipy_kit.c kitnode_remove). The child wrapper stays
+   * valid so detached subtrees (e.g. tab pages) can be re-added; reclaim
+   * with node:free(). */
   return 0;
 }
 
@@ -284,12 +285,32 @@ static int l_node_relayout(lua_State *L) {
   return 0;
 }
 
+/* BK_node_free() recurses into ref-less (plain) children, so every live
+ * wrapper in the subtree must be invalidated first — otherwise methods on
+ * stale userdata would dereference freed BKNodes. */
+static void invalidate_node_subtree(lua_State *L, BKNode *n) {
+  const int nkids = BK_node_child_count(n);
+  for (int i = 0; i < nkids; i++) {
+    BKNode *c = BK_node_child(n, i);
+    if (!c || BK_node_ref(c))
+      continue; /* host-owned: BK_node_free leaves it alive */
+    invalidate_node_subtree(L, c);
+  }
+  if (luabui_lookup_node(L, n)) {
+    luabui_Node *cud = (luabui_Node *)lua_touserdata(L, -1);
+    if (cud)
+      cud->node = NULL;
+    lua_pop(L, 1);
+  }
+  luabui_unmap_node(L, n);
+}
+
 static int l_node_free(lua_State *L) {
   luabui_Node *ud = CHECK_NODE(L, 1);
   if (ud->node) {
-    luabui_unmap_node(L, ud->node);
-    BK_node_free(ud->node);
-    ud->node = NULL;
+    BKNode *n = ud->node; /* keep it: invalidation NULLs this wrapper too */
+    invalidate_node_subtree(L, n);
+    BK_node_free(n);
   }
   return 0;
 }
