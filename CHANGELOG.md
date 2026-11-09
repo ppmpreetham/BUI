@@ -32,7 +32,7 @@ All notable changes to **blenderui** (BUI). The format follows
   `kit/extern/wayland_protocols`.
 - **Focus callback:** `BKWindowCallbacks.on_focus` reports when a window gets or loses the keyboard focus, on
   Win32, Cocoa, X11 and Wayland (Python `Window.on_focus`). Losing it cancels an open pie, as Blender's
-  `WINDEACTIVATE` does.
+  `WINDEACTIVATE` does. In Python the callback is queued behind a running callback, like the timers.
 - **Hit test:** `BK_hit_at(ctx, x, y)` gives the interactive node under a point (Python `ctx.hit`, Lua `ctx:hit`).
 - **Pie menus as in Blender** (`pie_handler`, `pie_menu_begin`): opened while a key is held, releasing the key
   picks the item in the pointer's direction, and a quick tap keeps the pie open for a click; an item with a
