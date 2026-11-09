@@ -208,8 +208,7 @@ pub enum WindowBounds {
 pub enum WindowBackgroundAppearance {
     #[default]
     Opaque,
-    /// Per-pixel alpha: only the elements show. Linux (X11, Wayland) only; the window
-    /// draws on the software raster.
+    /// Per-pixel alpha: only the elements show. On Windows the window has no frame.
     Transparent,
 }
 

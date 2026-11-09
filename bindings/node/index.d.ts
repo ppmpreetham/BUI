@@ -18,7 +18,7 @@ export interface WindowOptions {
   height?: number
   resizable?: boolean
   gpu?: boolean
-  /** Per-pixel alpha: only the elements show (Linux; CPU renderer). */
+  /** Per-pixel alpha: only the elements show (no frame on Windows). */
   transparent?: boolean
 }
 
