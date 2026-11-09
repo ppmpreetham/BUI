@@ -35,8 +35,11 @@ struct BuiRaster {
   /* 0xFF000000 when the frame keeps alpha (premultiplied 0xAARRGGBB, BUI_raster_set_alpha),
    * else 0: the alpha byte stays 0 and the frame is opaque. */
   uint32_t alpha;
+  void *layer; /* BUI_raster_present_layered: the frame as a DIB section (Win32) */
   struct BuiRaster *scratch; /* CPU coverage for polygons in GPU mode */
 };
+
+static void layer_free(BuiRaster *r);
 
 /* -------------------------------------------------------------------- */
 /** \name Pixel helpers
@@ -198,6 +201,7 @@ void BUI_raster_free(BuiRaster *r)
     return;
   }
   BUI_raster_gpu_release(r);
+  layer_free(r);
   BUI_raster_free(r->scratch);
   free(r->pix);
   free(r->prev);
@@ -4336,6 +4340,100 @@ int BUI_raster_present_native(BuiRaster *r, void *window_handle, int full)
   ReleaseDC(hwnd, hdc);
   return 1;
 }
+
+/* The frame as a top-down 32 bpp DIB section, the surface UpdateLayeredWindow reads. */
+typedef struct Layer {
+  HDC dc;
+  HBITMAP bmp, old;
+  uint32_t *bits;
+  int w, h;
+} Layer;
+
+static void layer_free(BuiRaster *r)
+{
+  Layer *l = (Layer *)r->layer;
+  if (!l) {
+    return;
+  }
+  if (l->old) {
+    SelectObject(l->dc, l->old);
+  }
+  if (l->bmp) {
+    DeleteObject(l->bmp);
+  }
+  if (l->dc) {
+    DeleteDC(l->dc);
+  }
+  free(l);
+  r->layer = NULL;
+}
+
+/* The layer at the frame's size. `fresh` is set when it was made now (its pixels are empty). */
+static Layer *layer_get(BuiRaster *r, int *fresh)
+{
+  Layer *l = (Layer *)r->layer;
+  *fresh = 0;
+  if (l && l->w == r->w && l->h == r->h) {
+    return l;
+  }
+  layer_free(r);
+  l = (Layer *)calloc(1, sizeof(Layer));
+  if (!l) {
+    return NULL;
+  }
+  r->layer = l;
+  BITMAPINFO bmi;
+  memset(&bmi, 0, sizeof(bmi));
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = r->w;
+  bmi.bmiHeader.biHeight = -r->h;
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+  l->dc = CreateCompatibleDC(NULL);
+  l->bmp = l->dc ? CreateDIBSection(l->dc, &bmi, DIB_RGB_COLORS, (void **)&l->bits, NULL, 0) : NULL;
+  if (!l->bmp) {
+    layer_free(r);
+    return NULL;
+  }
+  l->old = (HBITMAP)SelectObject(l->dc, l->bmp);
+  l->w = r->w;
+  l->h = r->h;
+  *fresh = 1;
+  return l;
+}
+
+int BUI_raster_present_layered(BuiRaster *r, void *window_handle, int opacity, int full)
+{
+  HWND hwnd = (HWND)window_handle;
+  if (r->gpu || !r->alpha || r->w <= 0 || r->h <= 0 || !hwnd || !IsWindow(hwnd)) {
+    return 0;
+  }
+  int fresh;
+  Layer *l = layer_get(r, &fresh);
+  if (!l) {
+    return 0;
+  }
+  if (fresh || full) {
+    memcpy(l->bits, r->pix, (size_t)r->w * (size_t)r->h * sizeof(uint32_t));
+  }
+  else {
+    for (int i = 0; i < r->damage_len; i++) {
+      const int x = r->damage[i][0], y = r->damage[i][1], w = r->damage[i][2], h = r->damage[i][3];
+      for (int row = y; row < y + h; row++) {
+        memcpy(l->bits + (size_t)row * r->w + x, r->pix + (size_t)row * r->w + x,
+               (size_t)w * sizeof(uint32_t));
+      }
+    }
+  }
+  /* The raster is premultiplied 0xAARRGGBB, as ULW_ALPHA with AC_SRC_ALPHA needs. The size
+   * is passed each time: a layered window's surface follows it, not the window. */
+  const BLENDFUNCTION blend = {AC_SRC_OVER, 0, (BYTE)opacity, AC_SRC_ALPHA};
+  const POINT src = {0, 0};
+  SIZE size = {r->w, r->h};
+  return UpdateLayeredWindow(hwnd, NULL, NULL, &size, l->dc, &src, 0, (BLENDFUNCTION *)&blend,
+                             ULW_ALPHA) != 0;
+}
 #else
 int BUI_raster_present_native(BuiRaster *r, void *window_handle, int full)
 {
@@ -4346,6 +4444,20 @@ int BUI_raster_present_native(BuiRaster *r, void *window_handle, int full)
     return 1;
   }
   (void)window_handle;
+  (void)full;
+  return 0;
+}
+
+static void layer_free(BuiRaster *r)
+{
+  (void)r;
+}
+
+int BUI_raster_present_layered(BuiRaster *r, void *window_handle, int opacity, int full)
+{
+  (void)r;
+  (void)window_handle;
+  (void)opacity;
   (void)full;
   return 0;
 }

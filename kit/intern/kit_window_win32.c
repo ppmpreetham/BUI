@@ -47,6 +47,9 @@ struct BKWindow {
   int fixed_w, fixed_h;           /* axes the user may not resize (Tk's resizable) */
   int user_sizing;                /* inside a user move/resize loop */
   DWORD style;                    /* framed style restored by "override" 0 */
+  int override;                   /* "override": no frame */
+  int layered;                    /* "transparent": per-pixel alpha (UpdateLayeredWindow) */
+  BYTE opacity;                   /* "alpha" as 0..255 */
   BKImeWin32 ime;                 /* the IME (GHOST_ImeWin32) */
   WPARAM last_vk;                 /* the virtual key of the last WM_KEYDOWN */
 };
@@ -364,6 +367,17 @@ static void ime_sync(BKWindow *win)
   bk_ime_win32_begin(&win->ime, win->hwnd, s.x, s.y, s.x, s.y, s.restart != 0);
 }
 
+/* The raster on screen: a layered window shows the whole frame, the others the damage. */
+static void present(BKWindow *win, int full)
+{
+  if (win->layered) {
+    BUI_raster_present_layered(win->raster, win->hwnd, win->opacity, full);
+  }
+  else {
+    BUI_raster_present_native(win->raster, win->hwnd, full);
+  }
+}
+
 static void do_render(BKWindow *win)
 {
   RECT rc;
@@ -387,7 +401,7 @@ static void do_render(BKWindow *win)
   QueryPerformanceCounter(&t1);
   win->full = 0;
   if (regions || resized) {
-    BUI_raster_present_native(win->raster, win->hwnd, resized);
+    present(win, resized);
     win->frames++;
   }
   QueryPerformanceCounter(&t2);
@@ -499,7 +513,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       EndPaint(hwnd, &ps);
       win->full = 1;
       do_render(win);
-      BUI_raster_present_native(win->raster, hwnd, 1);
+      present(win, 1);
       return 0;
     }
     case WM_ERASEBKGND:
@@ -770,6 +784,7 @@ BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height
   win->prev = ctx->host;
   win->raster = BUI_raster_create(1, 1);
   win->next_timer = 1;
+  win->opacity = 255;
   win->scale = window_dpi_scale(NULL);
   {
     /* system DPI until the window exists */
@@ -886,7 +901,7 @@ BuiRaster *BK_window_raster(BKWindow *win)
 
 void BK_window_set_gpu(BKWindow *win, int on)
 {
-  if (win && on) {
+  if (win && on && !win->layered) { /* per-pixel alpha needs the software raster */
     gpu_attach(win);
     host_request(win);
   }
@@ -946,6 +961,49 @@ static void set_style(HWND hwnd, DWORD style)
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
+/* No frame while "override" or "transparent" is on: a layered window is drawn from the
+ * raster alone. */
+static void set_frame(BKWindow *win)
+{
+  if (!win->style) {
+    win->style = (DWORD)GetWindowLongPtrW(win->hwnd, GWL_STYLE) & ~WS_VISIBLE;
+  }
+  set_style(win->hwnd,
+            (win->override || win->layered) ? WS_POPUP | WS_CLIPCHILDREN : win->style);
+}
+
+/* The "alpha" of a window that is not transparent: one opacity for the whole window. */
+static void set_opacity(BKWindow *win)
+{
+  const LONG_PTR ex = GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE);
+  SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+  SetLayeredWindowAttributes(win->hwnd, 0, win->opacity, LWA_ALPHA);
+}
+
+/* "transparent": per-pixel alpha. The raster keeps alpha and UpdateLayeredWindow shows it, so
+ * the window has no frame and no GPU renderer (Direct3D 11 draws opaque frames). */
+static void set_transparent(BKWindow *win, int on)
+{
+  if (on == win->layered) {
+    return;
+  }
+  const LONG_PTR ex = GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE) & ~WS_EX_LAYERED;
+  win->layered = on;
+  BUI_raster_set_alpha(win->raster, on);
+  /* UpdateLayeredWindow fails once SetLayeredWindowAttributes ran, until the style is set again */
+  SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, ex);
+  if (on) {
+    BUI_raster_gpu_release(win->raster);
+    SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+  }
+  else if (win->opacity != 255) {
+    set_opacity(win);
+  }
+  set_frame(win);
+  win->full = 1;
+  host_request(win);
+}
+
 void BK_window_wm(BKWindow *win, const char *key, double a, double b)
 {
   HWND h = win->hwnd;
@@ -976,15 +1034,21 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
   else if (!strcmp(key, "alpha")) {
-    const LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-    SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-    SetLayeredWindowAttributes(h, 0, (BYTE)(BK_CLAMP(a, 0.0, 1.0) * 255.0 + 0.5), LWA_ALPHA);
+    win->opacity = (BYTE)(BK_CLAMP(a, 0.0, 1.0) * 255.0 + 0.5);
+    if (win->layered) { /* the next present scales the frame */
+      win->full = 1;
+      host_request(win);
+    }
+    else {
+      set_opacity(win);
+    }
   }
   else if (!strcmp(key, "override")) {
-    if (!win->style) {
-      win->style = (DWORD)GetWindowLongPtrW(h, GWL_STYLE) & ~WS_VISIBLE;
-    }
-    set_style(h, a ? WS_POPUP | WS_CLIPCHILDREN : win->style);
+    win->override = a != 0.0;
+    set_frame(win);
+  }
+  else if (!strcmp(key, "transparent")) {
+    set_transparent(win, a != 0.0);
   }
   else if (!strcmp(key, "state")) {
     static const int show[4] = {SW_RESTORE, SW_MINIMIZE, SW_HIDE, SW_MAXIMIZE};
