@@ -24,7 +24,6 @@
 #  include <windows.h>
 #  include <d3d11.h>
 #  include <d3d11_1.h>
-#  include <dcomp.h>
 #  include <dxgi1_2.h>
 
 #  include <stdio.h>
@@ -45,6 +44,38 @@ static const GUID k_IID_ID3D11DeviceContext1 = {
     0xbb2c6faa, 0xb5fb, 0x4082, {0x8e, 0x6b, 0x38, 0x8b, 0x8c, 0xfa, 0x90, 0xe1}};
 static const GUID k_IID_IDCompositionDevice = {
     0xc37ea93a, 0xe7aa, 0x450d, {0xb1, 0x6f, 0x97, 0x46, 0xcb, 0x04, 0x07, 0xf3}};
+
+/* dcomp.h declares overloaded methods, so C cannot parse it. The three interfaces used here
+ * are declared by their vtable order (dcomp.idl in Wine); `void *` fills the unused slots. */
+typedef struct DCompVisual DCompVisual;
+typedef struct DCompTarget DCompTarget;
+typedef struct DCompDevice DCompDevice;
+#  define DCOMP_COM(self) \
+    HRESULT(STDMETHODCALLTYPE *QueryInterface)(self *, REFIID, void **); \
+    ULONG(STDMETHODCALLTYPE *AddRef)(self *); \
+    ULONG(STDMETHODCALLTYPE *Release)(self *)
+struct DCompVisual {
+  const struct {
+    DCOMP_COM(DCompVisual);
+    void *offset_clip[12]; /* SetOffsetX (animation) ... SetClip */
+    HRESULT(STDMETHODCALLTYPE *SetContent)(DCompVisual *, IUnknown *);
+  } *lpVtbl;
+};
+struct DCompTarget {
+  const struct {
+    DCOMP_COM(DCompTarget);
+    HRESULT(STDMETHODCALLTYPE *SetRoot)(DCompTarget *, DCompVisual *);
+  } *lpVtbl;
+};
+struct DCompDevice {
+  const struct {
+    DCOMP_COM(DCompDevice);
+    HRESULT(STDMETHODCALLTYPE *Commit)(DCompDevice *);
+    void *wait_and_statistics[2];
+    HRESULT(STDMETHODCALLTYPE *CreateTargetForHwnd)(DCompDevice *, HWND, BOOL, DCompTarget **);
+    HRESULT(STDMETHODCALLTYPE *CreateVisual)(DCompDevice *, DCompVisual **);
+  } *lpVtbl;
+};
 
 #  define REL(p) \
     do { \
@@ -148,9 +179,9 @@ struct BuiGpu {
    * ClearView clears the rects of a redrawn region. */
   int alpha;
   ID3D11DeviceContext1 *ctx1;
-  IDCompositionDevice *dcomp;
-  IDCompositionTarget *dtarget;
-  IDCompositionVisual *dvisual;
+  DCompDevice *dcomp;
+  DCompTarget *dtarget;
+  DCompVisual *dvisual;
   int swap_fresh;
 
   ID3D11VertexShader *vs_quad, *vs_tri, *vs_mesh;
@@ -1582,12 +1613,12 @@ static int dcomp_attach(BuiGpu *g)
   const int ok = create &&
                  SUCCEEDED(ID3D11Device_QueryInterface(g->dev, &k_IID_IDXGIDevice, (void **)&xd)) &&
                  SUCCEEDED(create(xd, &k_IID_IDCompositionDevice, (void **)&g->dcomp)) &&
-                 SUCCEEDED(IDCompositionDevice_CreateTargetForHwnd(g->dcomp, g->hwnd, TRUE,
-                                                                   &g->dtarget)) &&
-                 SUCCEEDED(IDCompositionDevice_CreateVisual(g->dcomp, &g->dvisual)) &&
-                 SUCCEEDED(IDCompositionVisual_SetContent(g->dvisual, (IUnknown *)g->swap)) &&
-                 SUCCEEDED(IDCompositionTarget_SetRoot(g->dtarget, (IDCompositionVisual *)g->dvisual)) &&
-                 SUCCEEDED(IDCompositionDevice_Commit(g->dcomp)); /* once: Present needs no commit */
+                 SUCCEEDED(g->dcomp->lpVtbl->CreateTargetForHwnd(g->dcomp, g->hwnd, TRUE,
+                                                                 &g->dtarget)) &&
+                 SUCCEEDED(g->dcomp->lpVtbl->CreateVisual(g->dcomp, &g->dvisual)) &&
+                 SUCCEEDED(g->dvisual->lpVtbl->SetContent(g->dvisual, (IUnknown *)g->swap)) &&
+                 SUCCEEDED(g->dtarget->lpVtbl->SetRoot(g->dtarget, g->dvisual)) &&
+                 SUCCEEDED(g->dcomp->lpVtbl->Commit(g->dcomp)); /* once: Present needs no commit */
   REL(xd);
   return ok;
 }
