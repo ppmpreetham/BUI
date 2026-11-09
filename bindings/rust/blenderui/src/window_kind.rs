@@ -96,3 +96,42 @@ impl WindowKind {
         [first, second, frameless.then_some(("override", 1.0, 0.0))].into_iter().flatten()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::px;
+
+    fn requests(kind: WindowKind, decorations: WindowDecorations) -> Vec<Request> {
+        kind.requests(decorations).collect()
+    }
+
+    #[test]
+    fn normal_window_sends_nothing() {
+        assert!(requests(WindowKind::Normal, WindowDecorations::Server).is_empty());
+    }
+
+    #[test]
+    fn floating_is_topmost_and_pop_up_has_no_frame() {
+        assert_eq!(requests(WindowKind::Floating, WindowDecorations::Server), [("topmost", 1.0, 0.0)]);
+        assert_eq!(
+            requests(WindowKind::PopUp, WindowDecorations::Server),
+            [("topmost", 1.0, 0.0), ("override", 1.0, 0.0)]
+        );
+        assert_eq!(requests(WindowKind::Normal, WindowDecorations::Client), [("override", 1.0, 0.0)]);
+    }
+
+    #[test]
+    fn layer_shell_sends_layer_then_anchor() {
+        let kind = WindowKind::LayerShell(LayerShellOptions {
+            layer: Layer::Top,
+            anchor: Anchor::TOP | Anchor::LEFT,
+            exclusive_zone: Some(px(24.0)),
+            keyboard_interactivity: KeyboardInteractivity::OnDemand,
+        });
+        assert_eq!(
+            requests(kind, WindowDecorations::Server),
+            [("layer", 2.0, 2.0), ("anchor", 5.0, 24.0)]
+        );
+    }
+}
