@@ -41,7 +41,7 @@ All notable changes to **blenderui** (BUI). The format follows
   (`pie_menu_level_create`); items get underlined accelerator letters (`menu_block_set_keyaccels`); and the
   items grow out of the center over 60 ms (`pie_animation_timeout`, off with reduced motion).
 - **Rust:** `App::on_window_activation(|id, active, cx| ...)` reports keyboard focus, and `WindowOptions.window_background =
-  WindowBackgroundAppearance::Transparent` opens a transparent window on Linux.
+  WindowBackgroundAppearance::Transparent` opens a transparent window on Linux, Windows and macOS.
 - **JavaScript** (Node, Bun and `bui build` apps): `app.window({ transparent: true })` and the window events `focus` and
   `blur`.
 - **Window kinds in Rust and JavaScript:** Rust `WindowOptions.kind` (`WindowKind::Floating`, `PopUp` and
@@ -65,6 +65,9 @@ All notable changes to **blenderui** (BUI). The format follows
   Blender's GHOST: the compositor draws the cursor and no cursor theme is loaded. Elsewhere the theme loads on the first
   cursor change, not at start-up. Builds with wayland-protocols older than 1.32 keep the theme.
 - `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
+- **GPU renderer header:** `BuiGpuX11Window` has the new `visual` member (the window's VisualID, 0 for the default one),
+  and `BUI_raster_clear` clears on a GPU raster too. Call `BUI_raster_set_alpha` before attaching a GPU renderer: it
+  reads the setting when it starts.
 
 ### Fixed
 - **Closing a pie during its open animation** freed it while the animation still pointed at it, so the next render read freed
