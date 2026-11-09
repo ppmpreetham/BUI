@@ -191,6 +191,7 @@ typedef void (*ProcFn)(void);
 #  define GLX_RED_SIZE 8
 #  define GLX_GREEN_SIZE 9
 #  define GLX_BLUE_SIZE 10
+#  define GLX_ALPHA_SIZE 11
 #  define GLX_X_VISUAL_TYPE 0x22
 #  define GLX_TRUE_COLOR 0x8002
 #  define GLX_VISUAL_ID 0x800B
@@ -922,6 +923,8 @@ struct BuiGpu {
   int has_thread;
   XDisplay *host_dpy;
   XID host_win;
+  unsigned long host_visual; /* the window's VisualID (0: the default visual) */
+  int alpha;                 /* frames keep premultiplied alpha */
 
   /* context */
   int api;
@@ -1077,6 +1080,8 @@ static int glx_create(BuiGpu *g, XDisplay *dpy, XID window)
                           8,
                           GLX_BLUE_SIZE,
                           8,
+                          GLX_ALPHA_SIZE,
+                          g->alpha ? 8 : 0,
                           GLX_DOUBLEBUFFER,
                           window ? 1 : 0,
                           0};
@@ -1088,10 +1093,12 @@ static int glx_create(BuiGpu *g, XDisplay *dpy, XID window)
     }
     return fail("glXChooseFBConfig");
   }
-  /* the kit's windows use the default visual: take the config made for it */
+  /* the window's visual (the default one, or the 32-bit ARGB one of a transparent window):
+   * take the config made for it */
   GLXFBConfig cfg = cfgs[0];
   if (window) {
-    const unsigned long want = p_XVisualIDFromVisual(p_XDefaultVisual(dpy, scr));
+    const unsigned long want = g->host_visual ? g->host_visual :
+                                                p_XVisualIDFromVisual(p_XDefaultVisual(dpy, scr));
     for (int i = 0; i < n; i++) {
       int vid = 0;
       if (p_glXGetFBConfigAttrib(dpy, cfgs[i], GLX_VISUAL_ID, &vid) == 0 &&
@@ -1490,7 +1497,7 @@ static void *device_thread(void *arg)
   return NULL;
 }
 
-BuiGpu *bui_gpu_create(void *handle)
+BuiGpu *bui_gpu_create(void *handle, int alpha)
 {
   BuiGpu *g = (BuiGpu *)calloc(1, sizeof(BuiGpu));
   if (!g) {
@@ -1500,7 +1507,9 @@ BuiGpu *bui_gpu_create(void *handle)
     const BuiGpuX11Window *xw = (const BuiGpuX11Window *)handle;
     g->host_dpy = (XDisplay *)xw->display;
     g->host_win = (XID)xw->window;
+    g->host_visual = xw->visual;
   }
+  g->alpha = alpha;
   g->mask_map = (Slot *)calloc(MASK_MAP, sizeof(Slot));
   g->img_map = (Slot *)calloc(IMG_MAP, sizeof(Slot));
   g->has_thread = (!handle || g->host_win) && g->mask_map && g->img_map &&
@@ -2440,7 +2449,7 @@ static int ensure_target(BuiGpu *g)
   g->tw = g->w;
   g->th = g->h;
   GL(glViewport)(0, 0, g->tw, g->th);
-  GL(glClearColor)(0, 0, 0, 1);
+  GL(glClearColor)(0, 0, 0, g->alpha ? 0 : 1);
   GL(glClear)(GL_COLOR_BUFFER_BIT);
   g->dmg_full = 1;
   return 1;
@@ -2549,6 +2558,20 @@ static void flush(BuiGpu *g)
   g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = 0;
 }
 
+void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h)
+{
+  flush(g); /* what was recorded for earlier regions comes first */
+  if (!g->target || g->tw != g->w || g->th != g->h || !make_current(g)) {
+    return; /* a new target starts transparent */
+  }
+  GL(glBindFramebuffer)(GL_FRAMEBUFFER, g->fbo);
+  GL(glEnable)(GL_SCISSOR_TEST);
+  GL(glScissor)(x, y, w, h); /* the frame is stored top row first: GL y == BUI y */
+  GL(glClearColor)(0, 0, 0, 0);
+  GL(glClear)(GL_COLOR_BUFFER_BIT);
+  GL(glDisable)(GL_SCISSOR_TEST);
+}
+
 int bui_gpu_present(BuiGpu *g, int full)
 {
   (void)full;
@@ -2591,7 +2614,7 @@ int bui_gpu_read(BuiGpu *g, uint32_t *dst, int w, int h)
    * 0xAARRGGBB words */
   GL(glReadPixels)(0, 0, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, dst);
   const size_t n = (size_t)w * h;
-  for (size_t i = 0; i < n; i++) {
+  for (size_t i = 0; i < n && !g->alpha; i++) {
     dst[i] &= 0xFFFFFFu; /* 0x00RRGGBB like the raster */
   }
   return 1;

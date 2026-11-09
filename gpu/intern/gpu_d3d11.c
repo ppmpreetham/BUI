@@ -1682,9 +1682,10 @@ int bui_gpu_slug_glyph(BuiGpu *g, int face, int glyph, unsigned gen, float r_bbo
 
 #  include "gpu_d3d11.h"
 
-BuiGpu *bui_gpu_create(void *hwnd)
+BuiGpu *bui_gpu_create(void *hwnd, int alpha)
 {
   (void)hwnd;
+  (void)alpha;
   return NULL;
 }
 void bui_gpu_free(BuiGpu *g)
@@ -1798,6 +1799,14 @@ void bui_gpu_mesh(BuiGpu *g,
   (void)tex;
   (void)nearest;
   (void)clip;
+}
+void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h)
+{
+  (void)g;
+  (void)x;
+  (void)y;
+  (void)w;
+  (void)h;
 }
 void bui_gpu_damage(BuiGpu *g, int x, int y, int w, int h)
 {

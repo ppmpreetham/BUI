@@ -43,7 +43,9 @@ typedef struct BuiGpu BuiGpu;
 
 /* Starts creating the device on a worker thread (the first frames keep
  * using the software raster). NULL when D3D11 isn't available. */
-BuiGpu *bui_gpu_create(void *hwnd);
+/* `alpha`: frames keep premultiplied alpha (the target starts transparent, and the window
+ * shows it with per-pixel alpha). */
+BuiGpu *bui_gpu_create(void *hwnd, int alpha);
 void bui_gpu_free(BuiGpu *g);
 /* 1 once the device is ready, -1 when creation failed, 0 while pending
  * (never 0 with `wait`). */
@@ -128,6 +130,8 @@ unsigned bui_texture_free_gen(void);
  * when more went by than the log keeps (free whatever isn't in use). */
 int bui_image_forgotten(unsigned *seen, uint64_t *r_keys, int max);
 
+/* Sets a rect of the frame to transparent (BUI_raster_clear of an alpha frame). */
+void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h);
 /* Records damage for present (x, y, w, h); w <= 0 means the whole frame. */
 void bui_gpu_damage(BuiGpu *g, int x, int y, int w, int h);
 /* Draws everything recorded and presents. Returns 0 on device loss. */

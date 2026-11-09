@@ -55,10 +55,11 @@ int BUI_raster_damage(const BuiRaster *r, const int (**r_rects)[4]);
 void BUI_raster_invalidate(BuiRaster *r);
 /* Keep alpha: the frame becomes premultiplied 0xAARRGGBB, starting transparent where
  * BUI_raster_clear clears it (a transparent window). Off (the default), the alpha byte stays 0
- * and the frame is opaque 0x00RRGGBB. CPU frames only. */
+ * and the frame is opaque 0x00RRGGBB. A GPU renderer takes the setting when it is attached (the
+ * window needs an alpha surface: a 32-bit visual, a composition swap chain), so set it first. */
 void BUI_raster_set_alpha(BuiRaster *r, int on);
 int BUI_raster_alpha(const BuiRaster *r);
-/* Set the pixels of a rect to transparent (0), within the clip. CPU frames only. */
+/* Set the pixels of a rect to transparent (0), within the clip. */
 void BUI_raster_clear(BuiRaster *r, int x, int y, int w, int h);
 
 /* Clip subsequent drawing; w/h <= 0 removes the clip. */
@@ -316,6 +317,7 @@ const void *BUI_text_default_font(int *r_len);
 typedef struct BuiGpuX11Window {
   void *display;        /* Display * the window lives on (NULL: open one) */
   unsigned long window; /* Window */
+  unsigned long visual; /* its VisualID (0: the default visual) */
 } BuiGpuX11Window;
 int BUI_raster_gpu_attach(BuiRaster *r, void *window_handle, int wait);
 int BUI_raster_gpu_poll(BuiRaster *r);

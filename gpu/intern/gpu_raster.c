@@ -276,7 +276,7 @@ int BUI_raster_gpu_attach(BuiRaster *r, void *window_handle, int wait)
   if (r->gpu || r->gpu_pending) {
     return 1;
   }
-  r->gpu_pending = bui_gpu_create(window_handle);
+  r->gpu_pending = bui_gpu_create(window_handle, r->alpha != 0);
   if (!r->gpu_pending) {
     return 0;
   }
@@ -490,9 +490,11 @@ int BUI_raster_alpha(const BuiRaster *r)
 void BUI_raster_clear(BuiRaster *r, int x, int y, int w, int h)
 {
   int x0, y0, x1, y1;
-  if (r->gpu || !clip_box(r, (float)x, (float)y, (float)(x + w), (float)(y + h), &x0, &y0, &x1,
-                          &y1))
-  {
+  if (!clip_box(r, (float)x, (float)y, (float)(x + w), (float)(y + h), &x0, &y0, &x1, &y1)) {
+    return;
+  }
+  if (r->gpu) {
+    bui_gpu_clear(r->gpu, x0, y0, x1 - x0, y1 - y0);
     return;
   }
   for (int py = y0; py < y1; py++) {

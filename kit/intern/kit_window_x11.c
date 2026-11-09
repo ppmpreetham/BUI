@@ -422,7 +422,8 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 static void gpu_attach(BKWindow *win)
 {
   if (win->xid) {
-    BuiGpuX11Window target = {g_dpy, (unsigned long)win->xid};
+    BuiGpuX11Window target = {g_dpy, (unsigned long)win->xid,
+                              win->visual->visualid};
     BUI_raster_gpu_attach(win->raster, &target, 0);
   }
 }
@@ -909,7 +910,7 @@ BuiRaster *BK_window_raster(BKWindow *win)
 
 void BK_window_set_gpu(BKWindow *win, int on)
 {
-  if (win && on && win->depth != 32) { /* a transparent window keeps the software raster */
+  if (win && on) {
     gpu_attach(win);
     host_request(win);
   }
@@ -984,10 +985,14 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   else if (!strcmp(key, "transparent")) { /* before show: the window is made again */
     if ((a != 0) != (win->depth == 32)) {
+      const bool gpu = BUI_raster_is_gpu(win->raster) || BUI_raster_gpu_pending(win->raster);
       destroy_xid(win);
       if (!create_xid(win, a != 0)) {
         g_open--; /* no window: closed */
         return;
+      }
+      if (gpu) { /* the device was made for the old window: GLX needs a config for the new visual */
+        gpu_attach(win);
       }
       win->full = 1;
     }
