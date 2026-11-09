@@ -1319,6 +1319,44 @@ static void call_quiet(PyObject *fn, PyObject *args)
   Py_XDECREF(r);
 }
 
+/* Python callbacks do not nest. The kit calls Python from the middle of its own work (a key press walks
+ * the node tree and emits an event from inside that walk), and a handler may run a nested message
+ * loop with the GIL released: os.startfile (ShellExecute), a file dialog, MessageBox ... The window
+ * messages that arrive meanwhile re-enter the kit, and their callbacks would run Python while the
+ * outer call still holds node pointers it is about to use again. So while a Python callback is
+ * running, the ones that arrive are queued, and run in order as soon as the outer one returns. */
+static int g_py_depth;
+static PyObject *g_deferred; /* list of (callable, args tuple | None) */
+
+static void defer_call(PyObject *fn, PyObject *args)
+{
+  if (!fn || fn == Py_None) {
+    return;
+  }
+  if (!g_deferred && !(g_deferred = PyList_New(0))) {
+    PyErr_Clear();
+    return;
+  }
+  PyObject *item = PyTuple_Pack(2, fn, args ? args : Py_None);
+  if (!item || PyList_Append(g_deferred, item) < 0) {
+    PyErr_Clear();
+  }
+  Py_XDECREF(item);
+}
+
+static void run_deferred(void)
+{
+  g_py_depth++;
+  while (g_deferred && PyList_GET_SIZE(g_deferred) > 0) {
+    PyObject *item = Py_NewRef(PyList_GET_ITEM(g_deferred, 0));
+    PyList_SetSlice(g_deferred, 0, 1, NULL);
+    PyObject *args = PyTuple_GET_ITEM(item, 1);
+    call_quiet(PyTuple_GET_ITEM(item, 0), args == Py_None ? NULL : args);
+    Py_DECREF(item);
+  }
+  g_py_depth--;
+}
+
 static void host_request(void *data)
 {
   call_quiet(((KitContextObject *)data)->on_request, NULL);
@@ -1443,10 +1481,46 @@ static void host_schedule_gil(void *data, int ms, int timer)
   GIL_LEAVE;
 }
 
+/* host_emit's call, kept for later: what it would call, with what. */
+static void defer_emit(BKNode *node, int kind, void *ref, double a, double b)
+{
+  if (kind == BK_EV_CALL && ref) {
+    defer_call((PyObject *)ref, NULL);
+    return;
+  }
+  PyObject *target = node ? (PyObject *)BK_node_ref(node) : NULL;
+  PyObject *fn = target ? PyObject_GetAttrString(target, "_on_event") : NULL;
+  if (!fn) {
+    PyErr_Clear();
+    return;
+  }
+  PyObject *payload;
+  if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE) {
+    payload = PyUnicode_FromString(ref ? (const char *)ref : ""); /* raw events: a C string */
+  }
+  else {
+    payload = Py_NewRef(ref ? (PyObject *)ref : Py_None);
+  }
+  PyObject *args = payload ? Py_BuildValue("(iOdd)", kind, payload, a, b) : NULL;
+  defer_call(fn, args);
+  Py_XDECREF(args);
+  Py_XDECREF(payload);
+  Py_DECREF(fn);
+  PyErr_Clear();
+}
+
 static void host_emit_gil(void *data, BKNode *node, int kind, void *ref, double a, double b)
 {
   GIL_ENTER;
-  host_emit(data, node, kind, ref, a, b);
+  if (g_py_depth > 0) {
+    defer_emit(node, kind, ref, a, b);
+  }
+  else {
+    g_py_depth++;
+    host_emit(data, node, kind, ref, a, b);
+    g_py_depth--;
+    run_deferred();
+  }
   GIL_LEAVE;
 }
 
@@ -2328,17 +2402,47 @@ static int win_on_close(void *data, BKWindow *w)
   return allow;
 }
 
+/* The timer's callable, taken off the table (one-shot) and queued behind the running callback. */
+static void win_defer_timer(void *data, int id)
+{
+  KitWindowObject *self = (KitWindowObject *)data;
+  PyObject *key = PyLong_FromLong(id);
+  PyObject *fn = key ? PyDict_GetItemWithError(self->timers, key) : NULL;
+  if (fn) {
+    Py_INCREF(fn);
+    PyDict_DelItem(self->timers, key);
+    defer_call(fn, NULL);
+    Py_DECREF(fn);
+  }
+  Py_XDECREF(key);
+  PyErr_Clear();
+}
+
 static void win_on_timer_gil(void *data, BKWindow *w, int id)
 {
   GIL_ENTER;
-  win_on_timer(data, w, id);
+  if (g_py_depth > 0) {
+    win_defer_timer(data, id);
+  }
+  else {
+    g_py_depth++;
+    win_on_timer(data, w, id);
+    g_py_depth--;
+    run_deferred();
+  }
   GIL_LEAVE;
 }
 
 static int win_on_close_gil(void *data, BKWindow *w)
 {
   GIL_ENTER;
-  const int allow = win_on_close(data, w);
+  int allow = 0; /* the handler answers now: a close that arrives while a callback runs is refused */
+  if (g_py_depth == 0) {
+    g_py_depth++;
+    allow = win_on_close(data, w);
+    g_py_depth--;
+    run_deferred();
+  }
   GIL_LEAVE;
   return allow;
 }
