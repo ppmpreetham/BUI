@@ -356,6 +356,32 @@ fn describe(v: &Value<'_>) -> String {
 // ==========================================================================
 // Host functions (`host` in prelude.js)
 
+/// The window options object of `index.d.ts`.
+fn window_config(c: &Object<'_>) -> rquickjs::Result<view::WindowConfig> {
+    let layer_shell = c
+        .get::<_, Option<Object>>("layerShell")?
+        .map(|l| -> rquickjs::Result<view::LayerShellConfig> {
+            Ok(view::LayerShellConfig {
+                layer: l.get("layer")?,
+                anchor: l.get("anchor")?,
+                exclusive_zone: l.get("exclusiveZone")?,
+                keyboard: l.get("keyboard")?,
+            })
+        })
+        .transpose()?;
+    Ok(view::WindowConfig {
+        title: c.get("title")?,
+        width: c.get("width")?,
+        height: c.get("height")?,
+        resizable: c.get("resizable")?,
+        gpu: c.get("gpu")?,
+        transparent: c.get("transparent")?,
+        always_on_top: c.get("alwaysOnTop")?,
+        frame: c.get("frame")?,
+        layer_shell,
+    })
+}
+
 fn host_object<'js>(ctx: &Ctx<'js>, argv: Vec<String>) -> rquickjs::Result<Object<'js>> {
     let h = Object::new(ctx.clone())?;
     macro_rules! f {
@@ -397,10 +423,9 @@ fn host_object<'js>(ctx: &Ctx<'js>, argv: Vec<String>) -> rquickjs::Result<Objec
     f!("rss", rss);
     f!("cpuCycles", view::process_cpu_cycles);
     f!("tsc", view::timestamp_counter);
-    f!("openWindow", |id: u32, title: Option<String>, width: f64, height: f64, resizable: Option<bool>, gpu: Option<bool>,
-              transparent: Option<bool>| {
-        command(Command::Open(id, view::WindowConfig { title, width: Some(width), height: Some(height), resizable, gpu,
-                                                       transparent }));
+    f!("openWindow", |id: u32, c: Object<'js>| -> rquickjs::Result<()> {
+        command(Command::Open(id, window_config(&c)?));
+        Ok(())
     });
     f!("commit", |w: u32, ops: TypedArray<'js, i32>, strings: Vec<String>, animated: bool| {
         // SAFETY: copied right away, before JavaScript can detach or resize the buffer

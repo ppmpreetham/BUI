@@ -84,6 +84,18 @@ pub struct WindowConfig {
     pub resizable: Option<bool>,
     pub gpu: Option<bool>,
     pub transparent: Option<bool>,
+    pub always_on_top: Option<bool>,
+    pub frame: Option<bool>,
+    pub layer_shell: Option<LayerShellConfig>,
+}
+
+#[napi(object)]
+#[derive(Clone)]
+pub struct LayerShellConfig {
+    pub layer: Option<String>,
+    pub anchor: Option<Vec<String>>,
+    pub exclusive_zone: Option<f64>,
+    pub keyboard: Option<String>,
 }
 
 #[napi(object)]
@@ -223,7 +235,10 @@ impl NativeApp {
     pub fn open_window(&self, id: u32, config: Option<WindowConfig>) {
         let c = config.map(|c| view::WindowConfig {
             title: c.title, width: c.width, height: c.height, resizable: c.resizable, gpu: c.gpu,
-            transparent: c.transparent,
+            transparent: c.transparent, always_on_top: c.always_on_top, frame: c.frame,
+            layer_shell: c.layer_shell.map(|l| view::LayerShellConfig {
+                layer: l.layer, anchor: l.anchor, exclusive_zone: l.exclusive_zone, keyboard: l.keyboard,
+            }),
         }).unwrap_or_default();
         self.link.send(move |cx| {
             let s = sink(cx.global::<Tsfn>());

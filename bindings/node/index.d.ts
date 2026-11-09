@@ -20,6 +20,24 @@ export interface WindowOptions {
   gpu?: boolean
   /** Per-pixel alpha: only the elements show (no frame on Windows). */
   transparent?: boolean
+  /** Stay above other windows: Windows, macOS and X11. A Wayland toplevel cannot; use `layerShell`. */
+  alwaysOnTop?: boolean
+  /** `false`: no frame (Electron's `frame`). */
+  frame?: boolean
+  /** A wlr-layer-shell surface (Wayland compositors with layer shell: KDE Plasma, wlroots);
+   *  a normal window elsewhere. */
+  layerShell?: LayerShellOptions
+}
+
+export interface LayerShellOptions {
+  /** Default `'overlay'`. */
+  layer?: 'background' | 'bottom' | 'top' | 'overlay'
+  /** Edges the surface sticks to; both edges of an axis fill it. */
+  anchor?: Array<'top' | 'bottom' | 'left' | 'right'>
+  /** Space the compositor keeps free for the surface (a panel), in pixels. */
+  exclusiveZone?: number
+  /** Default `'none'`. */
+  keyboard?: 'none' | 'exclusive' | 'on-demand'
 }
 
 export type EventType = 'click' | 'mousedown' | 'mouseup' | 'mousemove' | 'mouseenter' | 'mouseleave' |

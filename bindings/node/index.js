@@ -41,6 +41,30 @@ const signals = require('./signals')
 const dom = require('./dom')
 const { OP, HTMLElement, TextNode, Comment, DocumentFragment, createElement } = dom
 
+const LAYERS = ['background', 'bottom', 'top', 'overlay']
+const EDGES = ['top', 'bottom', 'left', 'right']
+const KEYBOARD = ['none', 'exclusive', 'on-demand']
+
+function oneOf (what, value, names) {
+  if (value != null && !names.includes(value)) {
+    throw new TypeError(`${what}: '${value}' is not one of ${names.map((n) => `'${n}'`).join(', ')}`)
+  }
+}
+
+/** The window options as the addon takes them; unknown layer-shell names throw here. */
+function windowConfig (o) {
+  const l = o.layerShell
+  if (l) {
+    oneOf('layerShell.layer', l.layer, LAYERS)
+    oneOf('layerShell.keyboard', l.keyboard, KEYBOARD)
+    for (const e of l.anchor ?? []) oneOf('layerShell.anchor', e, EDGES)
+  }
+  return {
+    title: o.title, width: o.width, height: o.height, resizable: o.resizable, gpu: o.gpu,
+    transparent: o.transparent, alwaysOnTop: o.alwaysOnTop, frame: o.frame, layerShell: l,
+  }
+}
+
 class Window {
   constructor (app, id, options = {}) {
     this.app = app
@@ -63,10 +87,7 @@ class Window {
     this.body.ownerWindow = this
     this.body.id = 0
     this._nodes.set(0, this.body)
-    app.native.openWindow(id, {
-      title: options.title, width: options.width, height: options.height,
-      resizable: options.resizable, gpu: options.gpu, transparent: options.transparent,
-    })
+    app.native.openWindow(id, windowConfig(options))
   }
 
   /** An element. Capitalized tags are Blender's widgets (`Button`, `NumberSlider` ...). */

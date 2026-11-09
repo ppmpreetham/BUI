@@ -51,8 +51,58 @@ pub struct WindowConfig {
     pub height: Option<f64>,
     pub resizable: Option<bool>,
     pub gpu: Option<bool>,
-    /// Per-pixel alpha, only the elements show (Linux).
+    /// Per-pixel alpha, only the elements show.
     pub transparent: Option<bool>,
+    /// Above other windows.
+    pub always_on_top: Option<bool>,
+    /// `false`: no frame.
+    pub frame: Option<bool>,
+    pub layer_shell: Option<LayerShellConfig>,
+}
+
+/// A layer-shell surface as JavaScript asks for it: the names of `index.d.ts`, checked there.
+#[derive(Clone, Debug, Default)]
+pub struct LayerShellConfig {
+    pub layer: Option<String>,
+    pub anchor: Option<Vec<String>>,
+    pub exclusive_zone: Option<f64>,
+    pub keyboard: Option<String>,
+}
+
+impl LayerShellConfig {
+    fn options(&self) -> LayerShellOptions {
+        let edge = |name: &str| match name {
+            "top" => Anchor::TOP,
+            "bottom" => Anchor::BOTTOM,
+            "left" => Anchor::LEFT,
+            "right" => Anchor::RIGHT,
+            _ => Anchor::default(),
+        };
+        LayerShellOptions {
+            layer: match self.layer.as_deref() {
+                Some("background") => Layer::Background,
+                Some("bottom") => Layer::Bottom,
+                Some("top") => Layer::Top,
+                _ => Layer::Overlay,
+            },
+            anchor: self.anchor.iter().flatten().fold(Anchor::default(), |a, e| a | edge(e)),
+            exclusive_zone: self.exclusive_zone.map(|z| px(z as f32)),
+            keyboard_interactivity: match self.keyboard.as_deref() {
+                Some("exclusive") => KeyboardInteractivity::Exclusive,
+                Some("on-demand") => KeyboardInteractivity::OnDemand,
+                _ => KeyboardInteractivity::None,
+            },
+        }
+    }
+
+    /// The window kind: a layer surface wins over `alwaysOnTop`.
+    fn kind(layer_shell: Option<&LayerShellConfig>, always_on_top: Option<bool>) -> WindowKind {
+        match (layer_shell, always_on_top) {
+            (Some(l), _) => WindowKind::LayerShell(l.options()),
+            (None, Some(true)) => WindowKind::Floating,
+            (None, _) => WindowKind::Normal,
+        }
+    }
 }
 
 /// A layout box, logical pixels.
@@ -452,6 +502,12 @@ pub fn open_window(cx: &mut App, id: u32, config: WindowConfig, sink: Sink) {
             WindowBackgroundAppearance::Transparent
         } else {
             WindowBackgroundAppearance::Opaque
+        },
+        kind: LayerShellConfig::kind(config.layer_shell.as_ref(), config.always_on_top),
+        window_decorations: if config.frame == Some(false) {
+            WindowDecorations::Client
+        } else {
+            WindowDecorations::Server
         },
         ..Default::default()
     };
