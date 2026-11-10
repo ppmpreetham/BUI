@@ -283,9 +283,116 @@ local mb = bui.Node("menubutton")
 mb:set_menus({
   {text="Open", icon=0, fn=function() end},
   {text="Save", icon=1, enabled=1},
-  {text="", icon=0}, -- separator
+  {text="-"}, -- separator
   {text="Quit", icon=0},
 })
+
+-- Menu item types the Python binding accepts (blanks and booleans, icon
+-- names) must not error in Lua either.
+local mb2 = bui.Node("menubutton")
+mb2:set_menus({
+  {text = "Bold", checked = true, icon = "CHECKBOX", enabled = false},
+  {text = "Plain", checked = false, enabled = true},
+  {text = "Num", checked = 1, enabled = 0},
+})
+
+-- Pick through a real press-drag-release (kit_menus.c: press opens,
+-- release on a row fires the item's callback).
+local hits = {}
+local mroot = bui.Node("frame")
+local pmb = bui.Node("menubutton")
+pmb:set("text", "File")
+pmb:set_menus({
+  {text = "New", fn = function() hits.new = (hits.new or 0) + 1 end},
+  {text = "Off", enabled = false, fn = function() hits.off = (hits.off or 0) + 1 end},
+  {text = "-"},
+  {text = "Recent", icon = "FILE_FOLDER", sub = {
+    {text = "a.lua", fn = function() hits.deep = (hits.deep or 0) + 1 end},
+  }},
+})
+mroot:add(pmb)
+pmb:geom(bui.GEOM_PACK, {side = 0, fill = 1})
+local mctx = bui.Context(mroot)
+mctx:render(300, 200, 1)
+local mx, my, mw, mh = pmb:rect()
+check(mw > 0, "menubutton not laid out")
+
+local function pick_row(rows, i)
+  local r = rows[i]
+  mctx:motion(r.x + 10, r.y + r.h // 2, 0)
+  mctx:release(r.x + 10, r.y + r.h // 2, 0)
+end
+
+mctx:press(mx + mw // 2, my + mh // 2, 0)
+local rows = mctx:menu_rows(-1)
+check(rows and #rows == 4, "menu_rows count, got " .. tostring(rows and #rows))
+pick_row(rows, 1)
+check(hits.new == 1, "menu item callback did not fire")
+check(mctx:popup_count() == 0, "popups not closed after pick")
+
+-- A disabled item never fires its callback.
+mctx:press(mx + mw // 2, my + mh // 2, 0)
+rows = mctx:menu_rows(-1)
+pick_row(rows, 2)
+check(not hits.off, "disabled menu item fired its callback")
+mctx:close_popups()
+
+-- Submenus open from the parent row and their items fire.
+mctx:press(mx + mw // 2, my + mh // 2, 0)
+rows = mctx:menu_rows(-1)
+pick_row(rows, 4)
+check(mctx:popup_count() == 2, "submenu did not open")
+local srows = mctx:menu_rows(-1)
+check(srows and srows[1].text == "a.lua", "submenu rows wrong")
+mctx:press(srows[1].x + 10, srows[1].y + srows[1].h // 2, 0)
+mctx:release(srows[1].x + 10, srows[1].y + srows[1].h // 2, 0)
+check(hits.deep == 1, "submenu callback did not fire")
+check(mctx:popup_count() == 0, "popups not closed after submenu pick")
+
+-- Replacing the items frees the old callbacks and the new ones fire.
+pmb:set_menus({{text = "Again", fn = function() hits.again = (hits.again or 0) + 1 end}})
+mctx:press(mx + mw // 2, my + mh // 2, 0)
+rows = mctx:menu_rows(-1)
+check(rows and #rows == 1, "set_menus replacement row count")
+pick_row(rows, 1)
+check(hits.again == 1, "replaced menu callback did not fire")
+
+-- open_menu / open_pie callbacks.
+mctx:open_menu(nil, {{text = "Quick", fn = function() hits.quick = (hits.quick or 0) + 1 end}},
+               "Quick", 40, 40)
+rows = mctx:menu_rows(-1)
+check(rows and rows[1].text == "Quick", "open_menu rows")
+mctx:press(rows[1].x + 10, rows[1].y + rows[1].h // 2, 0)
+mctx:motion(rows[1].x + 10, rows[1].y + rows[1].h // 2, 0)
+mctx:release(rows[1].x + 10, rows[1].y + rows[1].h // 2, 0)
+check(hits.quick == 1, "open_menu callback did not fire")
+
+-- MenuBar composition (same as Python's MenuBar): set_menus on a menubar
+-- builds one menubutton child per top-level menu.
+local bar = bui.Node("menubar")
+local broot = bui.Node("frame")
+bar:set_menus({
+  {text = "File", sub = {{text = "New", fn = function() hits.bar_new = (hits.bar_new or 0) + 1 end}}},
+  {text = "Edit", sub = {{text = "Undo"}}},
+})
+broot:add(bar)
+bar:geom(bui.GEOM_PACK, {side = 0, fill = 1})
+local bctx = bui.Context(broot)
+bctx:render(400, 100, 1)
+check(bar:child_count() == 2, "menubar child count, got " .. bar:child_count())
+local file_btn = bar:child(0)
+check(file_btn ~= nil and file_btn:type() == "menubutton", "menubar child type")
+check(file_btn:get("text") == "File", "menubar child text")
+local bx, by, bw, bh = file_btn:rect()
+check(bw > 0, "menubar button not laid out")
+bctx:press(bx + bw // 2, by + bh // 2, 0)
+local brows = bctx:menu_rows(-1)
+check(brows and #brows == 1 and brows[1].text == "New", "menubar menu rows")
+bctx:motion(brows[1].x + 10, brows[1].y + brows[1].h // 2, 0)
+bctx:release(brows[1].x + 10, brows[1].y + brows[1].h // 2, 0)
+check(hits.bar_new == 1, "menubar item callback did not fire")
+bar:set_menus({{text = "View", sub = {{text = "Zoom"}}}})
+check(bar:child_count() == 1, "menubar rebuild child count")
 
 -- ── Progress / Meter ────────────────────────────────────────────────
 
