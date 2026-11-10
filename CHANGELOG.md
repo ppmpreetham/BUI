@@ -70,6 +70,8 @@ All notable changes to **blenderui** (BUI). The format follows
   reads the setting when it starts.
 
 ### Fixed
+- **Crash at exit on Wayland:** `exit` on another thread closed libwayland-client while the event loop still called into
+  it (SIGSEGV in about 1 of 15 benchmark exits). The library now stays loaded until the process ends.
 - **X11 frame pacing:** an animation frame is due one refresh after the previous frame started, so the render time is part
   of the interval, as the docs say. The loop slept a full refresh after each frame, so a 3000-cell animation on the GPU
   renderer ran at 24 fps instead of 49 fps.
