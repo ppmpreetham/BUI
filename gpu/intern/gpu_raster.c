@@ -68,13 +68,16 @@ static inline Paint paint_from(const BuiRaster *rs, const float c[4])
   return p;
 }
 
-/* Blend s over d with factor f in 0..256, all four bytes (alpha 0 stays 0). */
+/* Blend s over d with factor f in 0..256. The alpha byte only takes part when s has one
+ * (a raster that keeps alpha): an opaque frame costs what it did without alpha. */
 static inline uint32_t blend(uint32_t d, uint32_t s, uint32_t f)
 {
   const uint32_t nf = 256 - f;
   const uint32_t rb = (((s & 0xFF00FFu) * f + (d & 0xFF00FFu) * nf) >> 8) & 0xFF00FFu;
-  const uint32_t ag = (((s >> 8) & 0xFF00FFu) * f + ((d >> 8) & 0xFF00FFu) * nf) & 0xFF00FF00u;
-  return rb | ag;
+  if (!(s >> 24)) {
+    return rb | ((((s & 0x00FF00u) * f + (d & 0x00FF00u) * nf) >> 8) & 0x00FF00u);
+  }
+  return rb | ((((s >> 8) & 0xFF00FFu) * f + ((d >> 8) & 0xFF00FFu) * nf) & 0xFF00FF00u);
 }
 
 /* Write with coverage cov (0..1) scaled by paint alpha. */
