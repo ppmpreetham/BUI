@@ -1338,6 +1338,13 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
                  host_clipboard_get, host_clipboard_set, host_schedule, host_emit};
   BK_context_set_host(ctx, &host);
   wl_surface_commit(win->surface); /* the first commit asks for the configure */
+  wl_display_flush(g.display);
+  /* while the compositor answers: load the UI font and its ASCII glyphs at the UI size, as
+   * Blender loads its default font before the first draw */
+  static const char ascii[] =
+      " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+  float tw;
+  BUI_text_prepare("", 0, bk_font_size(), ascii, (int)sizeof(ascii) - 1, &tw);
   wait_configure(win);
   return win;
 }
