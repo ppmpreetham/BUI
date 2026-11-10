@@ -79,9 +79,6 @@ All notable changes to **blenderui** (BUI). The format follows
   the compositor answers while the program sets up (as GTK does). It no longer opens an X11 connection first in a Wayland
   session. While a new Wayland window waits for its first configure, the UI font and its ASCII glyphs load, so the first
   frame does not: about 2 ms less from configure to the first frame.
-- **Rust: new text of the same width no longer lays the window out again.** A single word (no space, newline or break
-  mode) measures to its width only, so its layout key is that width, not the text: a counter or label that keeps its
-  width is a paint-only change, as a kit value that keeps its size. 3000 animated cells: Taffy 2.3 to 4.1 ms, now 2.4 to 3.4 ms.
 - **A display list that changes everywhere** (`BK_canvas_put_item` each frame) compared and damaged every item one by one.
   Once the damage covers half the canvas, or the window redraws whole, the canvas redraws whole and items are no longer
   compared, as Blender's `ED_region_tag_redraw_partial` does. 3000 animated cells: 1.5 ms of flush per frame, 0.5 ms now.
