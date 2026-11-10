@@ -46,6 +46,11 @@ fn fnv(parts: &[&[u8]]) -> u64 {
     h.finish()
 }
 
+/// Text that cannot wrap: no space, no newline, no break mode. It measures to its width.
+fn single_word(text: &str, brk: u8) -> bool {
+    brk == 0 && !text.contains([' ', '\n'])
+}
+
 /// The key of the element with `.id(id)`.
 pub(crate) fn id_key(id: &str) -> Key {
     fnv(&[b"#", id.as_bytes()])
@@ -1729,16 +1734,19 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// The measure context for the text of box `node`, registered under `key`.
+    /// The measure context for the text of box `node`, registered under `key`. A single word
+    /// measures to its width only, so its context holds the width: new text of the same width
+    /// leaves the layout clean (a paint-only change, as a kit value that keeps its size).
     fn text_measure(&mut self, key: Key, node: usize, c: StyleId, nowrap: bool) -> Measure {
         self.text_box.insert(key, node);
+        let c = &self.styles[c];
+        let (size, flags, brk) = (c.font_size, text::flags(c), text::break_mode(c));
         let hash = match &self.nodes[node].content {
+            Content::Text(t) if single_word(t, brk) => u64::from(self.text.width(t, size, flags).ceil().to_bits()),
             Content::Text(t) => fnv(&[t.as_bytes()]),
             _ => 0,
         };
-        let c = &self.styles[c];
-        Measure::Text { key, hash, size: c.font_size, flags: text::flags(c), line: c.line_px(), nowrap,
-                        brk: text::break_mode(c) }
+        Measure::Text { key, hash, size, flags, line: c.line_px(), nowrap, brk }
     }
 
     /// The taffy node for box `i` (and its subtree). Marks it dirty when
@@ -2298,7 +2306,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
                         Some(Content::Text(t)) => t.as_str(),
                         _ => "",
                     };
-                    if !text.contains([' ', '\n']) && *brk == 0 {
+                    if single_word(text, *brk) {
                         // one word: no wrapping to do
                         let w = tc.width(text, *size, *flags);
                         return Size { width: known.width.unwrap_or(w.ceil()),
