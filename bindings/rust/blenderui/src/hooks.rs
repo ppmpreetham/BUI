@@ -22,7 +22,7 @@ use std::cell::Cell;
 use std::marker::PhantomData;
 use std::panic::Location;
 
-use crate::style::FnvMap;
+use crate::style::KeyMap;
 
 struct Slot {
     value: Option<Box<dyn Any>>,
@@ -42,9 +42,9 @@ struct Store {
     slots: Vec<Slot>,
     free: Vec<u32>,
     /// (window, call site, key scope, occurrence) -> slot
-    keys: FnvMap<(usize, usize, u64, u32), u32>,
+    keys: KeyMap<(usize, usize, u64, u32), u32>,
     /// occurrences of each (call site, key scope) in the current render
-    occ: FnvMap<(usize, u64), u32>,
+    occ: KeyMap<(usize, u64), u32>,
     /// the keys of the keyed components being rendered, hashed together
     scope: u64,
     window: Option<usize>,

@@ -79,6 +79,9 @@ All notable changes to **blenderui** (BUI). The format follows
   the compositor answers while the program sets up (as GTK does). It no longer opens an X11 connection first in a Wayland
   session. While a new Wayland window waits for its first configure, the UI font and its ASCII glyphs load, so the first
   frame does not: about 2 ms less from configure to the first frame.
+- **Rust: one hasher, a word at a time.** Style, layout and paint keys hashed with two copies of a byte-at-a-time FNV;
+  they now share foldhash (already in the dependency tree). 3000 animated cells: the cascade 3.0 to 4.7 ms per frame,
+  now 2.2 to 2.7 ms.
 - **A display list that changes everywhere** (`BK_canvas_put_item` each frame) compared and damaged every item one by one.
   Once the damage covers half the canvas, or the window redraws whole, the canvas redraws whole and items are no longer
   compared, as Blender's `ED_region_tag_redraw_partial` does. 3000 animated cells: 1.5 ms of flush per frame, 0.5 ms now.

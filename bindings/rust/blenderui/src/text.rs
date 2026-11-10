@@ -1,7 +1,7 @@
 //! Text measuring and wrapping with the kit's font engine (the same one that
 //! draws, so layout and paint agree).
 
-use crate::style::Computed;
+use crate::style::{Computed, KeyMap};
 use blenderui_sys as sys;
 
 /// Font flags for a style (bold / italic; decorations are painted as lines),
@@ -119,7 +119,7 @@ pub(crate) const fn item_top(baseline: f32, size: f32) -> f32 {
     baseline - KIT_ITEM_BASELINE * size
 }
 
-type Widths = crate::style::FnvMap<Box<str>, f32>;
+type Widths = KeyMap<Box<str>, f32>;
 
 /// Text widths by (size, flags) then text: looked up by `&str`, no
 /// allocation on a hit. Owned by the window, kept across frames.
@@ -130,14 +130,14 @@ type Widths = crate::style::FnvMap<Box<str>, f32>;
 /// whole-pixel sizes follow the device size, so a width measured at the
 /// logical size would not match the drawn text.
 pub(crate) struct TextCache {
-    fonts: crate::style::FnvMap<(u32, i32), Widths>,
+    fonts: KeyMap<(u32, i32), Widths>,
     /// Device pixels per logical pixel (the window's resolution scale).
     scale: f32,
 }
 
 impl Default for TextCache {
     fn default() -> Self {
-        TextCache { fonts: crate::style::FnvMap::default(), scale: 1.0 }
+        TextCache { fonts: KeyMap::default(), scale: 1.0 }
     }
 }
 
