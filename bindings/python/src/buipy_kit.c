@@ -2496,15 +2496,38 @@ static void win_on_timer_gil(void *data, BKWindow *w, int id)
   GIL_LEAVE;
 }
 
+/* The close that was queued behind a running callback: ask the handler now, close if it agrees. */
+static PyObject *win_deferred_close(PyObject *self, PyObject *unused)
+{
+  KitWindowObject *win = (KitWindowObject *)self;
+  if (win->win && BK_window_is_open(win->win) && win_on_close(win, win->win)) {
+    BK_window_close(win->win);
+  }
+  Py_RETURN_NONE;
+}
+
+static PyMethodDef win_deferred_close_def = {"close", win_deferred_close, METH_NOARGS, NULL};
+
+static void win_defer_close(void *data)
+{
+  PyObject *fn = PyCFunction_New(&win_deferred_close_def, (PyObject *)data);
+  defer_call(fn, NULL);
+  Py_XDECREF(fn);
+  PyErr_Clear();
+}
+
 static int win_on_close_gil(void *data, BKWindow *w)
 {
   GIL_ENTER;
-  int allow = 0; /* the handler answers now: a close that arrives while a callback runs is refused */
+  int allow = 0; /* a close that arrives while a callback runs is answered after it */
   if (g_py_depth == 0) {
     g_py_depth++;
     allow = win_on_close(data, w);
     g_py_depth--;
     run_deferred();
+  }
+  else {
+    win_defer_close(data);
   }
   GIL_LEAVE;
   return allow;
