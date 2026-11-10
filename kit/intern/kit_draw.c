@@ -34,9 +34,12 @@ int BK_unit(void)
 {
   return bk_unit();
 }
+static void measure_cache_clear(void);
+
 void BK_set_font(const char *family)
 {
   strncpy(g_font_family, family ? family : "", sizeof(g_font_family) - 1);
+  measure_cache_clear(); /* the cached widths are of the old family */
 }
 
 /* wm_window.cc WM_window_dpi_set_userdef: U.dpi = int(72 * ui_scale), pixelsize =
@@ -1063,6 +1066,11 @@ typedef struct MeasureSlot {
 } MeasureSlot;
 #define MEASURE_SLOTS 8192
 static MeasureSlot g_measure[MEASURE_SLOTS];
+
+static void measure_cache_clear(void)
+{
+  memset(g_measure, 0, sizeof(g_measure));
+}
 
 static uint64_t hash_str(const char *s, int len, bool bold)
 {
