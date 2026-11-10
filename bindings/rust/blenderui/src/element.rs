@@ -35,7 +35,7 @@ pub(crate) fn resolve_deferred(el: &mut AnyElement, window: &mut Window, app: &m
     }
     fn walk(el: &mut AnyElement, window: &mut Window, app: &mut App) {
         if let AnyElement::Element(d) = el {
-            if let Some(f) = d.deferred.take() {
+            if let Some(f) = d.rare.as_mut().and_then(|r| r.deferred.take()) {
                 f(window, app, d);
             }
             for c in &mut d.children {
@@ -75,11 +75,23 @@ pub struct Div {
     pub(crate) children: Vec<AnyElement>,
     /// Allocated only when the element has a listener.
     pub(crate) listeners: Option<Box<Listeners>>,
-    pub(crate) paint: Option<PaintFn>,
-    pub(crate) image: Option<Arc<crate::paint::Image>>,
-    pub(crate) video: Option<std::rc::Rc<crate::video::Video>>,
+    /// Allocated only when used: builder calls move the element, so it stays small.
+    pub(crate) rare: Option<Box<Rare>>,
+}
+
+/// What a replaced element shows when the code gives it (else its `src`): one of these.
+pub(crate) enum ReplacedSource {
+    Painted(PaintFn),
+    Image(Arc<crate::paint::Image>),
+    Video(std::rc::Rc<crate::video::Video>),
+}
+
+/// The parts few elements use.
+#[derive(Default)]
+pub(crate) struct Rare {
+    pub source: Option<ReplacedSource>,
     /// Runs before layout with the window and app (see [`Div::defer`]).
-    pub(crate) deferred: Option<Deferred>,
+    pub deferred: Option<Deferred>,
 }
 
 /// Styles for interaction states (`.hover(|s| ...)` ...).
@@ -139,11 +151,18 @@ impl Div {
             states: None,
             children: Vec::new(),
             listeners: None,
-            paint: None,
-            image: None,
-            video: None,
-            deferred: None,
+            rare: None,
         }
+    }
+
+    fn rare_mut(&mut self) -> &mut Rare {
+        self.rare.get_or_insert_with(Box::default)
+    }
+
+    /// Set what this replaced element shows (the last source given wins).
+    fn source(mut self, source: Option<ReplacedSource>) -> Self {
+        self.rare_mut().source = source;
+        self
     }
 
     /// Finish this element later, when the window is at hand: `f` runs
@@ -154,7 +173,7 @@ impl Div {
     ///
     /// [`uniform_list`]: crate::uniform_list
     pub(crate) fn defer(mut self, f: impl FnOnce(&mut Window, &mut App, &mut Div) + 'static) -> Self {
-        self.deferred = Some(Box::new(f));
+        self.rare_mut().deferred = Some(Box::new(f));
         DEFERRED.set(DEFERRED.get() + 1);
         self
     }
@@ -279,22 +298,20 @@ impl Div {
     /// Image pixels for `<img>`: straight RGBA, `width * height * 4` bytes
     /// (copied; to show the same pixels every frame, make an `Image` once and
     /// pass it to `image`).
-    pub fn image_rgba(mut self, width: u32, height: u32, rgba: impl AsRef<[u8]>) -> Self {
-        self.image = crate::paint::Image::from_rgba(width, height, rgba.as_ref()).map(Arc::new);
-        self
+    pub fn image_rgba(self, width: u32, height: u32, rgba: impl AsRef<[u8]>) -> Self {
+        let image = crate::paint::Image::from_rgba(width, height, rgba.as_ref());
+        self.source(image.map(|i| ReplacedSource::Image(Arc::new(i))))
     }
 
     /// Show shared image pixels (cheap to pass every frame).
-    pub fn image(mut self, image: Arc<crate::paint::Image>) -> Self {
-        self.image = Some(image);
-        self
+    pub fn image(self, image: Arc<crate::paint::Image>) -> Self {
+        self.source(Some(ReplacedSource::Image(image)))
     }
 
     /// `<video>` with a player you keep (play, pause, seek, events): cheap
     /// to pass every frame. Without it, `<video src>` makes its own.
-    pub fn video(mut self, video: std::rc::Rc<crate::video::Video>) -> Self {
-        self.video = Some(video);
-        self
+    pub fn video(self, video: std::rc::Rc<crate::video::Video>) -> Self {
+        self.source(Some(ReplacedSource::Video(video)))
     }
 
     // -- events ----------------------------------------------------------------------------
@@ -434,9 +451,7 @@ impl FluentBuilder for StyleRefinement {}
 /// gpui's `canvas(prepaint, paint)`: an element that paints itself.
 pub fn canvas(paint: impl Fn(crate::geometry::Bounds<f32>, &mut crate::paint::Painter) + 'static)
     -> Div {
-    let mut d = Div::new("canvas");
-    d.paint = Some(Box::new(move |b, p, _| paint(b, p)));
-    d
+    Div::new("canvas").source(Some(ReplacedSource::Painted(Box::new(move |b, p, _| paint(b, p)))))
 }
 
 /// Like [`canvas`], and the paint callback also reads the app: a view over
@@ -444,7 +459,5 @@ pub fn canvas(paint: impl Fn(crate::geometry::Bounds<f32>, &mut crate::paint::Pa
 /// into the element tree. The data tables draw this way.
 pub fn canvas_with(paint: impl Fn(crate::geometry::Bounds<f32>, &mut crate::paint::Painter, &App) + 'static)
     -> Div {
-    let mut d = Div::new("canvas");
-    d.paint = Some(Box::new(paint));
-    d
+    Div::new("canvas").source(Some(ReplacedSource::Painted(Box::new(paint))))
 }

@@ -20,7 +20,7 @@ use taffy::prelude::*;
 use taffy::style::Overflow;
 
 use crate::css::{Decl, Prop, Rule, Stylesheet, Subject};
-use crate::element::{AnyElement, Div, Listeners, PaintFn, ParentElement, SharedString};
+use crate::element::{AnyElement, Div, Listeners, PaintFn, ParentElement, ReplacedSource, SharedString};
 use crate::geometry::{rect, Bounds, Units};
 use crate::html::{tag_kind, ua_styled_stylesheet, ua_stylesheet, TagKind};
 use crate::paint::{Image, ImageCache, ImageFile};
@@ -1214,12 +1214,12 @@ impl<'a> Builder<'a> {
                 }
             }
             TagKind::Replaced => {
-                let r = if let Some(f) = div.paint.take() {
-                    Replaced::Painted(f)
-                } else if let Some(img) = div.image.take() {
-                    Replaced::Image(img)
-                } else if let Some(v) = div.video.take() {
-                    Replaced::Video(v)
+                let r = if let Some(s) = div.rare.as_mut().and_then(|r| r.source.take()) {
+                    match s {
+                        ReplacedSource::Painted(f) => Replaced::Painted(f),
+                        ReplacedSource::Image(img) => Replaced::Image(img),
+                        ReplacedSource::Video(v) => Replaced::Video(v),
+                    }
                 } else if div.tag == "video" && let Some(v) = self.video_src(i) {
                     Replaced::Video(v)
                 } else if let Some(file) = self.attr(i, "src").map(str::to_owned).and_then(|s| self.images.load(&s)) {

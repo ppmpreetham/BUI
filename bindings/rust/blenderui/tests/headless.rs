@@ -336,3 +336,26 @@ fn backspace_resets_to_the_value_the_field_was_made_with() {
         assert!((back - 5.0).abs() < 1e-9, "Backspace should give 5, got {back}");
     });
 }
+
+/// Every builder call moves the element: rarely used parts stay out of line.
+#[test]
+fn element_stays_small() {
+    assert!(std::mem::size_of::<Div>() <= 136, "Div is {} bytes", std::mem::size_of::<Div>());
+}
+
+/// A replaced element shows the last source it was given.
+#[test]
+fn canvas_image_and_video_sources() {
+    struct Pic;
+    impl Render for Pic {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            body().m_0().child(img().id("pic").w(px(4.0)).h(px(4.0)).image_rgba(1, 1, [0u8, 0, 255, 255]))
+        }
+    }
+    Application::headless().run(|cx| {
+        let win = open(cx, 20.0, 20.0, Pic);
+        let img = cx.draw(win.id);
+        let s = img.0 / 20;
+        assert_eq!(pixel(&img, s, s), 0x0000ff, "the image's pixel shows");
+    });
+}
