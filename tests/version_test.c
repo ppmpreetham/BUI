@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "BUI_kit.h"
+#include "bui_c_api.h"
 
 static int g_fail = 0;
 #define CHECK(c) \
@@ -28,6 +29,13 @@ int main(void)
   CHECK(BUI_KIT_VERSION_AT_LEAST(BUI_KIT_VERSION_MAJOR, BUI_KIT_VERSION_MINOR, BUI_KIT_VERSION_PATCH));
   CHECK(!BUI_KIT_VERSION_AT_LEAST(BUI_KIT_VERSION_MAJOR + 1, 0, 0));
   CHECK(BUI_KIT_VERSION_MINOR < 100 && BUI_KIT_VERSION_PATCH < 100); /* the number scheme holds */
+  /* the stable C API reports the same version, not a copy of it that can drift */
+  int major = -1, minor = -1, patch = -1;
+  bui_get_version(&major, &minor, &patch);
+  CHECK(major == BUI_KIT_VERSION_MAJOR && minor == BUI_KIT_VERSION_MINOR && patch == BUI_KIT_VERSION_PATCH);
+  char api_expect[48];
+  snprintf(api_expect, sizeof(api_expect), "BUI %s", BUI_KIT_VERSION_STRING);
+  CHECK(strcmp(bui_version_string(), api_expect) == 0);
   if (!g_fail) {
     printf("version test passed: %s\n", BK_version_string());
   }

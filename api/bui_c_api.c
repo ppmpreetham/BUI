@@ -2,11 +2,12 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "bui_c_api.h"
 
+#include "BUI_kit.h" /* BUI_KIT_VERSION_*: the version lives in one place, which tools/bump_version.py moves */
 #include "GPU_backend_sink.h"
 
-#define BUI_VERSION_MAJOR 0
-#define BUI_VERSION_MINOR 1
-#define BUI_VERSION_PATCH 0
+#define BUI_VERSION_MAJOR BUI_KIT_VERSION_MAJOR
+#define BUI_VERSION_MINOR BUI_KIT_VERSION_MINOR
+#define BUI_VERSION_PATCH BUI_KIT_VERSION_PATCH
 
 void bui_get_version(int *r_major, int *r_minor, int *r_patch)
 {
@@ -23,7 +24,7 @@ void bui_get_version(int *r_major, int *r_minor, int *r_patch)
 
 const char *bui_version_string(void)
 {
-  return "BUI 0.1.0";
+  return "BUI " BUI_KIT_VERSION_STRING;
 }
 
 void bui_set_render_sink(const BuiGpuSink *sink)
