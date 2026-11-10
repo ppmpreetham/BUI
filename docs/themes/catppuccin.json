@@ -1,0 +1,101 @@
+{
+  "$schema": "../theme-schema.json",
+  "name": "Catppuccin for BUI",
+  "author": "Catppuccin (https://github.com/catppuccin/catppuccin), colors; BUI, the mapping",
+  "url": "https://github.com/catppuccin/catppuccin",
+  "themes": [
+    {
+      "name": "Catppuccin Mocha",
+      "mode": "dark",
+      "radius": 0.4,
+      "colors": {
+        "background": "#181825",
+        "foreground": "#cdd6f4",
+        "border": "#313244",
+        "primary.background": "#89b4fa",
+        "primary.foreground": "#1e1e2e",
+        "secondary.background": "#302d41",
+        "accent.background": "#45475a",
+        "accent.foreground": "#cdd6f4",
+        "popover.background": "#1e1e2e",
+        "popover.foreground": "#cdd6f4",
+        "input.border": "#6c7086",
+        "muted.background": "#302d41",
+        "tab_bar.background": "#0b0b11",
+        "tab.background": "#181825",
+        "tab.foreground": "#aeb7d5",
+        "tab.active.background": "#1e1e2e",
+        "tab.active.foreground": "#cdd6f4",
+        "scrollbar.thumb.background": "#4e4e5e",
+        "caret": "#cba6f7",
+        "selection.background": "#89b4fa55",
+
+        "text_field.background": "#11111b",
+        "text_field.background.selected": "#181825",
+        "number_field.fill": "#74c7ec",
+        "slider.fill": "#74c7ec",
+        "panel.background": "#181825",
+        "panel.header": "#1e1e2e",
+        "node_editor.grid": "#1e1e2e",
+        "node_editor.node.selected": "#f5c2e7",
+        "node_editor.node.active": "#cba6f7"
+      }
+    },
+    {
+      "name": "Catppuccin Latte",
+      "mode": "light",
+      "radius": 0.4,
+      "colors": {
+        "background": "#e5e9ef",
+        "foreground": "#4c4f69",
+        "border": "#acb0be",
+        "primary.background": "#7287fd",
+        "primary.foreground": "#eff1f5",
+        "secondary.background": "#dce0e8",
+        "accent.background": "#ccd2de",
+        "accent.foreground": "#4c4f69",
+        "popover.background": "#eff1f5",
+        "popover.foreground": "#4c4f69",
+        "input.border": "#acb0be",
+        "muted.background": "#dce0e8",
+        "tab_bar.background": "#dce0e8",
+        "tab.background": "#d2d7e2",
+        "tab.foreground": "#82848c",
+        "tab.active.background": "#e5e9ef",
+        "tab.active.foreground": "#4c4f69",
+        "scrollbar.thumb.background": "#acb0be",
+        "caret": "#7287fd",
+        "selection.background": "#7287fd55",
+
+        "text_field.background": "#eff1f5",
+        "number_field.fill": "#7287fd",
+        "slider.fill": "#7287fd"
+      }
+    },
+    {
+      "name": "Mocha Flat",
+      "mode": "dark",
+      "font.size": 12,
+      "shadow": false,
+      "colors": {
+        "background": "#181825",
+        "foreground": "#cdd6f4",
+        "primary.background": "#89b4fa",
+        "primary.foreground": "#1e1e2e",
+        "secondary.background": "#302d41",
+        "border": "#45475a",
+
+        "button.border.width": 2,
+        "button.roundness": 0,
+        "button.emboss.enabled": false,
+        "button.gradient.enabled": false,
+        "number_field.corners.top_left": false,
+        "number_field.corners.bottom_left": false,
+        "number_field.border.width": 0,
+        "text_field.corners.top_right": false,
+        "text_field.corners.top_left": true,
+        "dropdown.emboss.enabled": false
+      }
+    }
+  ]
+}

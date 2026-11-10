@@ -1,10 +1,10 @@
 ---
 title: Theming and colors
 sidebarLabel: Theming
-description: Blender's Dark and Light themes in BUI, how to switch between them from every language, where the colors come from, and what else you can change.
+description: Blender's Dark and Light themes in BUI, how to switch between them from every language, how to write your own theme file, where the colors come from, and what else you can change.
 section: Concepts
 order: 70
-sources: ["kit/include/BUI_kit.h", "kit/intern/kit_theme_presets.c", "kit/intern/kit_core.c", "kit/intern/kit_draw.c", "kit/intern/kit_intern.h", "kit/intern/kit_icons_svg.c", "bindings/python/bui/__init__.py", "bindings/python/bui/theme.py", "bindings/python/tests/test_theme.py", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/theme.rs", "bindings/node/index.d.ts", "bindings/react/index.js", "bindings/imgui/imgui_bui_style.cpp", "docs/getting-started.md", "docs/tkinter.md", "docs/components.md"]
+sources: ["kit/include/BUI_kit.h", "kit/intern/kit_theme_presets.c", "kit/intern/kit_core.c", "kit/intern/kit_draw.c", "kit/intern/kit_intern.h", "kit/intern/kit_icons_svg.c", "kit/intern/kit_theme.c", "kit/intern/kit_json.c", "tools/gen_theme_keys.py", "docs/theming.md", "docs/theme-keys.md", "docs/themes/catppuccin.json", "tests/theme_file_test.c", "bindings/python/bui/__init__.py", "bindings/python/bui/theme.py", "bindings/python/tests/test_theme.py", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/theme.rs", "bindings/node/index.d.ts", "bindings/react/index.js", "bindings/imgui/imgui_bui_style.cpp", "docs/getting-started.md", "docs/tkinter.md", "docs/components.md"]
 ---
 
 BUI looks like Blender because it uses Blender's themes: the same grays, the same blue for selection, the same rounded corners and the same icons. That's what makes a BUI tool feel instantly familiar to the millions of people who use Blender.
@@ -165,6 +165,135 @@ Change the scale, and the whole UI grows or shrinks together, like Blender's Res
 
 The scale is clamped to 0.5–4. By default it follows the display's DPI (see [Window hosts](../window-hosts/#hidpi-and-scaling)).
 
+## Your own themes
+
+A **theme file** adds your own themes to Dark and Light. It's JSON in the shape of [gpui-kit's themes](https://github.com/longbridge/gpui-kit), with Blender's names for the colors, so you can write one by hand or take a name straight from Blender's theme editor.
+
+<Compare left="A theme of colors (Catppuccin Mocha)" right="Corners, borders and flat buttons (Mocha Flat)">
+  <div slot="left">
+
+<Figure src="images/shots/theme-catppuccin-mocha.png" alt="The Render Properties editor with a purple-gray Catppuccin Mocha theme: dark navy panels, blue slider bars and selected buttons" />
+
+  </div>
+  <div slot="right">
+
+<Figure src="images/shots/theme-mocha-flat.png" alt="The same editor with square, thick-bordered buttons, number fields square on their left side, no gradients and no embossed line under widgets" />
+
+  </div>
+</Compare>
+
+```json
+{
+  "name": "My themes",
+  "themes": [
+    {
+      "name": "My Dark",
+      "mode": "dark",
+      "radius": 0.4,
+      "colors": {
+        "background": "#181825",
+        "foreground": "#cdd6f4",
+        "primary.background": "#89b4fa",
+        "button.background": "#302d41",
+        "button.corners.top_left": false,
+        "button.border.width": 2,
+        "node_editor.grid": "#1e1e2e"
+      }
+    }
+  ]
+}
+```
+
+A theme starts from the built-in theme its `mode` names (`"dark"` or `"light"`) and lists only what it changes. `docs/themes/catppuccin.json` in the repository is a complete example, and `docs/theme-schema.json` is a JSON Schema: set `"$schema"` to it and your editor completes every key.
+
+<LangTabs>
+<Tab label="Python">
+
+```py
+import blenderui as bui
+
+bui.load_theme("my-themes.json")      # a path, or the JSON text itself
+bui.set_theme("My Dark")              # every open window redraws
+bui.set_theme_color("button.background", "#ff0000")   # one color, until the next set_theme
+bui.set_theme_value("button.border.width", 3)
+```
+
+A mistake raises `ValueError` with the line and column; a file with one adds none of its themes.
+
+</Tab>
+<Tab label="Rust">
+
+```rust
+blenderui::load_theme_file("my-themes.json")?; // or load_theme(text)
+blenderui::set_theme("My Dark");
+blenderui::set_theme_color("button.background", [1.0, 0.0, 0.0, 1.0]);
+blenderui::set_theme_value("button.border.width", 3.0);
+```
+
+Errors are `Err(String)`. The `styled` HTML sheet follows the theme's background, text and accent colors.
+
+</Tab>
+<Tab label="JavaScript">
+
+```js
+await app.loadTheme('my-themes.json')   // a path, or the JSON text
+await app.setTheme('My Dark')
+await app.setThemeColor('button.background', '#ff0000')
+await app.setThemeValue('button.border.width', 3)
+```
+
+The theme lives on the UI thread, so these return promises. `setTheme('dark')` and `setTheme('light')` still switch at once.
+
+</Tab>
+<Tab label="Lua">
+
+```lua
+bui.load_theme("my-themes.json")        -- a path, or the JSON text; nil, message on a mistake
+bui.set_theme("My Dark")
+bui.set_theme_color("button.background", 1, 0, 0)
+bui.set_theme_value("button.border.width", 3)
+```
+
+</Tab>
+<Tab label="C">
+
+```c
+BK_theme_load_file("my-themes.json");   /* or BK_theme_load_json(text); -1 and BK_theme_error() on a mistake */
+BK_set_theme("My Dark");
+const float red[4] = {1, 0, 0, 1};
+BK_theme_set_color("button.background", red);
+BK_theme_set_num("button.border.width", 3);
+```
+
+</Tab>
+</LangTabs>
+
+### Three kinds of keys
+
+- **Plain-English keys** name a part of a widget: `button.background`, `number_field.fill`, `slider.text.selected`, `popup.background`, `scrollbar.fill`. There's one key per color of every widget set, and keys for the surroundings (`region.background`, `panel.background`, `caret`, `node_editor.grid` ...).
+- **Blender's own keys** are the path of the property in Blender's theme XML: `user_interface.wcol_regular.inner` is the same key as `button.background`. Blender's theme has 782 keys; BUI uses the ones it has widgets for and **ignores the rest**, so a theme exported from Blender loads whole.
+- **Short palette names** (`background`, `foreground`, `border`, `primary.background`, `secondary.background`, `accent.background`, `popover.background`, `input.border` ...) fill in many keys at once, as gpui-kit's do. They're BUI's convenience, not Blender's. A key the theme sets itself **always wins** over a short name, so start with a handful of palette colors and refine.
+
+The full list is in [`docs/theme-keys.md`](https://github.com/ppmpreetham/BUI/blob/main/docs/theme-keys.md), generated from Blender's own theme file so the names cannot drift.
+
+### What you can change about a widget
+
+Every widget set takes, besides its colors:
+
+| Key | What it does |
+| --- | --- |
+| `<widget>.roundness` | How round the corners are, 0 to 1 |
+| `<widget>.corners.top_left` (also `top_right`, `bottom_left`, `bottom_right`) | `false` keeps that corner square, wherever the layout would round it |
+| `<widget>.border.width` | The outline's width in pixels (Blender's is 1); `0` draws none |
+| `<widget>.emboss.enabled` | `false` removes the light line under the widget |
+| `<widget>.gradient.enabled`, `.gradient.top`, `.gradient.bottom` | Blender's top-to-bottom shading of the fill |
+
+A theme can also set `font.family`, `font.size` (points; Blender's is 11), `shadow` (`false` removes the shadow behind UI text) and `radius` (the roundness of every widget at once). Corners and borders are per widget, so `number_field` can be square on its left and `button` flat and thick-bordered.
+
+<Callout type="note" title="What a theme doesn't reach">
+Plain HTML controls (outside `styled`) draw like Chrome's and keep Chrome's colors; give them their own `color` and `font-size` in CSS. There is one theme for the whole process, as in Blender, and a corner is round or square, not a different radius.
+</Callout>
+
 ## What else you can change
 
 Beyond picking Dark or Light, you can color individual things, and how much depends on the API:
@@ -178,7 +307,7 @@ Beyond picking Dark or Light, you can color individual things, and how much depe
 | **Dear ImGui** | Dear ImGui's own style (`ImGui::GetStyle().Colors`, `imgui.get_style().colors` …) for ImGui's widgets. BUI starts it from the active Blender theme. |
 | **C** | Per-node colors through `BK_set_color` where a node has a color property; anything on a canvas |
 
-The two presets are the whole theme system: BUI doesn't load Blender theme files (`.xml`), and there's no call to change a single theme color. `theme_color` reads colors; nothing writes them.
+Beyond the two presets you can load your own themes and change single colors (see [Your own themes](#your-own-themes)). BUI doesn't read Blender's `.xml` theme files directly, but a theme file uses Blender's own names for everything.
 
 <Callout type="note" title="A Python copy of the theme">
 `bui/theme.py` mirrors the active theme for Python code that draws things itself, and `set_theme` refreshes it. The kit's widgets read the C presets directly.

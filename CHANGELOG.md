@@ -7,6 +7,18 @@ All notable changes to **blenderui** (BUI). The format follows
 ## [Unreleased]
 
 ### Added
+- **Custom themes.** A theme file (JSON, in gpui-kit's shape, with Blender's own names for the colors) adds your
+  own themes to Dark and Light: `bui.load_theme(path_or_text)`, `blenderui::load_theme` / `load_theme_file`,
+  `app.loadTheme`, `bui.load_theme` (Lua), `BK_theme_load_file` / `BK_theme_load_json` (C), then `set_theme(name)`.
+  A key is plain English (`button.background`) or Blender's (`user_interface.wcol_regular.inner`), both from one
+  table that `tools/gen_theme_keys.py` writes from Blender's theme XML (782 keys; BUI uses what it has widgets for
+  and ignores the rest, so a theme from Blender loads whole). Short palette names (`background`,
+  `primary.background`, ...) fill in many keys; a key the theme sets itself wins. Single values change at run time
+  (`set_theme_color`, `set_theme_value`), and every widget takes `roundness`, `corners.top_left` / `top_right` /
+  `bottom_left` / `bottom_right`, `border.width`, `emboss.enabled` and the gradient keys; a theme also sets
+  `font.family`, `font.size`, `shadow` and `radius`. The Rust `styled` sheet follows the theme. Errors name the line
+  and column and add no themes. `docs/theming.md`, `docs/theme-keys.md`, `docs/theme-schema.json` (for editor
+  completion) and `docs/themes/catppuccin.json` (an example); the website's Theming page.
 - **Rust:** `<input live>` (and `<textarea live>`): the field reports every keystroke to `on_input` / `on_change`, not only on Enter or blur,
   so a view can follow the typing (a search box, a date field that lights up a calendar).
 - **Linux window requests** that Win32 and Cocoa already had, through `BK_window_wm` (Python `Window.wm`):
