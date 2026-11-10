@@ -138,6 +138,10 @@ void BK_set_text_shadow(int on);
 int BK_text_shadow(void);
 int BK_unit(void);              /* U.widget_unit in pixels */
 void BK_set_font(const char *family);
+/* The UI text size in points (Blender's UI_DEFAULT_TEXT_POINTS is 11, the default). Browser-look
+ * controls keep their own 13.33 px. */
+void BK_set_font_size(float points);
+float BK_font_size_points(void);
 /* Themes: Blender's two presets, "dark" (Blender_Dark.xml = the built-in
  * default) and "light" (Blender_Light.xml), any case ("Blender Light" works
  * too). Every context relayouts and redraws (its host gets a request).
@@ -156,6 +160,47 @@ const char *BK_theme_name(void); /* "dark" or "light" */
  * scroll progress tooltip tab pie_menu curve; outline outline_sel inner
  * inner_sel item text text_sel), e.g. "regular.inner". 0 when unknown. */
 int BK_theme_color(const char *key, float r_rgba[4]);
+/* Custom themes. A theme file is JSON in the shape of gpui-kit's, with Blender's own color names:
+ *
+ *   { "name": "My themes", "themes": [ { "name": "My Dark", "mode": "dark",
+ *       "font.family": "Inter", "font.size": 11, "radius": 0.4, "shadow": true,
+ *       "colors": { "background": "#181825", "primary.background": "#89b4fa",
+ *                   "button.background": "#302d41", "button.corners.top_left": false,
+ *                   "button.border.width": 2, "node_editor.grid": "#1e1e2e" } } ] }
+ *
+ * A theme starts from the built-in theme named by "mode" ("dark" or "light") and changes what it
+ * lists. "colors" takes plain-English keys ("button.background"), Blender's names
+ * ("user_interface.wcol_regular.inner") and short palette names ("primary.background"), which fill
+ * in several keys; keys the theme sets itself win over the short names. Keys BUI has no use for yet
+ * are ignored (BK_theme_ignored counts them). docs/theming.md lists every key, and
+ * docs/theme-schema.json is a JSON Schema for editors.
+ *
+ * Per widget (button, tool_button, toggle_button, radio_button, checkbox, text_field, number_field,
+ * slider, menu, dropdown, popup, menu_item, list_item, box, scrollbar, progress_bar, tooltip, tab,
+ * pie_menu): border, border.selected, background, background.selected, fill, text, text.selected
+ * (colors), gradient.enabled, gradient.top, gradient.bottom, roundness, border.width (pixels, 0 for
+ * none), emboss.enabled, and corners.top_left / top_right / bottom_left / bottom_right (false keeps
+ * that corner square). */
+/* Register the themes of a theme file's text (or file). Returns how many were added (a theme with
+ * the name of an earlier one replaces it) or -1 with a message in BK_theme_error(). Nothing is added
+ * from a file with an error in it. Choose one with BK_set_theme(its name). */
+int BK_theme_load_json(const char *json);
+int BK_theme_load_file(const char *path);
+const char *BK_theme_error(void);
+int BK_theme_ignored(void);        /* keys of the last load that BUI has no use for */
+int BK_theme_count(void);          /* registered themes */
+const char *BK_theme_at(int index); /* their names, NULL past the end */
+/* Set one value of the active theme now (until the next BK_set_theme): a color by key as above, or
+ * a number / boolean (roundness, border.width, gradient.top, emboss.enabled, corners.*, ...).
+ * Return 0 for an unknown key. BK_theme_color reads colors by these keys too. */
+int BK_theme_set_color(const char *key, const float rgba[4]);
+int BK_theme_set_num(const char *key, double value);
+int BK_theme_num(const char *key, double *r_value);
+/* For hosts that derive their own colors from the theme (a stylesheet, say): a number that changes
+ * whenever any theme value does, and the built-in theme ("dark" or "light") the active one is
+ * based on. */
+int BK_theme_generation(void);
+const char *BK_theme_mode(void);
 int BK_icon_id(const char *name); /* 0 when unknown */
 int BK_icon_count(void);
 const char *BK_icon_name(int id);

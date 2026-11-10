@@ -1449,7 +1449,7 @@ void BK_context_free(BKContext *ctx)
 
 static int g_theme_light = 0, g_theme_set = 0;
 
-static int theme_from_name(const char *name)
+int bk_theme_from_name(const char *name)
 {
   /* "dark" / "light", any case; Blender's preset names work too */
   char buf[32];
@@ -1474,10 +1474,26 @@ static int theme_from_name(const char *name)
   return -1;
 }
 
-static void theme_apply(int light)
+/* The preset itself, nothing redrawn yet: bk_theme_changed does that once the theme is complete. */
+void bk_theme_load_preset(int light)
 {
   g_theme_light = light;
   bk_theme = light ? bk_theme_light : bk_theme_dark;
+}
+
+bool bk_theme_is_light(void)
+{
+  return g_theme_light != 0;
+}
+
+void bk_theme_mark_set(void)
+{
+  g_theme_set = 1;
+}
+
+/* bk_theme changed (a preset, a custom theme, one color): every context relayouts and redraws. */
+void bk_theme_changed(void)
+{
   bk_theme_gen++;
   for (BKContext *c = g_contexts; c; c = c->next_ctx) {
     c->layout_dirty = true; /* shadow widths size popups */
@@ -1488,6 +1504,12 @@ static void theme_apply(int light)
   }
 }
 
+static void theme_apply(int light)
+{
+  bk_theme_load_preset(light);
+  bk_theme_changed();
+}
+
 void bk_theme_env_init(void)
 {
   if (g_theme_set) {
@@ -1495,23 +1517,10 @@ void bk_theme_env_init(void)
   }
   g_theme_set = 1;
   const char *env = getenv("BUI_THEME");
-  const int t = env && *env ? theme_from_name(env) : -1;
+  const int t = env && *env ? bk_theme_from_name(env) : -1;
   if (t > 0) {
     theme_apply(t);
   }
-}
-
-int BK_set_theme(const char *name)
-{
-  const int t = theme_from_name(name ? name : "dark");
-  if (t < 0) {
-    return 0;
-  }
-  g_theme_set = 1;
-  if (t != g_theme_light) {
-    theme_apply(t);
-  }
-  return 1;
 }
 
 int BK_version(void)
@@ -1522,12 +1531,6 @@ int BK_version(void)
 const char *BK_version_string(void)
 {
   return BUI_KIT_VERSION_STRING;
-}
-
-const char *BK_theme_name(void)
-{
-  bk_theme_env_init();
-  return g_theme_light ? "light" : "dark";
 }
 
 #define TH_FIELD(f) {#f, offsetof(BKTheme, f)}
@@ -1587,7 +1590,7 @@ int BK_theme_color(const char *key, float r_rgba[4])
     }
   }
   if (!c) {
-    return 0;
+    return bk_theme_key_color(key, r_rgba); /* "button.background", "user_interface.wcol_regular.inner" */
   }
   if (r_rgba) {
     bk_rgba(c, r_rgba);

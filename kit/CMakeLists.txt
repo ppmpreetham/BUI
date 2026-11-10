@@ -8,6 +8,8 @@ add_library(bui_kit STATIC
   intern/kit_core.c
   intern/kit_draw.c
   intern/kit_theme_presets.c
+  intern/kit_theme.c
+  intern/kit_json.c
   intern/kit_icons_data.c
   intern/kit_widgets.c
   intern/kit_views.c

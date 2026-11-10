@@ -64,7 +64,7 @@ static float ta_font_begin(const BKNode *n)
 {
   const float saved = bk_text_scale;
   if (BK_HTML(n)) {
-    bk_text_scale = (n->font_scale > 0.0f ? n->font_scale : 1.0f) * BK_HTML_FONT;
+    bk_text_scale = (n->font_scale > 0.0f ? n->font_scale : 1.0f) * BK_HTML_SCALE();
     bk_html_text_scale = bk_text_scale;
   }
   return saved;
