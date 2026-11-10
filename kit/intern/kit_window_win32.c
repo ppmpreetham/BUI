@@ -64,9 +64,58 @@ struct BKWindow {
   } layer;
   BKImeWin32 ime;                 /* the IME (GHOST_ImeWin32) */
   WPARAM last_vk;                 /* the virtual key of the last WM_KEYDOWN */
+  struct WinTimer {               /* armed timers: reopen() moves them to the new window */
+    UINT_PTR id;
+    ULONGLONG due; /* GetTickCount64 */
+  } *timers;
+  int ntimers;
 };
 
 static int g_open = 0;
+
+static void timer_arm(BKWindow *win, UINT_PTR id, UINT ms)
+{
+  int i = 0;
+  while (i < win->ntimers && win->timers[i].id != id) {
+    i++;
+  }
+  if (i == win->ntimers) {
+    struct WinTimer *t = realloc(win->timers, sizeof(*t) * (size_t)(i + 1));
+    if (t) {
+      win->timers = t;
+      win->ntimers++;
+    }
+    else {
+      i = -1; /* not tracked: it only misses a reopen */
+    }
+  }
+  if (i >= 0) {
+    win->timers[i].id = id;
+    win->timers[i].due = GetTickCount64() + ms;
+  }
+  SetTimer(win->hwnd, id, ms, NULL);
+}
+
+static void timer_kill(BKWindow *win, UINT_PTR id)
+{
+  KillTimer(win->hwnd, id);
+  for (int i = 0; i < win->ntimers; i++) {
+    if (win->timers[i].id == id) {
+      win->timers[i] = win->timers[--win->ntimers];
+      return;
+    }
+  }
+}
+
+/* The window handle changed: arm the timers again on it, for their time that is left. */
+static void timers_rearm(BKWindow *win)
+{
+  const ULONGLONG now = GetTickCount64();
+  for (int i = 0; i < win->ntimers; i++) {
+    const ULONGLONG due = win->timers[i].due;
+    SetTimer(win->hwnd, win->timers[i].id, (UINT)(due > now ? due - now : 1), NULL);
+  }
+}
 
 /* Wake BK_window_run's GetMessage without WM_QUIT: a quit message would also
  * end any other loop on this thread (e.g. a Tk mainloop in the same app). */
@@ -293,11 +342,11 @@ static void host_schedule(void *data, int ms, int timer)
 {
   BKWindow *win = (BKWindow *)data;
   if (timer == BK_TIMER_CUSTOM) { /* its own timer: tooltips keep theirs */
-    SetTimer(win->hwnd, ID_WAKE, (UINT)(ms > 0 ? ms : 1), NULL);
+    timer_arm(win, ID_WAKE, (UINT)(ms > 0 ? ms : 1));
     return;
   }
   win->tip_id = timer;
-  SetTimer(win->hwnd, ID_TIP, (UINT)ms, NULL);
+  timer_arm(win, ID_TIP, (UINT)ms);
 }
 
 static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, double b)
@@ -357,7 +406,7 @@ static double refresh_ms(void)
 static void gpu_attach(BKWindow *win)
 {
   if (BUI_raster_gpu_attach(win->raster, win->hwnd, 0)) {
-    SetTimer(win->hwnd, ID_GPU, (UINT)refresh_ms(), NULL);
+    timer_arm(win, ID_GPU, (UINT)refresh_ms());
   }
 }
 
@@ -822,27 +871,27 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_TIMER:
       if (wp == ID_TIP) {
-        KillTimer(hwnd, ID_TIP);
+        timer_kill(win, ID_TIP);
         BK_timer(ctx, win->tip_id);
       }
       else if (wp == ID_WAKE) {
-        KillTimer(hwnd, ID_WAKE);
+        timer_kill(win, ID_WAKE);
         BK_timer(ctx, BK_TIMER_CUSTOM);
       }
       else if (wp == ID_GPU) {
         /* a GPU device that is ready switches an idle window over too */
         if (!BUI_raster_gpu_pending(win->raster)) {
-          KillTimer(hwnd, ID_GPU);
+          timer_kill(win, ID_GPU);
         }
         else if (BUI_raster_gpu_poll(win->raster)) {
-          KillTimer(hwnd, ID_GPU);
+          timer_kill(win, ID_GPU);
           win->full = 1;
           host_request(win);
         }
         gpu_window_check(win);
       }
       else if (wp >= ID_USER_BASE) {
-        KillTimer(hwnd, wp);
+        timer_kill(win, wp);
         if (win->cb.on_timer) {
           win->cb.on_timer(win->cb.data, win, (int)(wp - ID_USER_BASE));
         }
@@ -943,6 +992,7 @@ void BK_window_free(BKWindow *win)
   layer_free(win);
   BUI_raster_free(win->raster);
   bk_ime_win32_free(&win->ime);
+  free(win->timers);
   free(win);
 }
 
@@ -1036,7 +1086,7 @@ int BK_window_timer(BKWindow *win, int ms)
 {
   const int id = win->next_timer++;
   if (win->hwnd) {
-    SetTimer(win->hwnd, ID_USER_BASE + (UINT_PTR)id, (UINT)BK_MAX(0, ms), NULL);
+    timer_arm(win, ID_USER_BASE + (UINT_PTR)id, (UINT)BK_MAX(0, ms));
   }
   return id;
 }
@@ -1051,7 +1101,7 @@ void BK_window_request_frame(BKWindow *win, int vsync)
 void BK_window_cancel_timer(BKWindow *win, int id)
 {
   if (win->hwnd) {
-    KillTimer(win->hwnd, ID_USER_BASE + (UINT_PTR)id);
+    timer_kill(win, ID_USER_BASE + (UINT_PTR)id);
   }
 }
 
@@ -1106,6 +1156,7 @@ static int reopen(BKWindow *win, LONG_PTR ex)
   SetWindowLongPtrW(old, GWLP_USERDATA, 0); /* the old window's messages end here */
   SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)win);
   win->hwnd = h;
+  timers_rearm(win);
   DestroyWindow(old);
   if (style & WS_VISIBLE) {
     ShowWindow(h, SW_SHOW);
