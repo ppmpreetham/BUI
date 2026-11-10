@@ -237,16 +237,72 @@ pub fn ua_styled_css(theme: &str) -> String {
     css
 }
 
-/// The parsed `styled` sheet for the active theme ([`crate::set_theme`],
-/// `BUI_THEME`): [`UA_STYLED_CSS`] or its light variant (each parsed once).
-pub fn ua_styled_stylesheet() -> &'static Stylesheet {
-    static DARK: OnceLock<Stylesheet> = OnceLock::new();
-    static LIGHT: OnceLock<Stylesheet> = OnceLock::new();
-    if crate::theme_name() == "light" {
-        LIGHT.get_or_init(|| Stylesheet::parse(&ua_styled_css("light")))
+/// `#rrggbb`, or `rgba(...)` when the color is not opaque.
+fn css_color(rgba: [f32; 4]) -> String {
+    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    if rgba[3] >= 1.0 {
+        format!("#{:02x}{:02x}{:02x}", b(rgba[0]), b(rgba[1]), b(rgba[2]))
     } else {
-        DARK.get_or_init(|| Stylesheet::parse(UA_STYLED_CSS))
+        format!("rgba({}, {}, {}, {:.3})", b(rgba[0]), b(rgba[1]), b(rgba[2]), rgba[3])
     }
+}
+
+/// The `styled` sheet of the active theme: the dark or light sheet its `mode` names, with the
+/// background, text and accent colors the theme gives (`region.background`, `text`,
+/// `button.background.selected`). A built-in theme gives exactly [`UA_STYLED_CSS`] or its light variant.
+pub fn themed_styled_css() -> String {
+    let light = crate::theme_name() == "light";
+    let mut css = ua_styled_css(if light { "light" } else { "dark" });
+    // (the sheet's own color, the preset's value of the key it follows): a color the theme leaves as
+    // the preset has keeps the sheet's, so a built-in theme gives exactly the sheet it always did
+    // (Blender_Light.xml's `text` is black, the sheet's is the properties editor's #1a1a1a)
+    let (bg0, bg_preset) = if light { ("#b3b3b3", "#b3b3b3") } else { ("#303030", "#303030") };
+    let (fg0, fg_preset) = if light { ("#1a1a1a", "#000000") } else { ("#e6e6e6", "#e6e6e6") };
+    let theme = |key: &str, preset: &str| {
+        crate::theme_color(key).map(css_color).filter(|c| c != preset)
+    };
+    let (bg, fg) = (theme("region.background", bg_preset), theme("text", fg_preset));
+    css = css.replacen(
+        &format!("background-color: {bg0}; color: {fg0};"),
+        &format!(
+            "background-color: {}; color: {};",
+            bg.as_deref().unwrap_or(bg0),
+            fg.as_deref().unwrap_or(fg0)
+        ),
+        1,
+    );
+    // the accent of the dark sheet (the light sheet keeps Blender's, which is not a theme key of its own)
+    if !light && let Some(accent) = theme("button.background.selected", "#4772b3") {
+        css = css.replace("#4772b3", &accent);
+    }
+    css
+}
+
+/// The parsed `styled` sheet for the active theme ([`crate::set_theme`], `BUI_THEME`, a theme loaded
+/// with [`crate::load_theme`], single colors set at run time). Parsed again when the theme changes,
+/// and once for each distinct sheet.
+pub fn ua_styled_stylesheet() -> &'static Stylesheet {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+    use std::sync::Mutex;
+    static GEN: AtomicI32 = AtomicI32::new(-1);
+    static CURRENT: AtomicPtr<Stylesheet> = AtomicPtr::new(std::ptr::null_mut());
+    static SHEETS: Mutex<Option<HashMap<String, &'static Stylesheet>>> = Mutex::new(None);
+    let generation = crate::theme_generation();
+    let cur = CURRENT.load(Ordering::Acquire);
+    if !cur.is_null() && GEN.load(Ordering::Acquire) == generation {
+        // SAFETY: only leaked sheets are stored, which live for the whole program.
+        return unsafe { &*cur };
+    }
+    let css = themed_styled_css();
+    let mut sheets = SHEETS.lock().unwrap_or_else(|e| e.into_inner());
+    let sheet: &'static Stylesheet = sheets
+        .get_or_insert_with(HashMap::new)
+        .entry(css.clone())
+        .or_insert_with(|| Box::leak(Box::new(Stylesheet::parse(&css))));
+    CURRENT.store(sheet as *const Stylesheet as *mut Stylesheet, Ordering::Release);
+    GEN.store(generation, Ordering::Release);
+    sheet
 }
 
 #[cfg(test)]

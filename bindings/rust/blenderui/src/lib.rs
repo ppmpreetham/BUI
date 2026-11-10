@@ -195,11 +195,93 @@ pub fn reduced_motion() -> bool {
     REDUCED_MOTION.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// The active theme: `"dark"` or `"light"`.
+/// The built-in theme the active one is based on: `"dark"` or `"light"` (a theme loaded with
+/// [`load_theme`] says which in its `mode`). [`current_theme`] has its own name.
 pub fn theme_name() -> &'static str {
     // SAFETY: the kit returns a static string.
-    let s = unsafe { std::ffi::CStr::from_ptr(sys::BK_theme_name()) };
+    let s = unsafe { std::ffi::CStr::from_ptr(sys::BK_theme_mode()) };
     if s.to_bytes() == b"light" { "light" } else { "dark" }
+}
+
+/// The name of the active theme: `"dark"`, `"light"` or a theme loaded with [`load_theme`].
+pub fn current_theme() -> String {
+    // SAFETY: the kit returns a NUL-terminated string that is valid until the next theme call.
+    unsafe { std::ffi::CStr::from_ptr(sys::BK_theme_name()) }.to_string_lossy().into_owned()
+}
+
+/// A number that changes whenever any value of the theme does (the `styled` sheet is rebuilt by it).
+pub(crate) fn theme_generation() -> i32 {
+    // SAFETY: reads a counter.
+    unsafe { sys::BK_theme_generation() }
+}
+
+fn theme_result(n: i32) -> Result<usize, String> {
+    if n >= 0 {
+        return Ok(n as usize);
+    }
+    // SAFETY: a NUL-terminated message owned by the kit.
+    Err(unsafe { std::ffi::CStr::from_ptr(sys::BK_theme_error()) }.to_string_lossy().into_owned())
+}
+
+/// Register the themes of a theme file's text (gpui-kit's format with Blender's color names; see
+/// `docs/theming.md`) and return how many were added. Choose one with [`set_theme`]. An error says
+/// where the mistake is (`line 3, column 14: ...`); a file with one adds no themes. Keys BUI has no
+/// use for are ignored.
+pub fn load_theme(json: &str) -> Result<usize, String> {
+    let c = std::ffi::CString::new(json).map_err(|_| "theme text contains a NUL".to_string())?;
+    // SAFETY: a NUL-terminated string; the kit copies what it keeps.
+    theme_result(unsafe { sys::BK_theme_load_json(c.as_ptr()) })
+}
+
+/// [`load_theme`] for a file.
+pub fn load_theme_file(path: impl AsRef<std::path::Path>) -> Result<usize, String> {
+    let p = path.as_ref().to_str().ok_or("the path is not valid UTF-8")?;
+    let c = std::ffi::CString::new(p).map_err(|_| "the path contains a NUL".to_string())?;
+    // SAFETY: a NUL-terminated string.
+    theme_result(unsafe { sys::BK_theme_load_file(c.as_ptr()) })
+}
+
+/// The names of the themes loaded with [`load_theme`].
+pub fn themes() -> Vec<String> {
+    let mut names = Vec::new();
+    // SAFETY: indexes the kit's list; each name is NUL-terminated.
+    unsafe {
+        let mut i = 0;
+        loop {
+            let p = sys::BK_theme_at(i);
+            if p.is_null() {
+                break;
+            }
+            names.push(std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned());
+            i += 1;
+        }
+    }
+    names
+}
+
+/// Set one color of the active theme until the next [`set_theme`]: `key` is a plain-English key
+/// (`"button.background"`) or Blender's (`"user_interface.wcol_regular.inner"`). `false` for an
+/// unknown key. Open windows redraw.
+pub fn set_theme_color(key: &str, rgba: [f32; 4]) -> bool {
+    let Ok(c) = std::ffi::CString::new(key) else { return false };
+    // SAFETY: a NUL-terminated key and the four floats the kit reads.
+    unsafe { sys::BK_theme_set_color(c.as_ptr(), rgba.as_ptr()) != 0 }
+}
+
+/// Set a number of the active theme: `"button.roundness"`, `"button.border.width"` (pixels),
+/// `"button.corners.top_left"` (0 keeps that corner square), `"button.emboss.enabled"` ...
+pub fn set_theme_value(key: &str, value: f64) -> bool {
+    let Ok(c) = std::ffi::CString::new(key) else { return false };
+    // SAFETY: a NUL-terminated key.
+    unsafe { sys::BK_theme_set_num(c.as_ptr(), value) != 0 }
+}
+
+/// A number of the active theme (booleans are 0 or 1).
+pub fn theme_value(key: &str) -> Option<f64> {
+    let c = std::ffi::CString::new(key).ok()?;
+    let mut out = 0.0;
+    // SAFETY: `out` is the one double the kit writes.
+    (unsafe { sys::BK_theme_num(c.as_ptr(), &mut out) } != 0).then_some(out)
 }
 
 /// A color of the active theme as RGBA 0..1 (`"region_bg"`, `"text"`,

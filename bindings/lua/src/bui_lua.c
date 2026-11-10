@@ -1,5 +1,7 @@
 /* BUI Lua binding: module entry point and constant registration.
  * SPDX-License-Identifier: GPL-2.0-or-later */
+#include <ctype.h>
+
 #include "bui_internal.h"
 
 /* Numeric property keys (for node:get() dispatch) */
@@ -50,6 +52,57 @@ static int l_set_scale(lua_State *L) {
 static int l_set_theme(lua_State *L) {
   int ok = BK_set_theme(luaL_checkstring(L, 1));
   lua_pushinteger(L, ok);
+  return 1;
+}
+
+/* bui.load_theme(source): register the themes of a theme file (a path) or of theme JSON text.
+ * Returns how many were added, or nil and the message (the line and column of a mistake). */
+static int l_load_theme(lua_State *L) {
+  const char *src = luaL_checkstring(L, 1);
+  while (isspace((unsigned char)*src)) src++;
+  const int n = (*src == '{') ? BK_theme_load_json(lua_tostring(L, 1)) : BK_theme_load_file(lua_tostring(L, 1));
+  if (n < 0) {
+    lua_pushnil(L);
+    lua_pushstring(L, BK_theme_error());
+    return 2;
+  }
+  lua_pushinteger(L, n);
+  return 1;
+}
+
+/* bui.themes(): the names of the loaded themes. */
+static int l_themes(lua_State *L) {
+  lua_newtable(L);
+  for (int i = 0; BK_theme_at(i); i++) {
+    lua_pushstring(L, BK_theme_at(i));
+    lua_rawseti(L, -2, i + 1);
+  }
+  return 1;
+}
+
+/* bui.set_theme_color(key, r, g, b [, a]): one color of the active theme (0..1); false for an unknown key. */
+static int l_set_theme_color(lua_State *L) {
+  const float rgba[4] = {(float)luaL_checknumber(L, 2), (float)luaL_checknumber(L, 3),
+                         (float)luaL_checknumber(L, 4), (float)luaL_optnumber(L, 5, 1.0)};
+  lua_pushboolean(L, BK_theme_set_color(luaL_checkstring(L, 1), rgba));
+  return 1;
+}
+
+/* bui.set_theme_value(key, number | boolean): roundness, border.width, corners.*, ...; false for an unknown key. */
+static int l_set_theme_value(lua_State *L) {
+  const double v = lua_isboolean(L, 2) ? (lua_toboolean(L, 2) ? 1.0 : 0.0) : luaL_checknumber(L, 2);
+  lua_pushboolean(L, BK_theme_set_num(luaL_checkstring(L, 1), v));
+  return 1;
+}
+
+/* bui.theme_value(key): a number of the active theme, or nil. */
+static int l_theme_value(lua_State *L) {
+  double v;
+  if (BK_theme_num(luaL_checkstring(L, 1), &v)) {
+    lua_pushnumber(L, v);
+    return 1;
+  }
+  lua_pushnil(L);
   return 1;
 }
 
@@ -391,6 +444,11 @@ static const struct luaL_Reg bui_module[] = {
   {"set_scale", l_set_scale},
   {"scale",     l_scale},
   {"set_theme", l_set_theme},
+  {"load_theme", l_load_theme},
+  {"themes", l_themes},
+  {"set_theme_color", l_set_theme_color},
+  {"set_theme_value", l_set_theme_value},
+  {"theme_value", l_theme_value},
   {"set_font",  l_set_font},
   {"theme_name",l_theme_name},
   {"theme_color",l_theme_color},

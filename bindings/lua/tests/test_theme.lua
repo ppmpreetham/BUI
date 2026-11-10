@@ -112,6 +112,38 @@ check(bad == 0 or bad == false, "set_theme('nonexistent') should fail, got " .. 
 local final_name = bui.theme_name()
 check(final_name == "dark", "theme should still be 'dark' after failed set, got '" .. tostring(final_name) .. "'")
 
+-- ── Theme files and single values ────────────────────────────────────
+
+local function near(c, r, g, b)
+  return math.abs(c[1] - r / 255) < 2e-3 and math.abs(c[2] - g / 255) < 2e-3 and math.abs(c[3] - b / 255) < 2e-3
+end
+
+local text = [[{ "name": "set", "themes": [
+  { "name": "Plum", "mode": "dark",
+    "colors": { "primary.background": "#112233", "button.background": "#445566",
+                "button.border.width": 3, "button.corners.top_left": false } } ] }]]
+check(bui.load_theme(text) == 1, "load_theme should add one theme")
+local names = bui.themes()
+check(#names == 1 and names[1] == "Plum", "themes() should list Plum")
+check(bui.set_theme("plum") == 1 and bui.theme_name() == "Plum", "set_theme('plum') should pick the loaded theme")
+local r, g, b = bui.theme_color("button.background")
+check(near({r, g, b}, 0x44, 0x55, 0x66), "button.background from the file")
+r, g, b = bui.theme_color("tool_button.background.selected")
+check(near({r, g, b}, 0x11, 0x22, 0x33), "a short palette name fills in other widgets")
+check(bui.theme_value("button.border.width") == 3, "border.width from the file")
+check(bui.theme_value("button.corners.top_left") == 0, "corners.top_left from the file")
+check(bui.theme_value("button.nope") == nil, "an unknown value is nil")
+check(bui.set_theme_color("button.background", 1, 0, 0) == true, "set_theme_color")
+r, g, b = bui.theme_color("button.background")
+check(near({r, g, b}, 255, 0, 0), "set_theme_color changed the color")
+check(bui.set_theme_color("button.nope", 1, 0, 0) == false, "unknown color key")
+check(bui.set_theme_value("button.roundness", 0.25) == true and math.abs(bui.theme_value("button.roundness") - 0.25) < 1e-6, "set_theme_value")
+check(bui.set_theme_value("button.corners.top_left", true) == true and bui.theme_value("button.corners.top_left") == 1, "boolean value")
+local nothing, err = bui.load_theme('{ "themes": [ { } ] }')
+check(nothing == nil and err:find("themes%[0%]"), "a bad theme file says where: " .. tostring(err))
+check(#bui.themes() == 1, "a bad file adds no themes")
+bui.set_theme("dark")
+
 -- ── All tests passed ─────────────────────────────────────────────────
 
 io.write("OK: test_theme.lua\n")

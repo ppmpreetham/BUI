@@ -288,6 +288,68 @@ impl NativeApp {
         ok
     }
 
+    /// Switch to a theme loaded with `loadTheme`: resolves with whether the name is known.
+    #[napi(ts_return_type = "Promise<boolean>")]
+    pub fn set_custom_theme(&self, env: Env, name: String) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |cx| {
+            let ok = blenderui::set_theme(&name);
+            cx.notify_all();
+            deferred.resolve(move |_| Ok(ok));
+        });
+        Ok(promise)
+    }
+
+    /// Register the themes of a theme file's text (`file` false) or of the file at that path
+    /// (`file` true): resolves with how many were added, rejects with where the mistake is.
+    #[napi(ts_return_type = "Promise<number>")]
+    pub fn load_theme(&self, env: Env, source: String, file: bool) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |_cx| {
+            let r = if file { blenderui::load_theme_file(&source) } else { blenderui::load_theme(&source) };
+            match r {
+                Ok(n) => deferred.resolve(move |_| Ok(n as u32)),
+                Err(e) => deferred.reject(Error::from_reason(e)),
+            }
+        });
+        Ok(promise)
+    }
+
+    /// The names of the loaded themes.
+    #[napi(ts_return_type = "Promise<string[]>")]
+    pub fn themes(&self, env: Env) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |_cx| {
+            let names = blenderui::themes();
+            deferred.resolve(move |_| Ok(names));
+        });
+        Ok(promise)
+    }
+
+    /// One color of the active theme (`rgba` 0..1): resolves with whether the key exists.
+    #[napi(ts_return_type = "Promise<boolean>")]
+    pub fn set_theme_color(&self, env: Env, key: String, r: f64, g: f64, b: f64, a: f64) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |cx| {
+            let ok = blenderui::set_theme_color(&key, [r as f32, g as f32, b as f32, a as f32]);
+            cx.notify_all();
+            deferred.resolve(move |_| Ok(ok));
+        });
+        Ok(promise)
+    }
+
+    /// One number of the active theme (roundness, border width, ...): resolves with whether the key exists.
+    #[napi(ts_return_type = "Promise<boolean>")]
+    pub fn set_theme_value(&self, env: Env, key: String, value: f64) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |cx| {
+            let ok = blenderui::set_theme_value(&key, value);
+            cx.notify_all();
+            deferred.resolve(move |_| Ok(ok));
+        });
+        Ok(promise)
+    }
+
     /// End the UI thread (closes every window).
     #[napi]
     pub fn quit(&self) {

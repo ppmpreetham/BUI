@@ -229,6 +229,19 @@ unsafe extern "C" {
     pub fn BK_version() -> c_int;
     pub fn BK_version_string() -> *const c_char;
     pub fn BK_theme_color(key: *const c_char, r_rgba: *mut c_float) -> c_int;
+    pub fn BK_theme_load_json(json: *const c_char) -> c_int;
+    pub fn BK_theme_load_file(path: *const c_char) -> c_int;
+    pub fn BK_theme_error() -> *const c_char;
+    pub fn BK_theme_ignored() -> c_int;
+    pub fn BK_theme_count() -> c_int;
+    pub fn BK_theme_at(index: c_int) -> *const c_char;
+    pub fn BK_theme_set_color(key: *const c_char, rgba: *const c_float) -> c_int;
+    pub fn BK_theme_set_num(key: *const c_char, value: f64) -> c_int;
+    pub fn BK_theme_num(key: *const c_char, r_value: *mut f64) -> c_int;
+    pub fn BK_theme_generation() -> c_int;
+    pub fn BK_theme_mode() -> *const c_char;
+    pub fn BK_set_font_size(points: c_float);
+    pub fn BK_font_size_points() -> c_float;
 
     // nodes
     pub fn BK_node_new(type_: *const c_char) -> *mut BKNode;

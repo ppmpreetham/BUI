@@ -2059,7 +2059,7 @@ static PyObject *kit_set_theme(PyObject *m, PyObject *arg)
     return NULL;
   }
   if (!BK_set_theme(name)) {
-    PyErr_Format(PyExc_ValueError, "unknown theme %R (expected 'dark' or 'light')", arg);
+    PyErr_Format(PyExc_ValueError, "unknown theme %R (expected 'dark', 'light' or a theme loaded with load_theme)", arg);
     return NULL;
   }
   Py_RETURN_NONE;
@@ -2087,6 +2087,113 @@ static PyObject *kit_theme_color(PyObject *m, PyObject *arg)
     return NULL;
   }
   return Py_BuildValue("(dddd)", (double)c[0], (double)c[1], (double)c[2], (double)c[3]);
+}
+
+/* Theme files (kit_theme.c): register the themes of a JSON text or file; ValueError says why not. */
+static PyObject *theme_loaded(int n)
+{
+  if (n < 0) {
+    PyErr_SetString(PyExc_ValueError, BK_theme_error());
+    return NULL;
+  }
+  return Py_BuildValue("(ii)", n, BK_theme_ignored());
+}
+
+static PyObject *kit_theme_load_json(PyObject *m, PyObject *arg)
+{
+  const char *text = PyUnicode_AsUTF8(arg);
+  return text ? theme_loaded(BK_theme_load_json(text)) : NULL;
+}
+
+static PyObject *kit_theme_load_file(PyObject *m, PyObject *arg)
+{
+  PyObject *path = PyOS_FSPath(arg);
+  if (!path) {
+    return NULL;
+  }
+  PyObject *enc = PyUnicode_EncodeFSDefault(path);
+  Py_DECREF(path);
+  if (!enc) {
+    return NULL;
+  }
+  PyObject *r = theme_loaded(BK_theme_load_file(PyBytes_AS_STRING(enc)));
+  Py_DECREF(enc);
+  return r;
+}
+
+static PyObject *kit_theme_names(PyObject *m, PyObject *unused)
+{
+  PyObject *list = PyList_New(0);
+  for (int i = 0; list && BK_theme_at(i); i++) {
+    PyObject *s = PyUnicode_FromString(BK_theme_at(i));
+    if (!s || PyList_Append(list, s) < 0) {
+      Py_XDECREF(s);
+      Py_CLEAR(list);
+      break;
+    }
+    Py_DECREF(s);
+  }
+  return list;
+}
+
+static PyObject *kit_theme_set_color(PyObject *m, PyObject *args)
+{
+  const char *key;
+  PyObject *rgba;
+  if (!PyArg_ParseTuple(args, "sO:kit_theme_set_color", &key, &rgba)) {
+    return NULL;
+  }
+  PyObject *seq = PySequence_Fast(rgba, "a color is (r, g, b) or (r, g, b, a)");
+  if (!seq) {
+    return NULL;
+  }
+  const Py_ssize_t n = PySequence_Fast_GET_SIZE(seq);
+  float f[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  if (n != 3 && n != 4) {
+    Py_DECREF(seq);
+    PyErr_SetString(PyExc_ValueError, "a color is (r, g, b) or (r, g, b, a)");
+    return NULL;
+  }
+  for (Py_ssize_t i = 0; i < n; i++) {
+    f[i] = (float)PyFloat_AsDouble(PySequence_Fast_GET_ITEM(seq, i));
+  }
+  Py_DECREF(seq);
+  if (PyErr_Occurred()) {
+    return NULL;
+  }
+  if (!BK_theme_set_color(key, f)) {
+    PyErr_Format(PyExc_KeyError, "no theme color %s", key);
+    return NULL;
+  }
+  Py_RETURN_NONE;
+}
+
+static PyObject *kit_theme_set_num(PyObject *m, PyObject *args)
+{
+  const char *key;
+  double v;
+  if (!PyArg_ParseTuple(args, "sd:kit_theme_set_num", &key, &v)) {
+    return NULL;
+  }
+  if (!BK_theme_set_num(key, v)) {
+    PyErr_Format(PyExc_KeyError, "no theme number %s", key);
+    return NULL;
+  }
+  Py_RETURN_NONE;
+}
+
+static PyObject *kit_theme_num(PyObject *m, PyObject *arg)
+{
+  const char *key = PyUnicode_AsUTF8(arg);
+  double v;
+  if (!key) {
+    return NULL;
+  }
+  if (!BK_theme_num(key, &v)) {
+    PyErr_Format(PyExc_KeyError, "%R", arg);
+    return NULL;
+  }
+  return PyFloat_FromDouble(v);
 }
 
 static PyObject *kit_set_font(PyObject *m, PyObject *arg)
@@ -2372,7 +2479,13 @@ static PyMethodDef kit_functions[] = {
     {"kit_set_theme", kit_set_theme, METH_O, "Theme: 'dark' (default) or 'light' (Blender's presets)."},
     {"kit_version", kit_version, METH_NOARGS, "The kit's version, 'MAJOR.MINOR.PATCH' (the same as BUI's)."},
     {"kit_theme_name", kit_theme_name, METH_NOARGS, "The active theme: 'dark' or 'light'."},
-    {"kit_theme_color", kit_theme_color, METH_O, "A theme color as (r, g, b, a) 0..1, e.g. 'region_bg', 'regular.inner'."},
+    {"kit_theme_color", kit_theme_color, METH_O, "A theme color as (r, g, b, a) 0..1: 'button.background', 'user_interface.wcol_regular.inner', 'region_bg'."},
+    {"kit_theme_load_json", kit_theme_load_json, METH_O, "Register the themes of a theme file's text: (added, ignored keys)."},
+    {"kit_theme_load_file", kit_theme_load_file, METH_O, "Register the themes of a theme file: (added, ignored keys)."},
+    {"kit_theme_names", kit_theme_names, METH_NOARGS, "The registered (custom) themes."},
+    {"kit_theme_set_color", kit_theme_set_color, METH_VARARGS, "kit_theme_set_color(key, (r, g, b[, a])): one color of the active theme."},
+    {"kit_theme_set_num", kit_theme_set_num, METH_VARARGS, "kit_theme_set_num(key, value): a number of the active theme (roundness, border.width, ...)."},
+    {"kit_theme_num", kit_theme_num, METH_O, "A number of the active theme."},
     {"kit_icon_names", kit_icon_names, METH_NOARGS, "All icon names."},
     {"kit_eval_number", kit_eval_number, METH_O, "Evaluate number input ('2*pi')."},
     {"kit_link_fields", kit_link_fields, METH_O, "Link number fields for Alt editing."},
