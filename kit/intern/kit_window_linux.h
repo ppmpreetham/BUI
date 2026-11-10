@@ -58,6 +58,7 @@ BK_WINDOW_FUNCS(BK_WINDOW_DECLARE)
 BK_WINDOW_GLOBAL_FUNCS(BK_WINDOW_DECLARE)
 int bk_x11_window_supported(void);
 int bk_wl_window_supported(void);
+int bk_wl_window_connect(void); /* connects and asks for the globals, does not wait */
 #  undef BK_WINDOW_DECLARE
 int bk_x11_window_wake_ready(void);
 int bk_wl_window_wake_ready(void);

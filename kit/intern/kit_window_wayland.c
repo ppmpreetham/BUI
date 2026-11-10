@@ -989,14 +989,27 @@ static void fill_listeners(void)
   fill_noop(&surface_listener, sizeof(surface_listener));
 }
 
-/* Connects (once): the libraries, the display, the globals a window needs. */
-static int open_display(void)
+static int g_connect = 0; /* 1 the registry was asked for, -1 failed */
+static struct wl_callback *g_registry_sync;
+
+static void registry_sync_done(void *data, struct wl_callback *cb, uint32_t serial)
 {
-  static int state = 0; /* 1 connected, -1 failed */
-  if (state) {
-    return state > 0;
+  (void)data;
+  (void)serial;
+  wl_callback_destroy(cb);
+  g_registry_sync = NULL;
+}
+
+static const struct wl_callback_listener registry_sync_listener = {.done = registry_sync_done};
+
+/* Connects (once) and asks for the globals without waiting for them, so the compositor answers
+ * while the program does its own setup (as GTK tracks its init with wl_display_sync). */
+static int display_connect(void)
+{
+  if (g_connect) {
+    return g_connect > 0;
   }
-  state = -1;
+  g_connect = -1;
   if (!wayland_dynload_client_init(false) || !xkb_load()) {
     return 0;
   }
@@ -1007,7 +1020,26 @@ static int open_display(void)
   }
   g.registry = wl_display_get_registry(g.display);
   wl_registry_add_listener(g.registry, &registry_listener, NULL);
-  wl_display_roundtrip(g.display); /* the globals */
+  g_registry_sync = wl_display_sync(g.display);
+  wl_callback_add_listener(g_registry_sync, &registry_sync_listener, NULL);
+  wl_display_flush(g.display);
+  g_connect = 1;
+  return 1;
+}
+
+/* Connects (once): the libraries, the display, the globals a window needs. */
+static int open_display(void)
+{
+  static int state = 0; /* 1 connected, -1 failed */
+  if (state) {
+    return state > 0;
+  }
+  state = -1;
+  if (!display_connect()) {
+    return 0;
+  }
+  while (g_registry_sync && wl_display_dispatch(g.display) != -1) { /* the globals */
+  }
   wl_display_roundtrip(g.display); /* their first events: outputs, seat capabilities */
   if (!g.compositor || !g.shm || !g.wm_base) {
     return 0;
@@ -1029,6 +1061,11 @@ static int open_display(void)
 int bk_wl_window_supported(void)
 {
   return open_display();
+}
+
+int bk_wl_window_connect(void)
+{
+  return display_connect();
 }
 
 /* -- host callbacks -- */

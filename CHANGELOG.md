@@ -73,6 +73,9 @@ All notable changes to **blenderui** (BUI). The format follows
 - **X11 frame pacing:** an animation frame is due one refresh after the previous frame started, so the render time is part
   of the interval, as the docs say. The loop slept a full refresh after each frame, so a 3000-cell animation on the GPU
   renderer ran at 24 fps instead of 49 fps.
+- **Wayland start:** `BK_window_supported` only connects and asks for the globals; the first window waits for them, so
+  the compositor answers while the program sets up (as GTK does). It no longer opens an X11 connection first in a Wayland
+  session.
 - **A display list that changes everywhere** (`BK_canvas_put_item` each frame) compared and damaged every item one by one.
   Once the damage covers half the canvas, or the window redraws whole, the canvas redraws whole and items are no longer
   compared, as Blender's `ED_region_tag_redraw_partial` does. 3000 animated cells: 1.5 ms of flush per frame, 0.5 ms now.
