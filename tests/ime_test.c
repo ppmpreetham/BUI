@@ -129,6 +129,32 @@ int main(void)
   ime(BK_IME_COMPOSITION_END, "", "", -1, -1, -1);
   CHECK(strstr(BK_get_str(area, "value"), "\xE7\xAA\x93") != NULL);
 
+  /* -- committed text is text, never a key name --------------------------------------------- */
+  /* A pinyin IME commits the raw letters it was given: "left", "end", "return" must be typed in,
+   * not move the caret, jump to the end or confirm the edit. */
+  click(text, 95);
+  BK_ime_state(g_ctx, &s);
+  char before_text[64]; /* a copy: the node's own string changes as it is edited */
+  snprintf(before_text, sizeof(before_text), "%s", BK_get_str(text, "edit"));
+  char want[64];
+  snprintf(want, sizeof(want), "%sleft", before_text);
+  ime(BK_IME_COMPOSITION_START, "", "", -1, -1, -1);
+  ime(BK_IME_COMPOSITION, "left", "", -1, -1, -1);
+  ime(BK_IME_COMPOSITION_END, "", "", -1, -1, -1);
+  CHECK(strcmp(BK_get_str(text, "edit"), want) == 0);
+  ime(BK_IME_COMPOSITION_START, "", "", -1, -1, -1);
+  ime(BK_IME_COMPOSITION, "Return", "", -1, -1, -1);
+  ime(BK_IME_COMPOSITION_END, "", "", -1, -1, -1);
+  CHECK(BK_get_num(text, "editing") == 1); /* "Return" did not confirm the edit */
+  snprintf(want, sizeof(want), "%sleftReturn", before_text);
+  CHECK(strcmp(BK_get_str(text, "edit"), want) == 0);
+  /* a composition left going when another field takes over is typed in as text as well */
+  ime(BK_IME_COMPOSITION_START, "", "", -1, -1, -1);
+  ime(BK_IME_COMPOSITION, "", "BackSpace", 9, -1, -1);
+  click(area, 50);
+  snprintf(want, sizeof(want), "%sleftReturnBackSpace", before_text);
+  CHECK(strcmp(BK_get_str(text, "value"), want) == 0);
+
   /* -- fields that take no IME ------------------------------------------------------------- */
   click(num, 50); /* Blender's textedit_ime_begin skips number buttons */
   BK_ime_state(g_ctx, &s);
