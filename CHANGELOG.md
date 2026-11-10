@@ -70,6 +70,9 @@ All notable changes to **blenderui** (BUI). The format follows
   reads the setting when it starts.
 
 ### Fixed
+- **X11 frame pacing:** an animation frame is due one refresh after the previous frame started, so the render time is part
+  of the interval, as the docs say. The loop slept a full refresh after each frame, so a 3000-cell animation on the GPU
+  renderer ran at 24 fps instead of 49 fps.
 - **Closing a pie during its open animation** freed it while the animation still pointed at it, so the next render read freed
   memory (`bui_lua_context` crashed in CI). Closing a popup now clears everything that refers into it through `bk_forget`.
 - **Wayland frames copied the whole window every frame** after the first full one: the double-buffer copy kept
