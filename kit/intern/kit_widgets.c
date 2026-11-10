@@ -986,7 +986,28 @@ static void tabs_draw(BKNode *n)
   bk_roundbox(n->x, n->y + th, n->w, n->h - th, rad, CNR_ALL & ~CNR_TL, c);
 }
 
+/* Like panels: paint the widget, then draw children clipped to the content
+ * region under the tab bar (tabs_arrange shows only the current page). */
+static void tabs_draw_tree(BKNode *n)
+{
+  if (!NODE_VISIBLE(n)) {
+    return;
+  }
+  BKRect r = bk_rect(n->x - 3, n->y - 3, n->w + 6, n->h + 6);
+  if (!bk_clip_visible(&r)) {
+    return;
+  }
+  tabs_draw(n);
+  const int th = tab_h();
+  bk_clip_push(n->x, n->y + th, n->w, BK_MAX(0, n->h - th));
+  for (int i = 0; i < n->nkids; i++) {
+    bk_draw_tree(n->kids[i]);
+  }
+  bk_clip_pop();
+}
+
 const BKClass bk_cls_tabs = {.name = "tabs",
+                             .draw_tree = tabs_draw_tree,
                              .flags = CLS_INTERACTIVE,
                              .measure = tabs_measure,
                              .arrange = tabs_arrange,

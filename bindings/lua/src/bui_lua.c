@@ -435,6 +435,9 @@ LUAMOD_API int luaopen_bui(lua_State *L) {
     return lua_error(L);
   }
 
+  /* Menu/hotkey ref hooks (retain/release), as in the Python binding */
+  luabui_set_ref_state(L);
+
   /* Weak-keyed node map in registry */
   lua_newtable(L);
   lua_newtable(L);
