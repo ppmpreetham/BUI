@@ -487,6 +487,151 @@ def test_pie_menu():
     assert got == ["N"] and not d.popups()
 
 
+def _pie_on_q(got):
+    from bui.components import MenuItem, PieMenu
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(300, 250)
+    d.app.bind("q", lambda: PieMenu.show(d.ctx, [
+        MenuItem(n, (lambda n=n: got.append(n))) for n in "WESN"]))
+    d.app.key("q", "q", 0, mods())
+    d.frame()
+    return d
+
+
+def test_pie_hold_release():
+    import time
+    got = []
+    d = _pie_on_q(got)
+    d.app.key("q", "q", 0, mods())                     # auto-repeat is ignored
+    d.app.motion(301, 249, mods())                     # still inside the click threshold
+    time.sleep(0.25)                                   # past pie_tap_timeout
+    d.app.motion(300, 120, mods())
+    d.ctx.key_release("q")
+    assert got == ["N"] and not d.popups()
+
+
+def test_pie_drag_release():
+    got = []
+    d = _pie_on_q(got)
+    d.app.motion(430, 250, mods())                     # a drag: release picks at once
+    d.ctx.key_release("q")
+    assert got == ["E"] and not d.popups()
+
+
+def test_pie_tap_stays_open():
+    got = []
+    d = _pie_on_q(got)
+    d.ctx.key_release("q")                             # a quick tap: click style
+    assert d.popups() == 1 and not got
+    d.app.motion(170, 250, mods())
+    d.app.press(170, 250, mods())
+    assert got == ["W"] and not d.popups()
+
+
+def test_pie_sub_menu():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(300, 250)
+    leaf = [MenuItem(n, (lambda n=n: got.append(n))) for n in "wesn"]
+    PieMenu.show(d.ctx, [MenuItem("W"), MenuItem("Sub", submenu=leaf)])
+    d.frame()
+    d.app.motion(430, 250, mods())                     # east: "Sub"
+    d.app.press(430, 250, mods())
+    assert d.popups() == 1 and not got                 # the sub-pie, centred at the pointer
+    d.frame()
+    d.app.motion(430, 120, mods())                     # north of the new centre
+    d.app.press(430, 120, mods())
+    assert got == ["n"] and not d.popups()
+
+
+def test_pie_more_level():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(300, 250)
+    PieMenu.show(d.ctx, [MenuItem(str(i), (lambda i=i: got.append(i))) for i in range(10)])
+    d.frame()
+    d.app.key("3", "3", 0, mods())                     # numpad SE: the 8th slot, "More"
+    d.frame()
+    assert d.popups() == 1 and not got
+    d.app.key("2", "2", 0, mods())                     # items 7, 8, 9 at W, E, S: S is 9
+    assert got == [9] and not d.popups()
+
+
+def test_pie_number_keys():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    PieMenu.show(d.ctx, [MenuItem(n, (lambda n=n: got.append(n))) for n in "WESN"], at=(300, 250))
+    d.frame()
+    d.app.key("5", "5", 0, mods())                     # the centre: no item
+    d.app.key("1", "1", 0, mods())                     # SW: no item there
+    assert d.popups() == 1
+    d.app.key("8", "8", 0, mods())                     # numpad 8 is north
+    assert got == ["N"] and not d.popups()
+
+
+def test_pie_accelerator_keys():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    names = ["Object Mode", "Edit Mode", "Sculpt", "Open Shading"]
+    PieMenu.show(d.ctx, [MenuItem(n, (lambda n=n: got.append(n))) for n in names], at=(300, 250))
+    d.frame()
+    # first letters of words: o, e, s; both of "Open Shading"'s are taken, so the second pass
+    # gives it its first free letter, p
+    d.app.key("m", "m", 0, mods())                     # no item has m
+    assert d.popups() == 1
+    d.app.key("p", "p", 0, mods())
+    assert got == ["Open Shading"] and not d.popups()
+
+
+def test_pie_open_animation():
+    import time
+    from bui.components import MenuItem, PieMenu
+
+    def east_x(d):
+        d.frame()
+        x, y, w, h = dict(d.ctx.menu_rows(-1))["E"]
+        return x + w / 2
+
+    d = Driver(Label("x"), size=(600, 500))
+    buipy.kit_set_animations(True)
+    try:
+        PieMenu.show(d.ctx, [MenuItem(n) for n in "WESN"], at=(300, 250))
+        start = east_x(d)                              # items start at the center
+        time.sleep(0.1)                                # past pie_animation_timeout
+        end = east_x(d)
+        assert start < 330 < 380 < end, (start, end)
+    finally:
+        buipy.kit_set_animations(False)
+    d.ctx.close_popups()
+    PieMenu.show(d.ctx, [MenuItem(n) for n in "WESN"], at=(300, 250))
+    assert east_x(d) == end                            # reduced motion: no animation
+
+
+def test_pie_menu_at():
+    from bui.components import MenuItem, PieMenu
+    got = []
+    d = Driver(Label("x"), size=(600, 500))
+    d.ctx.set_pointer(10, 10)
+    PieMenu.show(d.ctx, [MenuItem(n, (lambda n=n: got.append(n))) for n in "WESN"], at=(300, 250))
+    d.frame()
+    d.app.motion(430, 250, mods())                     # east of the given centre
+    d.app.press(430, 250, mods())
+    assert got == ["E"] and not d.popups()
+
+
+def test_hit():
+    from bui.components import Button
+    btn = Button("x")
+    d = Driver(btn, size=(300, 200))
+    x, y, w, h = btn.rect
+    assert d.ctx.hit(x + w // 2, y + h // 2) is btn
+    assert d.ctx.hit(-5, -5) is None
+
+
 # -- color ------------------------------------------------------------------------------
 
 

@@ -173,15 +173,28 @@ elseif(UNIX AND NOT APPLE)
       set(_wl_gen ${CMAKE_CURRENT_BINARY_DIR}/wayland)
       file(MAKE_DIRECTORY ${_wl_gen})
       set(_wl_src)
-      foreach(_p stable/xdg-shell/xdg-shell unstable/xdg-decoration/xdg-decoration-unstable-v1)
-        get_filename_component(_n ${_p} NAME)
+      # wlr-layer-shell is not in wayland-protocols: kit/extern/wayland_protocols has it
+      set(_wl_xml ${BUI_WL_PROTOCOLS}/stable/xdg-shell/xdg-shell.xml
+                  ${BUI_WL_PROTOCOLS}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml
+                  ${CMAKE_CURRENT_SOURCE_DIR}/extern/wayland_protocols/wlr-layer-shell-unstable-v1.xml)
+      # cursor-shape (wayland-protocols 1.32+), as GHOST: the compositor draws the cursor, so no
+      # cursor theme is loaded. Its code refers to the tablet tool interface.
+      set(_wl_cursor_shape ${BUI_WL_PROTOCOLS}/staging/cursor-shape/cursor-shape-v1.xml)
+      set(_wl_tablet ${BUI_WL_PROTOCOLS}/stable/tablet/tablet-v2.xml)
+      if(NOT EXISTS ${_wl_tablet})
+        set(_wl_tablet ${BUI_WL_PROTOCOLS}/unstable/tablet/tablet-unstable-v2.xml)
+      endif()
+      if(EXISTS ${_wl_cursor_shape} AND EXISTS ${_wl_tablet})
+        list(APPEND _wl_xml ${_wl_cursor_shape} ${_wl_tablet})
+        target_compile_definitions(bui_kit PRIVATE BUI_WL_CURSOR_SHAPE)
+      endif()
+      foreach(_x ${_wl_xml})
+        get_filename_component(_n ${_x} NAME_WE)
         add_custom_command(
           OUTPUT ${_wl_gen}/${_n}-client-protocol.h ${_wl_gen}/${_n}-client-protocol.c
-          COMMAND ${BUI_WL_SCANNER} client-header ${BUI_WL_PROTOCOLS}/${_p}.xml
-                  ${_wl_gen}/${_n}-client-protocol.h
-          COMMAND ${BUI_WL_SCANNER} private-code ${BUI_WL_PROTOCOLS}/${_p}.xml
-                  ${_wl_gen}/${_n}-client-protocol.c
-          DEPENDS ${BUI_WL_PROTOCOLS}/${_p}.xml)
+          COMMAND ${BUI_WL_SCANNER} client-header ${_x} ${_wl_gen}/${_n}-client-protocol.h
+          COMMAND ${BUI_WL_SCANNER} private-code ${_x} ${_wl_gen}/${_n}-client-protocol.c
+          DEPENDS ${_x})
         list(APPEND _wl_src ${_wl_gen}/${_n}-client-protocol.c)
       endforeach()
       target_sources(bui_kit PRIVATE intern/kit_window_wayland.c intern/kit_window_linux.c

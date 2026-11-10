@@ -9,18 +9,90 @@ All notable changes to **blenderui** (BUI). The format follows
 ### Added
 - **Rust:** `<input live>` (and `<textarea live>`): the field reports every keystroke to `on_input` / `on_change`, not only on Enter or blur,
   so a view can follow the typing (a search box, a date field that lights up a calendar).
+- **Linux window requests** that Win32 and Cocoa already had, through `BK_window_wm` (Python `Window.wm`):
+  `"state"` 2 and 0 hide and show a window on X11 and Wayland; `"override"` removes the frame (`_MOTIF_WM_HINTS`
+  on X11, client-side decorations on Wayland) and `"topmost"` keeps an X11 window above others
+  (`_NET_WM_STATE_ABOVE`), both ported from `GHOST_WindowX11`.
+- **Transparent windows on Linux:** `wm "transparent"` before `show` gives per-pixel alpha, with no region
+  background, through a 32-bit ARGB visual on X11 and ARGB8888 buffers on Wayland. The software raster can keep
+  premultiplied alpha (`BUI_raster_set_alpha`, `BUI_raster_alpha`, `BUI_raster_clear`); opaque frames are
+  unchanged byte for byte and draw as fast as before. The OpenGL renderer draws transparent windows too: a GLX config for the
+  32-bit visual, frames cleared to alpha 0 and `BUI_raster_clear` as a GPU clear of the redrawn rect (`ROP`: premultiplied
+  `ONE, ONE_MINUS_SRC_ALPHA` for colour and alpha, as in Blender's `GPU_BLEND_ALPHA_PREMULT`).
+- **Transparent windows on Windows and macOS:** `wm "transparent"` gives per-pixel alpha with the software
+  raster. Windows shows the premultiplied frame through a layered window (`UpdateLayeredWindow`, `AC_SRC_ALPHA`; the
+  window has no frame and `"alpha"` scales the whole window); macOS draws it in a non-opaque window with a clear
+  background. Rust `WindowBackgroundAppearance::Transparent` and JavaScript `transparent: true` use it there too.
+  With the Direct3D 11 renderer the window uses DWM blur-behind (`DwmEnableBlurBehindWindow` over the client area, the
+  surface cleared to zero alpha) and a bitblt-model swap chain, as SDL does (no copy to the CPU, `ClearView` for the
+  redrawn rect); without the device it falls back to `UpdateLayeredWindow`. A window that is not transparent keeps the
+  flip-model swap chain with `DXGI_ALPHA_MODE_IGNORE`.
+- **Layer-shell windows on Wayland:** `wm "layer"` (layer 0 background to 3 overlay, keyboard interactivity) and
+  `"anchor"` (edges, exclusive zone) make a wlr-layer-shell surface, on KDE Plasma, wlroots compositors and
+  COSMIC (not GNOME). `wm_get("layer")` says whether the compositor has it. The protocol file (MIT) is in
+  `kit/extern/wayland_protocols`.
+- **Focus callback:** `BKWindowCallbacks.on_focus` reports when a window gets or loses the keyboard focus, on
+  Win32, Cocoa, X11 and Wayland (Python `Window.on_focus`). Losing it cancels an open pie, as Blender's
+  `WINDEACTIVATE` does. In Python the callback is queued behind a running callback, like the timers.
+- **Hit test:** `BK_hit_at(ctx, x, y)` gives the interactive node under a point (Python `ctx.hit`, Lua `ctx:hit`).
+- **Pie menus as in Blender** (`pie_handler`, `pie_menu_begin`): opened while a key is held, releasing the key
+  picks the item in the pointer's direction, and a quick tap keeps the pie open for a click; an item with a
+  submenu opens a sub-pie at the pointer; past 8 items, the 8th is "More" with the rest
+  (`pie_menu_level_create`); items get underlined accelerator letters (`menu_block_set_keyaccels`); and the
+  items grow out of the center over 60 ms (`pie_animation_timeout`, off with reduced motion).
+- **Rust:** `App::on_window_activation(|id, active, cx| ...)` reports keyboard focus, and `WindowOptions.window_background =
+  WindowBackgroundAppearance::Transparent` opens a transparent window on Linux, Windows and macOS.
+- **JavaScript** (Node, Bun and `bui build` apps): `app.window({ transparent: true })` and the window events `focus` and
+  `blur`.
+- **Window kinds in Rust and JavaScript:** Rust `WindowOptions.kind` (`WindowKind::Floating`, `PopUp` and
+  `LayerShell(LayerShellOptions)`) and `window_decorations` (`WindowDecorations::Client`), and JavaScript
+  `app.window({ alwaysOnTop, frame: false, layerShell: { layer, anchor, exclusiveZone, keyboard } })`, send the
+  `topmost`, `override`, `layer` and `anchor` window requests that Python reaches through `Window.wm`. Topmost works on
+  Windows, macOS and X11; a Wayland toplevel cannot ask for it, so use the layer shell there.
+- **Dear ImGui:** `ImGui_ImplBUI_AbandonFrame()` (C: `cImGui_ImplBUI_AbandonFrame`) ends a frame that a binding's
+  callback left early on an error, with Dear ImGui's error recovery.
 
 ### Changed
 - **Text fields:** in the HTML look (browser-style inputs and text areas) the caret blinks like a browser's (about every 530 ms, solid right after it
   moves or the text changes); Blender's own fields keep Blender's solid caret. The window wakes only for the next toggle, so an idle window still sleeps.
+- `BK_open_pie` takes the pie's center (`at_x`, `at_y`; `-100000` for the pointer, as in `BK_open_menu`).
+  Python `PieMenu.show(..., at=(x, y))` and `ctx.open_pie(..., at=)`, Lua `ctx:open_pie(items, title, x, y)`.
+- Pie number keys are directions on the numpad (8 north, 6 east, 2 south, 4 west, the diagonals on 7, 9, 1 and 3),
+  as in Blender. They were item positions.
+- **Python text has no shadow:** Blender's UI text shadow made small text look soft. The Python binding turns it off at import;
+  `buipy.kit_set_text_shadow(True)` brings it back. Other bindings keep it. The switch is `BK_set_text_shadow(on)` in C.
+- **Wayland cursors** go through the cursor-shape protocol when the compositor has it (KDE, wlroots, GNOME 46+), as in
+  Blender's GHOST: the compositor draws the cursor and no cursor theme is loaded. Elsewhere the theme loads on the first
+  cursor change, not at start-up. Builds with wayland-protocols older than 1.32 keep the theme.
+- `BKWindowCallbacks` has the new `on_focus` member, and so has the Rust `blenderui-sys` struct.
+- **GPU renderer header:** `BuiGpuX11Window` has the new `visual` member (the window's VisualID, 0 for the default one),
+  and `BUI_raster_clear` clears on a GPU raster too. Call `BUI_raster_set_alpha` before attaching a GPU renderer: it
+  reads the setting when it starts.
 
 ### Fixed
+- **Closing a pie during its open animation** freed it while the animation still pointed at it, so the next render read freed
+  memory (`bui_lua_context` crashed in CI). Closing a popup now clears everything that refers into it through `bk_forget`.
+- **Wayland frames copied the whole window every frame** after the first full one: the double-buffer copy kept
+  its own full copy as the next frame's damage. It copies and reports only what changed now.
+- **Setting a node's geometry or a flag property** (`visible`, `enabled` ...) **to the value it already has** relaid out
+  and redrew the whole window. Unchanged values do nothing now. The Rust binding sets every widget's place each frame,
+  so each Rust frame was a full redraw: 2.7 ms of CPU per frame at 941x982 on Wayland, 0.43 ms now.
+- **`BK_canvas_put_item` / `BK_canvas_truncate`** (display lists rebuilt each frame) redrew the whole canvas. Only items
+  that changed, moved or went away are redrawn now.
+- **Python Tk host on X11:** a held key no longer sends a release on each auto-repeat, so holding a pie key keeps the pie open
+  until the key is up (the native X11 host already did this).
 - **Lua bindings** set_menus on menubar fix; ctx:free() no-ops fix; widget tests
 - **Browser-look text fields** take the CSS `color` and `font-size` the field itself is given (one that differs from its parent's); without them they keep Chrome's black 13.33px, as before.
 - **Browser-look form controls** drew their text with Blender's UI drop shadow, which made it look heavy next to the page's text. They draw none now, as in a browser.
 - **macOS:** the npm `bui-runtime` (and the release build of the addon) failed to link with `Undefined symbols: ___isPlatformVersionAtLeast`: the
   Cocoa host asked for ProMotion with `@available`, which needs a symbol from clang's runtime that a Rust binary linked with
   `-nodefaultlibs` does not have. It asks by selector now.
+- **Wayland:** a new window drew nothing until a later turn of the event loop, because the host did not wait for
+  the compositor's first configure. It waits now, as `GHOST_WindowWayland` does (`buipy_render` failed on
+  Wayland sessions).
+- **Dear ImGui from Python:** an exception after `Begin()` in a frame callback aborted the process in builds with
+  asserts ("Missing End()"). The frame is unwound now and the exception reaches Python.
+- Pies with more than 8 items dropped the rest; they now get Blender's "More" item.
 
 ## [0.5.0] - 2026-11-08
 

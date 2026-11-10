@@ -32,6 +32,9 @@ struct BuiRaster {
   BuiGpu *gpu;
   BuiGpu *gpu_pending;
   int gpu_switched; /* the renderer changed: the next frame must be full */
+  /* 0xFF000000 when the frame keeps alpha (premultiplied 0xAARRGGBB, BUI_raster_set_alpha),
+   * else 0: the alpha byte stays 0 and the frame is opaque. */
+  uint32_t alpha;
   struct BuiRaster *scratch; /* CPU coverage for polygons in GPU mode */
 };
 
@@ -40,7 +43,7 @@ struct BuiRaster {
  * \{ */
 
 typedef struct Paint {
-  uint32_t rgb; /* 0x00RRGGBB */
+  uint32_t rgb; /* 0x00RRGGBB, or 0xFFRRGGBB in a raster that keeps alpha */
   int a;        /* 0..256 */
 } Paint;
 
@@ -54,24 +57,27 @@ static inline float clampf(float v, float lo, float hi)
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
-static inline Paint paint_from(const float c[4])
+static inline Paint paint_from(uint32_t alpha, const float c[4])
 {
   Paint p;
   int r = (int)(clampf(c[0], 0.0f, 1.0f) * 255.0f + 0.5f);
   int g = (int)(clampf(c[1], 0.0f, 1.0f) * 255.0f + 0.5f);
   int b = (int)(clampf(c[2], 0.0f, 1.0f) * 255.0f + 0.5f);
-  p.rgb = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+  p.rgb = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b | alpha;
   p.a = (int)(clampf(c[3], 0.0f, 1.0f) * 256.0f + 0.5f);
   return p;
 }
 
-/* Blend s over d with factor f in 0..256. */
+/* Blend s over d with factor f in 0..256. The alpha byte only takes part when s has one
+ * (a raster that keeps alpha): an opaque frame costs what it did without alpha. */
 static inline uint32_t blend(uint32_t d, uint32_t s, uint32_t f)
 {
   const uint32_t nf = 256 - f;
   const uint32_t rb = (((s & 0xFF00FFu) * f + (d & 0xFF00FFu) * nf) >> 8) & 0xFF00FFu;
-  const uint32_t g = (((s & 0x00FF00u) * f + (d & 0x00FF00u) * nf) >> 8) & 0x00FF00u;
-  return rb | g;
+  if (!(s >> 24)) {
+    return rb | ((((s & 0x00FF00u) * f + (d & 0x00FF00u) * nf) >> 8) & 0x00FF00u);
+  }
+  return rb | ((((s >> 8) & 0xFF00FFu) * f + ((d >> 8) & 0xFF00FFu) * nf) & 0xFF00FF00u);
 }
 
 /* Write with coverage cov (0..1) scaled by paint alpha. */
@@ -269,7 +275,7 @@ int BUI_raster_gpu_attach(BuiRaster *r, void *window_handle, int wait)
   if (r->gpu || r->gpu_pending) {
     return 1;
   }
-  r->gpu_pending = bui_gpu_create(window_handle);
+  r->gpu_pending = bui_gpu_create(window_handle, r->alpha != 0);
   if (!r->gpu_pending) {
     return 0;
   }
@@ -469,6 +475,32 @@ void BUI_raster_invalidate(BuiRaster *r)
   r->full_damage = 1;
 }
 
+void BUI_raster_set_alpha(BuiRaster *r, int on)
+{
+  r->alpha = on ? 0xFF000000u : 0u;
+  r->full_damage = 1;
+}
+
+int BUI_raster_alpha(const BuiRaster *r)
+{
+  return r->alpha != 0;
+}
+
+void BUI_raster_clear(BuiRaster *r, int x, int y, int w, int h)
+{
+  int x0, y0, x1, y1;
+  if (!clip_box(r, (float)x, (float)y, (float)(x + w), (float)(y + h), &x0, &y0, &x1, &y1)) {
+    return;
+  }
+  if (r->gpu) {
+    bui_gpu_clear(r->gpu, x0, y0, x1 - x0, y1 - y0);
+    return;
+  }
+  for (int py = y0; py < y1; py++) {
+    memset(r->pix + (size_t)py * r->w + x0, 0, sizeof(uint32_t) * (size_t)(x1 - x0));
+  }
+}
+
 size_t BUI_raster_view_size(void)
 {
   return sizeof(BuiRaster);
@@ -515,7 +547,7 @@ void BUI_raster_fill_rect(BuiRaster *r, float x, float y, float w, float h, cons
     }
     return;
   }
-  const Paint p = paint_from(rgba);
+  const Paint p = paint_from(r->alpha, rgba);
   if (p.a <= 0) {
     return;
   }
@@ -604,7 +636,7 @@ void BUI_raster_round_rect(
     }
     return;
   }
-  const Paint p = paint_from(rgba);
+  const Paint p = paint_from(r->alpha, rgba);
   if (p.a <= 0) {
     return;
   }
@@ -694,7 +726,7 @@ void BUI_raster_circle(
     }
     return;
   }
-  const Paint p = paint_from(rgba);
+  const Paint p = paint_from(r->alpha, rgba);
   if (p.a <= 0) {
     return;
   }
@@ -753,7 +785,7 @@ void BUI_raster_line(
     }
     return;
   }
-  const Paint p = paint_from(rgba);
+  const Paint p = paint_from(r->alpha, rgba);
   if (p.a <= 0) {
     return;
   }
@@ -805,7 +837,7 @@ void BUI_raster_ellipse(BuiRaster *r,
     }
     return;
   }
-  const Paint p = paint_from(rgba);
+  const Paint p = paint_from(r->alpha, rgba);
   if (p.a <= 0) {
     return;
   }
@@ -902,9 +934,9 @@ void BUI_raster_widget(BuiRaster *r,
     return;
   }
   const int gradient = top && bot && memcmp(top, bot, sizeof(float[4])) != 0;
-  Paint p_inner = top ? paint_from(top) : (Paint){0, 0};
-  const Paint p_out = outline ? paint_from(outline) : (Paint){0, 0};
-  const Paint p_emb = has_emboss ? paint_from(emboss) : (Paint){0, 0};
+  Paint p_inner = top ? paint_from(r->alpha, top) : (Paint){0, 0};
+  const Paint p_out = outline ? paint_from(r->alpha, outline) : (Paint){0, 0};
+  const Paint p_emb = has_emboss ? paint_from(r->alpha, emboss) : (Paint){0, 0};
   /* Fully covered interior margin: no SDF needed farther than this from
    * every edge (skips sqrt for the bulk of each widget). */
   const float safe = rad + ow + 1.0f;
@@ -918,7 +950,7 @@ void BUI_raster_widget(BuiRaster *r,
       for (int k = 0; k < 4; k++) {
         c[k] = top[k] + (bot[k] - top[k]) * t;
       }
-      p_inner = paint_from(c);
+      p_inner = paint_from(r->alpha, c);
     }
     const int row_inside = (sy - y) >= safe && (y + h - sy) >= safe;
     /* Interior span of this row: filled directly, no per-pixel SDF. */
@@ -983,6 +1015,7 @@ void BUI_raster_widget(BuiRaster *r,
  * only) is the emboss. */
 void BUI_raster_widget_base(BuiRaster *r, const BuiWidgetBase *p)
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   const float x = p->rect[0], y = p->rect[1], w = p->rect[2], h = p->rect[3];
   if (w <= 0.0f || h <= 0.0f) {
     return;
@@ -1023,9 +1056,9 @@ void BUI_raster_widget_base(BuiRaster *r, const BuiWidgetBase *p)
   }
   const int gradient = memcmp(p->inner1, p->inner2, sizeof(float[4])) != 0;
   const int per_pixel_inner = p->alpha_checker || (gradient && p->shade_horizontal);
-  const Paint p_out = paint_from(p->outline);
-  const Paint p_emb = paint_from(p->emboss);
-  Paint p_in = paint_from(p->inner1);
+  const Paint p_out = paint_from(ralpha, p->outline);
+  const Paint p_emb = paint_from(ralpha, p->emboss);
+  Paint p_in = paint_from(ralpha, p->inner1);
   /* Columns farther than this from the left/right edges never see a corner:
    * there the distance field only depends on the row (computed once). */
   const float cornerw = fmaxf(rad, radi) + px1 + 1.0f;
@@ -1041,7 +1074,7 @@ void BUI_raster_widget_base(BuiRaster *r, const BuiWidgetBase *p)
       for (int k = 0; k < 4; k++) {
         c[k] = p->inner1[k] + (p->inner2[k] - p->inner1[k]) * t;
       }
-      p_in = paint_from(c);
+      p_in = paint_from(ralpha, c);
     }
     /* -- middle columns: row-constant coverage -- */
     int span_a = ma, span_b = mb;
@@ -1109,7 +1142,7 @@ void BUI_raster_widget_base(BuiRaster *r, const BuiWidgetBase *p)
           const int cell = ((int)((sx - x) / 8.0f) + (int)((sy - y) / 8.0f)) & 1;
           const float g = cell ? 160.0f / 255.0f : 100.0f / 255.0f;
           const float gc[4] = {g, g, g, 1.0f};
-          put_cov(row + px, paint_from(gc), ci);
+          put_cov(row + px, paint_from(ralpha, gc), ci);
         }
         Paint pi = p_in;
         if (gradient && p->shade_horizontal) {
@@ -1118,7 +1151,7 @@ void BUI_raster_widget_base(BuiRaster *r, const BuiWidgetBase *p)
           for (int k = 0; k < 4; k++) {
             c[k] = p->inner1[k] + (p->inner2[k] - p->inner1[k]) * t;
           }
-          pi = paint_from(c);
+          pi = paint_from(ralpha, c);
         }
         put_cov(row + px, pi, ci);
       }
@@ -1129,15 +1162,21 @@ void BUI_raster_widget_base(BuiRaster *r, const BuiWidgetBase *p)
   }
 }
 
-/* Premultiplied source over the frame (whose alpha byte is unused). */
-static inline uint32_t premul_over(uint32_t d, uint32_t s)
+/* Premultiplied source over the frame. The alpha byte is blended only when the frame keeps
+ * alpha (`alpha` is BuiRaster.alpha): an opaque frame costs what it did without alpha. */
+static inline uint32_t premul_over(uint32_t d, uint32_t s, uint32_t alpha)
 {
   const uint32_t ia = 255u - (s >> 24);
   uint32_t rb = (d & 0xFF00FFu) * ia + 0x800080u;
-  uint32_t g = (d & 0x00FF00u) * ia + 0x008000u;
   rb = ((rb + ((rb >> 8) & 0xFF00FFu)) >> 8) & 0xFF00FFu; /* /255, rounded */
-  g = ((g + ((g >> 8) & 0x00FF00u)) >> 8) & 0x00FF00u;
-  return (s & 0xFFFFFFu) + rb + g;
+  if (!alpha) {
+    uint32_t g = (d & 0x00FF00u) * ia + 0x008000u;
+    g = ((g + ((g >> 8) & 0x00FF00u)) >> 8) & 0x00FF00u;
+    return (s & 0xFFFFFFu) + rb + g;
+  }
+  uint32_t ag = ((d >> 8) & 0xFF00FFu) * ia + 0x800080u;
+  ag = (ag + ((ag >> 8) & 0xFF00FFu)) & 0xFF00FF00u;
+  return s + rb + ag;
 }
 
 /* All four channels times f/256. */
@@ -1148,17 +1187,17 @@ static inline uint32_t premul_scale(uint32_t c, uint32_t f)
   return ag | rb;
 }
 
-/* An image pixel (premultiplied) times ga/256 over the frame. */
-static inline void put_image_px(uint32_t *d, uint32_t c, uint32_t ga)
+/* An image pixel (premultiplied) times ga/256 over the frame; `alpha` is BuiRaster.alpha. */
+static inline void put_image_px(uint32_t *d, uint32_t c, uint32_t ga, uint32_t alpha)
 {
   if (ga < 256) {
     c = premul_scale(c, ga);
   }
   if (c >= 0xFF000000u) {
-    *d = c & 0xFFFFFFu;
+    *d = c & (0xFFFFFFu | alpha);
   }
   else if (c) {
-    *d = premul_over(*d, c);
+    *d = premul_over(*d, c, alpha);
   }
 }
 
@@ -1343,6 +1382,7 @@ static void raster_nv12(BuiRaster *r, float x, float y, float w, float h, const 
                         float sx, float sy, float sw, float sh, uint32_t ga, int nearest,
                         int x0, int y0, int x1, int y1)
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   const int *k = k_yuv[img->format == BUI_PIXMAP_NV12_BT709];
   const uint8_t *yp = (const uint8_t *)img->px;
   const uint8_t *uvp = yp + (size_t)img->w * img->h;
@@ -1368,7 +1408,7 @@ static void raster_nv12(BuiRaster *r, float x, float y, float w, float h, const 
             const int l = (yr[px + ox] - 16) * k[0];
             row[px] = (uint32_t)clampi((l + rv) >> 16, 0, 255) << 16 |
                       (uint32_t)clampi((l + gu) >> 16, 0, 255) << 8 |
-                      (uint32_t)clampi((l + bu) >> 16, 0, 255);
+                      (uint32_t)clampi((l + bu) >> 16, 0, 255) | ralpha;
           }
           px--;
         }
@@ -1377,7 +1417,7 @@ static void raster_nv12(BuiRaster *r, float x, float y, float w, float h, const 
       for (int px = x0; px < x1; px++) {
         const int tx = px + ox;
         const uint8_t *c = cr + (tx & ~1);
-        put_image_px(row + px, yuv_argb(k, yr[tx], c[0], c[1]), ga);
+        put_image_px(row + px, yuv_argb(k, yr[tx], c[0], c[1]), ga, ralpha);
       }
     }
     return;
@@ -1414,7 +1454,7 @@ static void raster_nv12(BuiRaster *r, float x, float y, float w, float h, const 
       const int Y = lerp2(ya[xa], ya[xb], yb[xa], yb[xb], fx, fy);
       const int U = lerp2(ca[ca0], ca[cb0], cb[ca0], cb[cb0], fcx, fcy);
       const int V = lerp2(ca[ca0 + 1], ca[cb0 + 1], cb[ca0 + 1], cb[cb0 + 1], fcx, fcy);
-      put_image_px(row + px, yuv_argb(k, Y, U, V), ga);
+      put_image_px(row + px, yuv_argb(k, Y, U, V), ga, ralpha);
     }
   }
 }
@@ -1429,6 +1469,7 @@ void BUI_raster_image(BuiRaster *r,
                       float alpha,
                       int flags)
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   int x0, y0, x1, y1;
   if (!img || !img->px || img->w <= 0 || img->h <= 0 || !(alpha > 0.0f) ||
       !clip_box(r, x, y, x + w, y + h, &x0, &y0, &x1, &y1))
@@ -1486,7 +1527,7 @@ void BUI_raster_image(BuiRaster *r,
       uint32_t *row = r->pix + (size_t)py * r->w;
       const uint32_t *s = img->px + (size_t)(py - (int)y + (int)sy) * img->w + (int)sx - (int)x;
       for (int px = x0; px < x1; px++) {
-        put_image_px(row + px, s[px], ga);
+        put_image_px(row + px, s[px], ga, ralpha);
       }
     }
     return;
@@ -1515,7 +1556,7 @@ void BUI_raster_image(BuiRaster *r,
         const int xa = clampi(tx, ix0, ix1), xb = clampi(tx + 1, ix0, ix1);
         c = bilerp(ra[xa], ra[xb], rb[xa], rb[xb], fx, fy);
       }
-      put_image_px(row + px, c, ga);
+      put_image_px(row + px, c, ga, ralpha);
     }
   }
 }
@@ -1683,7 +1724,7 @@ void BUI_raster_polygon(BuiRaster *r, const float (*pts)[2], int n, const float 
     free(mask);
     return;
   }
-  const Paint p = paint_from(rgba);
+  const Paint p = paint_from(r->alpha, rgba);
   if (p.a <= 0) {
     return;
   }
@@ -1762,6 +1803,7 @@ void BUI_raster_triangles(BuiRaster *r,
                           const float (*col)[4],
                           int count)
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   if (r->gpu) {
     const int clip[4] = {r->cx0, r->cy0, r->cx1, r->cy1};
     bui_gpu_triangles(r->gpu, co, col, count, clip);
@@ -1794,7 +1836,7 @@ void BUI_raster_triangles(BuiRaster *r,
     }
     const int flat = memcmp(c[0], c[1], sizeof(float[4])) == 0 &&
                      memcmp(c[0], c[2], sizeof(float[4])) == 0;
-    const Paint flat_p = paint_from(c[0]);
+    const Paint flat_p = paint_from(ralpha, c[0]);
     const int tl0 = is_top_left(v[1][0], v[1][1], v[2][0], v[2][1]);
     const int tl1 = is_top_left(v[2][0], v[2][1], v[0][0], v[0][1]);
     const int tl2 = is_top_left(v[0][0], v[0][1], v[1][0], v[1][1]);
@@ -1821,7 +1863,7 @@ void BUI_raster_triangles(BuiRaster *r,
           for (int k = 0; k < 4; k++) {
             rgba[k] = c[0][k] * b0 + c[1][k] * b1 + c[2][k] * b2;
           }
-          put_cov(row + px, paint_from(rgba), 1.0f);
+          put_cov(row + px, paint_from(ralpha, rgba), 1.0f);
         }
       }
     }
@@ -2060,14 +2102,14 @@ static inline void tex_sample(const BuiTexture *t, float u, float v, int nearest
   }
 }
 
-/* Straight-alpha source-over of color c (0..1) into a 0x00RRGGBB pixel. */
-static inline void put_straight(uint32_t *px, const float c[4])
+/* Straight-alpha source-over of color c (0..1) into a frame pixel. */
+static inline void put_straight(uint32_t alpha, uint32_t *px, const float c[4])
 {
   const float a = c[3];
   if (!(a > 0.0f)) {
     return;
   }
-  Paint p = paint_from(c);
+  Paint p = paint_from(alpha, c);
   if (p.a >= 256) {
     *px = p.rgb;
   }
@@ -2106,6 +2148,7 @@ static void mesh_triangle(BuiRaster *r,
                           int cx1,
                           int cy1)
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   int64_t X[3] = {mesh_fx(va->x + ox), mesh_fx(vb->x + ox), mesh_fx(vc->x + ox)};
   int64_t Y[3] = {mesh_fx(va->y + oy), mesh_fx(vb->y + oy), mesh_fx(vc->y + oy)};
   const BuiMeshVertex *v[3] = {va, vb, vc};
@@ -2185,7 +2228,7 @@ static void mesh_triangle(BuiRaster *r,
         continue;
       }
       if (flat_all) {
-        put_straight(row + px, flat);
+        put_straight(ralpha, row + px, flat);
         continue;
       }
       /* barycentric weights of vertices 0, 1, 2 */
@@ -2213,7 +2256,7 @@ static void mesh_triangle(BuiRaster *r,
           c[k] *= tx[k];
         }
       }
-      put_straight(row + px, c);
+      put_straight(ralpha, row + px, c);
     }
   }
 }
@@ -2283,6 +2326,7 @@ static void hsv_to_rgb_f(float h, float s, float v, float out[3])
 
 void BUI_raster_hsv_circle(BuiRaster *r, float cx, float cy, float radius, float value)
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   int x0, y0, x1, y1;
   if (radius <= 0.0f ||
       !clip_box(r, cx - radius - 1, cy - radius - 1, cx + radius + 1, cy + radius + 1, &x0, &y0,
@@ -2313,7 +2357,7 @@ void BUI_raster_hsv_circle(BuiRaster *r, float cx, float cy, float radius, float
       const float hue = atan2f(dx, -dy) * inv_2pi + 0.5f;
       float rgba[4] = {0, 0, 0, 1.0f};
       hsv_to_rgb_f(hue, fminf(dist / radius, 1.0f), value, rgba);
-      put_cov(row + px, paint_from(rgba), cov);
+      put_cov(row + px, paint_from(ralpha, rgba), cov);
     }
   }
 }
@@ -2328,6 +2372,7 @@ void BUI_raster_gradient(BuiRaster *r,
                          const float br[4],
                          const float bl[4])
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   int x0, y0, x1, y1;
   if (!clip_box(r, x, y, x + w, y + h, &x0, &y0, &x1, &y1)) {
     return;
@@ -2357,7 +2402,7 @@ void BUI_raster_gradient(BuiRaster *r,
       for (int k = 0; k < 4; k++) {
         c[k] = left[k] + (right[k] - left[k]) * u;
       }
-      put_cov(row + px, paint_from(c), 1.0f);
+      put_cov(row + px, paint_from(ralpha, c), 1.0f);
     }
   }
 }
@@ -2365,6 +2410,7 @@ void BUI_raster_gradient(BuiRaster *r,
 void BUI_raster_sphere(
     BuiRaster *r, float cx, float cy, float radius, const float light[3], const float rgba[4])
 {
+  const uint32_t ralpha = r->alpha; /* a pixel store may alias r->alpha: read it once */
   int x0, y0, x1, y1;
   if (radius <= 0.0f ||
       !clip_box(r, cx - radius - 1, cy - radius - 1, cx + radius + 1, cy + radius + 1, &x0, &y0,
@@ -2421,7 +2467,7 @@ void BUI_raster_sphere(
         c[k] = rgba[k] * (0.12f + 0.88f * diff) + 0.6f * spec;
       }
       c[3] = rgba[3];
-      put_cov(row + px, paint_from(c), cov);
+      put_cov(row + px, paint_from(ralpha, c), cov);
     }
   }
 }
@@ -2711,7 +2757,7 @@ static int gpu_text_glyphs(BuiRaster *r, TextRun *e, float x, float y, const flo
 void BUI_raster_text_run(BuiRaster *r, float x, float y, const BuiTextRun *run, const float rgba[4])
 {
   const TextRun *e = (const TextRun *)run;
-  const Paint p = paint_from(rgba);
+  const Paint p = paint_from(r->alpha, rgba);
   if (!e || !e->mask || p.a <= 0) {
     return;
   }

@@ -51,6 +51,58 @@ pub struct WindowConfig {
     pub height: Option<f64>,
     pub resizable: Option<bool>,
     pub gpu: Option<bool>,
+    /// Per-pixel alpha, only the elements show.
+    pub transparent: Option<bool>,
+    /// Above other windows.
+    pub always_on_top: Option<bool>,
+    /// `false`: no frame.
+    pub frame: Option<bool>,
+    pub layer_shell: Option<LayerShellConfig>,
+}
+
+/// A layer-shell surface as JavaScript asks for it: the names of `index.d.ts`, checked there.
+#[derive(Clone, Debug, Default)]
+pub struct LayerShellConfig {
+    pub layer: Option<String>,
+    pub anchor: Option<Vec<String>>,
+    pub exclusive_zone: Option<f64>,
+    pub keyboard: Option<String>,
+}
+
+impl From<&LayerShellConfig> for LayerShellOptions {
+    fn from(c: &LayerShellConfig) -> Self {
+        let edge = |name: &str| match name {
+            "top" => Anchor::TOP,
+            "bottom" => Anchor::BOTTOM,
+            "left" => Anchor::LEFT,
+            "right" => Anchor::RIGHT,
+            _ => Anchor::default(),
+        };
+        LayerShellOptions {
+            layer: match c.layer.as_deref() {
+                Some("background") => Layer::Background,
+                Some("bottom") => Layer::Bottom,
+                Some("top") => Layer::Top,
+                _ => Layer::Overlay,
+            },
+            anchor: c.anchor.iter().flatten().fold(Anchor::default(), |a, e| a | edge(e)),
+            exclusive_zone: c.exclusive_zone.map(|z| px(z as f32)),
+            keyboard_interactivity: match c.keyboard.as_deref() {
+                Some("exclusive") => KeyboardInteractivity::Exclusive,
+                Some("on-demand") => KeyboardInteractivity::OnDemand,
+                _ => KeyboardInteractivity::None,
+            },
+        }
+    }
+}
+
+/// The window kind: a layer surface wins over `alwaysOnTop`.
+fn window_kind(config: &WindowConfig) -> WindowKind {
+    match (&config.layer_shell, config.always_on_top) {
+        (Some(l), _) => WindowKind::LayerShell(l.into()),
+        (None, Some(true)) => WindowKind::Floating,
+        (None, _) => WindowKind::Normal,
+    }
 }
 
 /// A layout box, logical pixels.
@@ -415,24 +467,30 @@ impl JsView {
 // ==========================================================================
 // Window operations (UI thread)
 
-/// Set up the UI-thread state; `sink` also gets `close` events.
+/// Set up the UI-thread state; `sink` also gets `close`, `focus` and `blur` events.
 pub fn init(cx: &mut App, sink: Sink) {
     cx.set_global(UiState::default());
-    cx.set_global(CloseSink(sink));
+    cx.set_global(WindowSink(sink));
+    cx.on_window_activation(|id, active, cx| {
+        let Some(w) = cx.global::<UiState>().by_native.get(&id.0).copied() else { return };
+        let kind = if active { "focus" } else { "blur" };
+        cx.global::<WindowSink>().0(Event { kind: kind.into(), window: w, ..Default::default() });
+    });
     cx.on_window_closed(|id, cx| {
         let Some(w) = cx.global::<UiState>().by_native.get(&id.0).copied() else { return };
         let st = cx.global_mut::<UiState>();
         st.windows.remove(&w);
         st.by_native.remove(&id.0);
-        let sink = cx.global::<CloseSink>().0.clone();
+        let sink = cx.global::<WindowSink>().0.clone();
         sink(Event { kind: "close".into(), window: w, ..Default::default() });
     });
 }
 
-struct CloseSink(Sink);
+struct WindowSink(Sink);
 
 /// Open window `id` (chosen by JavaScript); its events go to `sink`.
 pub fn open_window(cx: &mut App, id: u32, config: WindowConfig, sink: Sink) {
+    let kind = window_kind(&config);
     let opts = blenderui::WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds {
             origin: point(px(0.0), px(0.0)),
@@ -441,6 +499,17 @@ pub fn open_window(cx: &mut App, id: u32, config: WindowConfig, sink: Sink) {
         titlebar: config.title.map(|t| TitlebarOptions { title: Some(t.into()) }),
         is_resizable: config.resizable,
         gpu: config.gpu,
+        window_background: if config.transparent == Some(true) {
+            WindowBackgroundAppearance::Transparent
+        } else {
+            WindowBackgroundAppearance::Opaque
+        },
+        kind,
+        window_decorations: if config.frame == Some(false) {
+            WindowDecorations::Client
+        } else {
+            WindowDecorations::Server
+        },
         ..Default::default()
     };
     let handle = cx.open_window(opts, |_, cx| cx.new(|_| JsView::new(id, sink.clone())));

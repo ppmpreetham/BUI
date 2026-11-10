@@ -178,3 +178,12 @@ test('document: detached nodes join a window when inserted; fragments, clones, c
   assert.strictEqual(win._nodes.size, size - 1, 'the dropped text node is freed; the moved button is not')
   assert.ok(win._nodes.has(btn.id))
 })
+
+test('window kinds: layer-shell names are checked', (t) => {
+  const app = new App({ headless: true })
+  t.after(() => app.quit())
+  assert.throws(() => app.window({ layerShell: { layer: 'middle' } }), /layerShell.layer: 'middle'/)
+  assert.throws(() => app.window({ layerShell: { anchor: ['up'] } }), /layerShell.anchor/)
+  assert.throws(() => app.window({ layerShell: { keyboard: 'all' } }), /layerShell.keyboard/)
+  app.window({ alwaysOnTop: true, frame: false, layerShell: { layer: 'top', anchor: ['top', 'left'], exclusiveZone: 24 } })
+})

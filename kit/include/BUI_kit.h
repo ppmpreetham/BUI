@@ -133,6 +133,9 @@ void BK_set_ref_hooks(void (*retain)(void *ref), void (*release)(void *ref));
 /* -- global look ------------------------------------------------------------ */
 void BK_set_scale(float scale); /* Blender's resolution scale (1 = 20 px widgets) */
 float BK_scale(void);
+/* Blender's UI text shadows (drop shadow, soft one on panel titles); on by default */
+void BK_set_text_shadow(int on);
+int BK_text_shadow(void);
 int BK_unit(void);              /* U.widget_unit in pixels */
 void BK_set_font(const char *family);
 /* Themes: Blender's two presets, "dark" (Blender_Dark.xml = the built-in
@@ -268,7 +271,12 @@ void BK_open_menu(BKContext *ctx,
                   const char *title,
                   int at_x,
                   int at_y);
-void BK_open_pie(BKContext *ctx, const BKMenuSpec *items, int n, const char *title);
+/* The interactive node under (x, y) in window pixels (ui_but_find_mouse_over): the top popup
+ * first, then the header and the root. NULL over nothing. A pie answers for the whole window. */
+BKNode *BK_hit_at(BKContext *ctx, int x, int y);
+/* The pie centre is (at_x, at_y) in window pixels, or the pointer when either is -100000. */
+void BK_open_pie(
+    BKContext *ctx, const BKMenuSpec *items, int n, const char *title, int at_x, int at_y);
 
 /* -- geometry managers (children of a "frame") ------------------------------------
  * Tk's pack / grid / place, also used for Qt layouts. Keys (numbers):
@@ -449,7 +457,7 @@ void BK_canvas_set_item(BKNode *canvas, const BKCanvasItem *item); /* insert or 
 void BK_canvas_add_item(BKNode *canvas, const BKCanvasItem *item);
 /* Immediate-mode hosts that rebuild the whole list each frame: overwrite the
  * item at `index` (index == count appends), reusing its buffers, then call
- * BK_canvas_truncate with the new count (drops the rest, redraws once). */
+ * BK_canvas_truncate with the new count (drops the rest). Only items that changed are redrawn. */
 void BK_canvas_put_item(BKNode *canvas, int index, const BKCanvasItem *item);
 void BK_canvas_truncate(BKNode *canvas, int count); /* append, ids not checked */
 void BK_canvas_delete(BKNode *canvas, int id);                     /* id < 0: all */
@@ -661,6 +669,8 @@ typedef struct BKWindowCallbacks {
   /* BK_window_request_frame: called right before the frame renders, so a host
    * can rebuild its UI for exactly the frame that presents it. */
   void (*on_frame)(void *data, BKWindow *win);
+  /* The window got (1) or lost (0) the keyboard focus (GHOST_kEventWindowActivate). */
+  void (*on_focus)(void *data, BKWindow *win, int active);
 } BKWindowCallbacks;
 int BK_window_supported(void);
 BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height);
@@ -690,7 +700,17 @@ void BK_window_cancel_timer(BKWindow *win, int id);
 void *BK_window_handle(BKWindow *win);       /* HWND / X11 Window / NSWindow * */
 /* Window-manager requests (Tk's wm): "pos" (x, y), "minsize"/"maxsize" (w, h),
  * "resizable" (w, h), "topmost" (a), "alpha" (a), "override" (a), "state"
- * (0 normal, 1 iconic, 2 withdrawn, 3 zoomed), "lift", "lower", "focus". */
+ * (0 normal, 1 iconic, 2 withdrawn, 3 zoomed), "lift", "lower", "focus".
+ * "transparent" (a): per-pixel alpha, no region background. On Linux set it
+ * before show (X11 makes the window again; the OpenGL renderer uses its 32-bit visual). On Windows
+ * the window has no frame: with the Direct3D 11 renderer DWM blends the alpha of its frames
+ * (blur-behind), else the raster is shown with UpdateLayeredWindow (the window is made again). On macOS it is a
+ * non-opaque window with a clear background.
+ * "layer" (layer, keyboard; Wayland with wlr-layer-shell): a layer surface instead of a
+ * toplevel, layer 0 background .. 3 overlay (-1: a toplevel again), keyboard 0 none,
+ * 1 exclusive, 2 on demand. "anchor" (edges, exclusive zone): edges top 1, bottom 2, left 4,
+ * right 8; anchored at both edges of an axis, the surface fills it. wm_get("layer") gives
+ * (1 when the compositor has layer shell, the window's layer). */
 void BK_window_wm(BKWindow *win, const char *key, double a, double b);
 /* Queries: "pos", "state", "screen" (w, h), "pointer" (x, y), "scale". */
 int BK_window_wm_get(BKWindow *win, const char *key, double *r_a, double *r_b);

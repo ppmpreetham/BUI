@@ -23,6 +23,7 @@
 #  define COBJMACROS
 #  include <windows.h>
 #  include <d3d11.h>
+#  include <d3d11_1.h>
 #  include <dxgi1_2.h>
 
 #  include <stdio.h>
@@ -39,6 +40,8 @@ static const GUID k_IID_IDXGIFactory2 = {
     0x50c83a1c, 0xe072, 0x4c48, {0x87, 0xb0, 0x36, 0x30, 0xfa, 0x36, 0xa6, 0xd0}};
 static const GUID k_IID_ID3D11Texture2D = {
     0x6f15aaf2, 0xd208, 0x4e89, {0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c}};
+static const GUID k_IID_ID3D11DeviceContext1 = {
+    0xbb2c6faa, 0xb5fb, 0x4082, {0x8e, 0x6b, 0x38, 0x8b, 0x8c, 0xfa, 0x90, 0xe1}};
 
 #  define REL(p) \
     do { \
@@ -137,6 +140,10 @@ struct BuiGpu {
   IDXGIFactory2 *factory;
   IDXGISwapChain1 *swap;
   int sw, sh; /* swap chain size */
+  /* alpha: frames keep premultiplied alpha. The swap chain is a bitblt one (DWM blur-behind
+   * shows its alpha, as in SDL) and ClearView clears the rects of a redrawn region. */
+  int alpha;
+  ID3D11DeviceContext1 *ctx1;
   int swap_fresh;
 
   ID3D11VertexShader *vs_quad, *vs_tri, *vs_mesh;
@@ -304,6 +311,11 @@ static int device_init(BuiGpu *g)
   if (FAILED(hr)) {
     return fail("D3D11CreateDevice", hr);
   }
+  if (g->alpha && FAILED(hr = ID3D11DeviceContext_QueryInterface(g->ctx, &k_IID_ID3D11DeviceContext1,
+                                                                  (void **)&g->ctx1)))
+  {
+    return fail("ID3D11DeviceContext1", hr); /* Windows 8: ClearView */
+  }
   g->max_tex = got >= D3D_FEATURE_LEVEL_11_0 ? D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION : 8192;
   const char *max_env = getenv("BUI_GPU_MAX_TEXTURE"); /* tests: force tiling */
   if (max_env && atoi(max_env) >= 64) {
@@ -431,13 +443,14 @@ static DWORD WINAPI device_thread(void *arg)
   return 0;
 }
 
-BuiGpu *bui_gpu_create(void *hwnd)
+BuiGpu *bui_gpu_create(void *hwnd, int alpha)
 {
   BuiGpu *g = (BuiGpu *)calloc(1, sizeof(BuiGpu));
   if (!g) {
     return NULL;
   }
   g->hwnd = (HWND)hwnd;
+  g->alpha = alpha;
   g->mask_map = (Slot *)calloc(MASK_MAP, sizeof(Slot));
   g->img_map = (Slot *)calloc(IMG_MAP, sizeof(Slot));
   g->thread = CreateThread(NULL, 0, device_thread, g, 0, NULL);
@@ -523,6 +536,7 @@ void bui_gpu_free(BuiGpu *g)
   REL(g->ps_tri);
   REL(g->swap);
   REL(g->factory);
+  REL(g->ctx1);
   REL(g->ctx);
   REL(g->dev);
   free(g->inst);
@@ -1393,8 +1407,8 @@ static int ensure_target(BuiGpu *g)
   }
   g->tw = g->w;
   g->th = g->h;
-  const float black[4] = {0, 0, 0, 1};
-  ID3D11DeviceContext_ClearRenderTargetView(g->ctx, g->rtv, black);
+  const float clear[4] = {0, 0, 0, g->alpha ? 0.0f : 1.0f};
+  ID3D11DeviceContext_ClearRenderTargetView(g->ctx, g->rtv, clear);
   g->dmg_full = 1;
   return 1;
 }
@@ -1566,9 +1580,17 @@ static int ensure_swap(BuiGpu *g)
     sd.SampleDesc.Count = 1;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.BufferCount = 2;
-    sd.Scaling = DXGI_SCALING_NONE;
-    sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-    sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    if (g->alpha) {
+      /* bitblt model, as SDL's transparent D3D11 windows: Present copies the alpha channel into
+       * the window's surface, which DWM blends (the host enables blur-behind) */
+      sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+      sd.Scaling = DXGI_SCALING_STRETCH;
+    }
+    else {
+      sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+      sd.Scaling = DXGI_SCALING_NONE;
+      sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+    }
     if (FAILED(IDXGIFactory2_CreateSwapChainForHwnd(g->factory, (IUnknown *)g->dev, g->hwnd, &sd,
                                                     NULL, NULL, &g->swap)))
     {
@@ -1582,18 +1604,29 @@ static int ensure_swap(BuiGpu *g)
   return 1;
 }
 
+void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h)
+{
+  flush(g); /* what was recorded for earlier regions comes first */
+  if (!g->ctx1 || !g->target || g->tw != g->w || g->th != g->h) {
+    return; /* a new target starts transparent */
+  }
+  const float clear[4] = {0, 0, 0, 0};
+  const RECT rect = {x, y, x + w, y + h};
+  ID3D11DeviceContext1_ClearView(g->ctx1, (ID3D11View *)g->rtv, clear, &rect, 1);
+}
+
 int bui_gpu_present(BuiGpu *g, int full)
 {
   flush(g);
   if (!g->target || !ensure_swap(g)) {
     g->n_dmg = g->dmg_full = 0;
-    return g->target != NULL;
+    return g->target != NULL && !g->alpha; /* no alpha surface: the renderer is given up */
   }
   ID3D11Texture2D *back = NULL;
   if (FAILED(IDXGISwapChain1_GetBuffer(g->swap, 0, &k_IID_ID3D11Texture2D, (void **)&back))) {
     return 0;
   }
-  /* the flip model hands back an older buffer: copy the whole frame */
+  /* a flip-model buffer is older than the last frame: copy the whole frame */
   ID3D11DeviceContext_CopyResource(g->ctx, (ID3D11Resource *)back, (ID3D11Resource *)g->target);
   REL(back);
   DXGI_PRESENT_PARAMETERS pp = {0};
@@ -1640,10 +1673,12 @@ int bui_gpu_read(BuiGpu *g, uint32_t *dst, int w, int h)
   D3D11_MAPPED_SUBRESOURCE m;
   int ok = 0;
   if (SUCCEEDED(ID3D11DeviceContext_Map(g->ctx, (ID3D11Resource *)st, 0, D3D11_MAP_READ, 0, &m))) {
+    /* like the raster: 0x00RRGGBB, or premultiplied 0xAARRGGBB with alpha */
+    const uint32_t mask = g->alpha ? 0xFFFFFFFFu : 0xFFFFFFu;
     for (int y = 0; y < h; y++) {
       const uint32_t *src = (const uint32_t *)((const uint8_t *)m.pData + (size_t)y * m.RowPitch);
       for (int x = 0; x < w; x++) {
-        dst[(size_t)y * w + x] = src[x] & 0xFFFFFFu; /* 0x00RRGGBB like the raster */
+        dst[(size_t)y * w + x] = src[x] & mask;
       }
     }
     ID3D11DeviceContext_Unmap(g->ctx, (ID3D11Resource *)st, 0);
@@ -1682,9 +1717,10 @@ int bui_gpu_slug_glyph(BuiGpu *g, int face, int glyph, unsigned gen, float r_bbo
 
 #  include "gpu_d3d11.h"
 
-BuiGpu *bui_gpu_create(void *hwnd)
+BuiGpu *bui_gpu_create(void *hwnd, int alpha)
 {
   (void)hwnd;
+  (void)alpha;
   return NULL;
 }
 void bui_gpu_free(BuiGpu *g)
@@ -1798,6 +1834,14 @@ void bui_gpu_mesh(BuiGpu *g,
   (void)tex;
   (void)nearest;
   (void)clip;
+}
+void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h)
+{
+  (void)g;
+  (void)x;
+  (void)y;
+  (void)w;
+  (void)h;
 }
 void bui_gpu_damage(BuiGpu *g, int x, int y, int w, int h)
 {

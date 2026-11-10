@@ -1843,6 +1843,15 @@ static PyObject *kitctx_picker_part(KitContextObject *self, PyObject *args)
   return node_wrap(p ? BK_picker_part(p, name) : NULL);
 }
 
+static PyObject *kitctx_hit(KitContextObject *self, PyObject *args)
+{
+  int x, y;
+  if (!PyArg_ParseTuple(args, "ii:hit", &x, &y)) {
+    return NULL;
+  }
+  return node_wrap(BK_hit_at(self->ctx, x, y));
+}
+
 static PyObject *kitctx_open_menu(KitContextObject *self, PyObject *args, PyObject *kw)
 {
   static char *kwlist[] = {"owner", "items", "title", "at", NULL};
@@ -1872,11 +1881,17 @@ static PyObject *kitctx_open_menu(KitContextObject *self, PyObject *args, PyObje
   Py_RETURN_NONE;
 }
 
-static PyObject *kitctx_open_pie(KitContextObject *self, PyObject *args)
+static PyObject *kitctx_open_pie(KitContextObject *self, PyObject *args, PyObject *kw)
 {
+  static char *kwlist[] = {"items", "title", "at", NULL};
   PyObject *items;
   const char *title = NULL;
-  if (!PyArg_ParseTuple(args, "O|z:open_pie", &items, &title)) {
+  PyObject *at = Py_None;
+  if (!PyArg_ParseTupleAndKeywords(args, kw, "O|zO:open_pie", kwlist, &items, &title, &at)) {
+    return NULL;
+  }
+  int ax = -100000, ay = -100000;
+  if (at != Py_None && !PyArg_ParseTuple(at, "ii", &ax, &ay)) {
     return NULL;
   }
   BKMenuSpec *specs;
@@ -1884,7 +1899,7 @@ static PyObject *kitctx_open_pie(KitContextObject *self, PyObject *args)
   if (!build_specs(items, &specs, &n)) {
     return NULL;
   }
-  BK_open_pie(self->ctx, specs, n, title);
+  BK_open_pie(self->ctx, specs, n, title, ax, ay);
   free_specs(specs, n);
   Py_RETURN_NONE;
 }
@@ -1974,9 +1989,11 @@ static PyMethodDef kitctx_methods[] = {
     {"popup_owner", (PyCFunction)kitctx_popup_owner, METH_O, ""},
     {"menu_rows", (PyCFunction)kitctx_menu_rows, METH_O, "[(text, rect)] of menu popup i"},
     {"picker_part", (PyCFunction)kitctx_picker_part, METH_VARARGS, "Color picker part."},
+    {"hit", (PyCFunction)kitctx_hit, METH_VARARGS, "hit(x, y): the node under the point, or None"},
     {"open_menu", (PyCFunction)(void (*)(void))kitctx_open_menu, METH_VARARGS | METH_KEYWORDS,
      "open_menu(owner, items, title=None, at=None)"},
-    {"open_pie", (PyCFunction)kitctx_open_pie, METH_VARARGS, "open_pie(items, title=None)"},
+    {"open_pie", (PyCFunction)(void (*)(void))kitctx_open_pie, METH_VARARGS | METH_KEYWORDS,
+     "open_pie(items, title=None, at=None)"},
     {NULL, NULL, 0, NULL},
 };
 
@@ -2012,6 +2029,16 @@ static PyTypeObject KitContext_Type = {
 static PyObject *kit_set_scale(PyObject *m, PyObject *arg)
 {
   BK_set_scale((float)PyFloat_AsDouble(arg));
+  Py_RETURN_NONE;
+}
+
+static PyObject *kit_set_text_shadow(PyObject *m, PyObject *arg)
+{
+  const int on = PyObject_IsTrue(arg);
+  if (on < 0) {
+    return NULL;
+  }
+  BK_set_text_shadow(on);
   Py_RETURN_NONE;
 }
 
@@ -2338,6 +2365,8 @@ static PyMethodDef kit_functions[] = {
     {"image_set_budget", kit_image_set_budget, METH_O, "Image cache budget in bytes."},
     {"kit_set_scale", kit_set_scale, METH_O, "UI scale (1.0 = 20 px widgets)."},
     {"kit_scale", kit_scale, METH_NOARGS, ""},
+    {"kit_set_text_shadow", kit_set_text_shadow, METH_O,
+     "Blender's UI text shadows (off in Python by default)."},
     {"kit_unit", kit_unit, METH_NOARGS, "U.widget_unit in pixels."},
     {"kit_set_font", kit_set_font, METH_O, "UI font family."},
     {"kit_set_theme", kit_set_theme, METH_O, "Theme: 'dark' (default) or 'light' (Blender's presets)."},
@@ -2362,6 +2391,7 @@ typedef struct KitWindowObject {
   PyObject *ctx;      /* KitContext (kept alive) */
   PyObject *timers;   /* id -> callable */
   PyObject *on_close; /* callable -> bool, or None */
+  PyObject *on_focus; /* callable(active: bool), or None */
 } KitWindowObject;
 
 static int stop_check(void)
@@ -2402,6 +2432,39 @@ static int win_on_close(void *data, BKWindow *w)
   return allow;
 }
 
+static void win_on_focus(void *data, BKWindow *w, int active)
+{
+  KitWindowObject *self = (KitWindowObject *)data;
+  if (self->on_focus && self->on_focus != Py_None) {
+    PyObject *r = PyObject_CallOneArg(self->on_focus, active ? Py_True : Py_False);
+    if (!r) {
+      stash_error();
+    }
+    Py_XDECREF(r);
+  }
+}
+
+static void win_on_focus_gil(void *data, BKWindow *w, int active)
+{
+  KitWindowObject *self = (KitWindowObject *)data;
+  GIL_ENTER;
+  if (g_py_depth > 0) { /* queued behind the running callback, like the timers */
+    PyObject *args = PyTuple_Pack(1, active ? Py_True : Py_False);
+    if (args) {
+      defer_call(self->on_focus, args);
+    }
+    Py_XDECREF(args);
+    PyErr_Clear();
+  }
+  else {
+    g_py_depth++;
+    win_on_focus(data, w, active);
+    g_py_depth--;
+    run_deferred();
+  }
+  GIL_LEAVE;
+}
+
 /* The timer's callable, taken off the table (one-shot) and queued behind the running callback. */
 static void win_defer_timer(void *data, int id)
 {
@@ -2433,15 +2496,38 @@ static void win_on_timer_gil(void *data, BKWindow *w, int id)
   GIL_LEAVE;
 }
 
+/* The close that was queued behind a running callback: ask the handler now, close if it agrees. */
+static PyObject *win_deferred_close(PyObject *self, PyObject *unused)
+{
+  KitWindowObject *win = (KitWindowObject *)self;
+  if (win->win && BK_window_is_open(win->win) && win_on_close(win, win->win)) {
+    BK_window_close(win->win);
+  }
+  Py_RETURN_NONE;
+}
+
+static PyMethodDef win_deferred_close_def = {"close", win_deferred_close, METH_NOARGS, NULL};
+
+static void win_defer_close(void *data)
+{
+  PyObject *fn = PyCFunction_New(&win_deferred_close_def, (PyObject *)data);
+  defer_call(fn, NULL);
+  Py_XDECREF(fn);
+  PyErr_Clear();
+}
+
 static int win_on_close_gil(void *data, BKWindow *w)
 {
   GIL_ENTER;
-  int allow = 0; /* the handler answers now: a close that arrives while a callback runs is refused */
+  int allow = 0; /* a close that arrives while a callback runs is answered after it */
   if (g_py_depth == 0) {
     g_py_depth++;
     allow = win_on_close(data, w);
     g_py_depth--;
     run_deferred();
+  }
+  else {
+    win_defer_close(data);
   }
   GIL_LEAVE;
   return allow;
@@ -2471,7 +2557,9 @@ static int kitwin_init(KitWindowObject *self, PyObject *args, PyObject *kw)
   }
   Py_XSETREF(self->ctx, Py_NewRef(ctx));
   Py_XSETREF(self->timers, PyDict_New());
-  BKWindowCallbacks cb = {self, win_on_timer_gil, win_on_close_gil};
+  BKWindowCallbacks cb = {
+      .data = self, .on_timer = win_on_timer_gil, .on_close = win_on_close_gil,
+      .on_focus = win_on_focus_gil};
   BK_window_set_callbacks(self->win, &cb);
   return 0;
 }
@@ -2486,6 +2574,7 @@ static void kitwin_dealloc(KitWindowObject *self)
   Py_CLEAR(self->ctx);
   Py_CLEAR(self->timers);
   Py_CLEAR(self->on_close);
+  Py_CLEAR(self->on_focus);
   Py_TYPE(self)->tp_free((PyObject *)self);
 }
 
@@ -2494,6 +2583,7 @@ static int kitwin_traverse(KitWindowObject *self, visitproc visit, void *arg)
   Py_VISIT(self->ctx);
   Py_VISIT(self->timers);
   Py_VISIT(self->on_close);
+  Py_VISIT(self->on_focus);
   return 0;
 }
 
@@ -2501,6 +2591,7 @@ static int kitwin_clear(KitWindowObject *self)
 {
   Py_CLEAR(self->timers);
   Py_CLEAR(self->on_close);
+  Py_CLEAR(self->on_focus);
   return 0;
 }
 
@@ -2653,14 +2744,16 @@ static PyObject *kitwin_after_cancel(KitWindowObject *self, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-static PyObject *kitwin_get_on_close(KitWindowObject *self, void *c)
+/* A callback attribute; `offset` is the field's offsetof in KitWindowObject. */
+static PyObject *kitwin_get_cb(KitWindowObject *self, void *offset)
 {
-  return Py_NewRef(self->on_close ? self->on_close : Py_None);
+  PyObject *v = *(PyObject **)((char *)self + (size_t)offset);
+  return Py_NewRef(v ? v : Py_None);
 }
 
-static int kitwin_set_on_close(KitWindowObject *self, PyObject *v, void *c)
+static int kitwin_set_cb(KitWindowObject *self, PyObject *v, void *offset)
 {
-  Py_XSETREF(self->on_close, Py_NewRef(v ? v : Py_None));
+  Py_XSETREF(*(PyObject **)((char *)self + (size_t)offset), Py_NewRef(v ? v : Py_None));
   return 0;
 }
 
@@ -2672,9 +2765,9 @@ static PyMethodDef kitwin_methods[] = {
     {"set_size", (PyCFunction)kitwin_set_size, METH_VARARGS, "Logical size (DPI scaled)."},
     {"wm", (PyCFunction)kitwin_wm, METH_VARARGS,
      "wm(key, a=0, b=0): pos, minsize, maxsize, resizable, topmost, alpha, override, state, "
-     "lift, lower, focus."},
+     "lift, lower, focus, transparent (Linux, before show), layer, anchor (Wayland layer shell)."},
     {"wm_get", (PyCFunction)kitwin_wm_get, METH_VARARGS,
-     "wm_get(key) -> (a, b) or None: pos, state, screen, pointer, scale."},
+     "wm_get(key) -> (a, b) or None: pos, state, screen, pointer, scale, layer."},
     {"render_now", (PyCFunction)kitwin_render_now, METH_NOARGS, "Render + present now."},
     {"pixel", (PyCFunction)kitwin_pixel, METH_VARARGS, "Frame buffer pixel (r, g, b)."},
     {"after", (PyCFunction)kitwin_after, METH_VARARGS, "after(ms, fn) -> id (one-shot)."},
@@ -2688,8 +2781,12 @@ static PyGetSetDef kitwin_getset[] = {
     {"gpu", (getter)kitwin_get_gpu, (setter)kitwin_set_gpu,
      "True once frames are drawn on the GPU; set True to switch this window to the GPU", NULL},
     {"hwnd", (getter)kitwin_hwnd, NULL, "native handle", NULL},
-    {"on_close", (getter)kitwin_get_on_close, (setter)kitwin_set_on_close,
-     "called on the close button; return True to close", NULL},
+    {"on_close", (getter)kitwin_get_cb, (setter)kitwin_set_cb,
+     "called on the close button; return True to close",
+     (void *)offsetof(KitWindowObject, on_close)},
+    {"on_focus", (getter)kitwin_get_cb, (setter)kitwin_set_cb,
+     "called with True when the window gets the keyboard focus, False when it loses it",
+     (void *)offsetof(KitWindowObject, on_focus)},
     {NULL, NULL, NULL, NULL, NULL},
 };
 
@@ -2755,6 +2852,7 @@ static PyMethodDef window_functions[] = {
 
 int buipy_kit_init(PyObject *module)
 {
+  BK_set_text_shadow(0); /* Python: crisp text without Blender's UI shadow */
   if (PyType_Ready(&KitNode_Type) < 0 || PyType_Ready(&KitTreeItem_Type) < 0 ||
       PyType_Ready(&KitContext_Type) < 0 || PyType_Ready(&KitWindow_Type) < 0)
   {

@@ -203,7 +203,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 - **Math in number fields**, with Blender's own expression evaluator: `2*pi`, `min(4, 3)`, `round(1.7)`, `x if c else y`.
 - Ctrl+Wheel steps values, Ctrl+C / Ctrl+V copy values, Backspace resets.
 - **Drag across checkboxes** to set them all.
-- Press-drag-release menus, pie menus, and **Blender's fuzzy menu search**: "ad cu" finds "Add Cube", typos are forgiven, recent picks rank first.
+- Press-drag-release menus, pie menus that pick on key release as in Blender (sub-pies, a "More" level, numpad directions, underlined letters), and **Blender's fuzzy menu search**: "ad cu" finds "Add Cube", typos are forgiven, recent picks rank first.
 - **Ctrl+Z / Ctrl+Shift+Z** on every UI edit, and inside a text field while you type; Tab between fields.
 - Blender's float display precision, multi-field vertical drags, and panels that collapse with Blender's animation.
 - The HSV color wheel, color ramps, curves, trees, lists, text areas, canvases, a node editor and Blender's File Browser.

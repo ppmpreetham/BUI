@@ -36,8 +36,8 @@ App(title="BUI", size=(420, 640), *children, padding=None, spacing=None, header=
 | `app.add(*components)` | Append to the root |
 | `app.bind("ctrl+s", fn)` | Window hotkey (`"q"`, `"shift+f3"`, `"ctrl+alt+z"` ...) |
 | `app.run(native=None)` | Open the window and run the loop. `native=False` forces the Tk host. |
-| `app.open(native=None)` | Open the window without running the loop. Returns the `bui.host.Window`. |
-| `app.ctx` | The C kit context (popups, focus, undo: `ctx.undo()` / `ctx.redo()`) |
+| `app.open(native=None)` | Open the window without running the loop. Returns the `bui.host.Window`: `wm(key, a, b)` sends window requests (`"transparent"`, `"override"`, `"topmost"`, and on Wayland `"layer"` and `"anchor"`), `on_focus(active)` reports keyboard focus. |
+| `app.ctx` | The C kit context (popups, focus, undo: `ctx.undo()` / `ctx.redo()`; `ctx.hit(x, y)` gives the interactive node under a point) |
 | `app.render_raster(w, h)` | Render headlessly into a `buipy.Raster` (tests, screenshots) |
 | `app.press / release / motion / key / wheel / context_menu` | Drive input headlessly (tests) |
 

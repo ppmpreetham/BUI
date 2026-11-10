@@ -41,6 +41,30 @@ const signals = require('./signals')
 const dom = require('./dom')
 const { OP, HTMLElement, TextNode, Comment, DocumentFragment, createElement } = dom
 
+const LAYERS = ['background', 'bottom', 'top', 'overlay']
+const EDGES = ['top', 'bottom', 'left', 'right']
+const KEYBOARD = ['none', 'exclusive', 'on-demand']
+
+function oneOf (what, value, names) {
+  if (value != null && !names.includes(value)) {
+    throw new TypeError(`${what}: '${value}' is not one of ${names.map((n) => `'${n}'`).join(', ')}`)
+  }
+}
+
+/** The window options as the addon takes them; unknown layer-shell names throw here. */
+function windowConfig (o) {
+  const l = o.layerShell
+  if (l) {
+    oneOf('layerShell.layer', l.layer, LAYERS)
+    oneOf('layerShell.keyboard', l.keyboard, KEYBOARD)
+    for (const e of l.anchor ?? []) oneOf('layerShell.anchor', e, EDGES)
+  }
+  return {
+    title: o.title, width: o.width, height: o.height, resizable: o.resizable, gpu: o.gpu,
+    transparent: o.transparent, alwaysOnTop: o.alwaysOnTop, frame: o.frame, layerShell: l,
+  }
+}
+
 class Window {
   constructor (app, id, options = {}) {
     this.app = app
@@ -52,7 +76,7 @@ class Window {
     this._strings = []
     this._stringIds = new Map()
     this._scheduled = false
-    this._onClose = new Set()
+    this._on = { close: new Set(), focus: new Set(), blur: new Set() }
     this._frameCallbacks = new Map()
     this._nextFrameId = 1
     this._framePending = false
@@ -63,10 +87,7 @@ class Window {
     this.body.ownerWindow = this
     this.body.id = 0
     this._nodes.set(0, this.body)
-    app.native.openWindow(id, {
-      title: options.title, width: options.width, height: options.height,
-      resizable: options.resizable, gpu: options.gpu,
-    })
+    app.native.openWindow(id, windowConfig(options))
   }
 
   /** An element. Capitalized tags are Blender's widgets (`Button`, `NumberSlider` ...). */
@@ -154,17 +175,22 @@ class Window {
   }
 
   on (event, fn) {
-    if (event !== 'close') throw new Error(`blenderui: unsupported window event "${event}"`)
-    this._onClose.add(fn)
+    const set = this._on[event]
+    if (!set) throw new Error(`blenderui: unsupported window event "${event}"`)
+    set.add(fn)
     return this
+  }
+
+  _emit (event) {
+    for (const fn of this._on[event]) {
+      try { fn() } catch (err) { queueMicrotask(() => { throw err }) }
+    }
   }
 
   _closed () {
     if (this.closed) return
     this.closed = true
-    for (const fn of this._onClose) {
-      try { fn() } catch (err) { queueMicrotask(() => { throw err }) }
-    }
+    this._emit('close')
     // the native window is gone: free what follows signals or holds listeners
     for (const n of this._nodes.values()) {
       n._unbindAll()
@@ -266,6 +292,10 @@ class App {
     }
     if (raw.kind === 'frame') {
       win._frame()
+      return
+    }
+    if (raw.kind === 'focus' || raw.kind === 'blur') {
+      win._emit(raw.kind)
       return
     }
     win._nodes.get(raw.target)?._dispatch(raw)

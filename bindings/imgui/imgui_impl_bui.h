@@ -79,6 +79,9 @@ IMGUI_IMPL_API BKNode*  ImGui_ImplBUI_GetNode();
 // Ask for frames: e.g. after the application changed state shown by the UI. n frames
 // back to back (paced to the display in a window), or one frame after `ms` milliseconds.
 IMGUI_IMPL_API void     ImGui_ImplBUI_RequestFrames(int n = 1);
+// Call from a frame callback that stops early on an error (an exception in a scripting
+// language): closes what the frame opened (Begin() without End() ...) so the frame can end.
+IMGUI_IMPL_API void     ImGui_ImplBUI_AbandonFrame();
 IMGUI_IMPL_API void     ImGui_ImplBUI_RequestFrameIn(int ms);
 // Frames run since Init (tests, profiling) and whether the last frame changed the output.
 IMGUI_IMPL_API int      ImGui_ImplBUI_FrameCount();

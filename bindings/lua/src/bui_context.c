@@ -380,10 +380,8 @@ static int l_ctx_close_popups(lua_State *L) {
   return 0;
 }
 
-static int l_ctx_focus(lua_State *L) {
-  luabui_Context *cud = CHECK_CTX(L, 1);
-  if (!cud->ctx) return 0;
-  BKNode *n = BK_focus(cud->ctx);
+/* Push the node's userdata (made on first use), or nothing for NULL. */
+static int push_node(lua_State *L, BKNode *n) {
   if (!n) return 0;
   if (luabui_lookup_node(L, n)) return 1;
   luabui_Node *ud = (luabui_Node *)lua_newuserdata(L, sizeof(luabui_Node));
@@ -396,20 +394,23 @@ static int l_ctx_focus(lua_State *L) {
   return 1;
 }
 
+static int l_ctx_focus(lua_State *L) {
+  luabui_Context *cud = CHECK_CTX(L, 1);
+  if (!cud->ctx) return 0;
+  return push_node(L, BK_focus(cud->ctx));
+}
+
 static int l_ctx_hover(lua_State *L) {
   luabui_Context *cud = CHECK_CTX(L, 1);
   if (!cud->ctx) return 0;
-  BKNode *n = BK_hover(cud->ctx);
-  if (!n) return 0;
-  if (luabui_lookup_node(L, n)) return 1;
-  luabui_Node *ud = (luabui_Node *)lua_newuserdata(L, sizeof(luabui_Node));
-  ud->node = n;
-  luaL_getmetatable(L, LUABUI_NODE_MT);
-  lua_setmetatable(L, -2);
-  lua_newtable(L);
-  lua_setuservalue(L, -2);
-  luabui_map_node(L, n, -1);
-  return 1;
+  return push_node(L, BK_hover(cud->ctx));
+}
+
+static int l_ctx_hit(lua_State *L) {
+  luabui_Context *cud = CHECK_CTX(L, 1);
+  if (!cud->ctx) return 0;
+  return push_node(L, BK_hit_at(cud->ctx, (int)luaL_checkinteger(L, 2),
+                                (int)luaL_checkinteger(L, 3)));
 }
 
 static int l_ctx_cursor(lua_State *L) {
@@ -591,7 +592,9 @@ static int l_ctx_open_pie(lua_State *L) {
   BKMenuSpec *specs;
   int n = luabui_build_menuspec(L, 2, &specs);
   const char *title = luaL_optstring(L, 3, NULL);
-  if (specs) BK_open_pie(cud->ctx, specs, n, title);
+  int ax = (int)luaL_optinteger(L, 4, -100000);
+  int ay = (int)luaL_optinteger(L, 5, -100000);
+  if (specs) BK_open_pie(cud->ctx, specs, n, title, ax, ay);
   return 0;
 }
 
@@ -665,6 +668,7 @@ static const luaL_Reg ctx_methods[] = {
   {"focus",         l_ctx_focus},
   {"focus_node",    l_ctx_focus_node},
   {"hover",         l_ctx_hover},
+  {"hit",           l_ctx_hit},
   {"cursor",        l_ctx_cursor},
   {"set_pointer",   l_ctx_set_pointer},
   {"modal",         l_ctx_modal},

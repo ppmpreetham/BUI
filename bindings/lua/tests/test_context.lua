@@ -221,7 +221,7 @@ ctx:open_pie({
   {text="South", icon=1},
   {text="East", icon=2},
   {text="West", icon=3},
-}, "Direction")
+}, "Direction", 160, 100)
 
 -- Close popups after open_menu/open_pie
 ctx:close_popups()
@@ -234,6 +234,12 @@ for i = 1, 3 do
   check(rw == 320, "render " .. i .. " width")
   check(rh == 200, "render " .. i .. " height")
 end
+
+-- ── Hit ───────────────────────────────────────────────────────────────
+
+local bx, by, bw, bh = btn:rect()
+assert(ctx:hit(bx + bw // 2, by + bh // 2) == btn, "hit over the button")
+assert(ctx:hit(-5, -5) == nil, "hit outside the window")
 
 -- ── Context tostring ─────────────────────────────────────────────────
 

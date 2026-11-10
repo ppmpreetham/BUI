@@ -30,7 +30,7 @@ Blender draws text with its font library, **BLF**, on top of FreeType. BUI vendo
 - **Optical size:** the variable Inter is set to the text's size, clamped to the axis as Blender does. UI text gets Inter's 14 pt design.
 - **Bold** is the font's weight-700 instance, not a smeared regular.
 - **No kerning**, matching Blender, whose FreeType is built without `GPOS` kerning.
-- **Shadows:** widget text gets Blender's 1 px drop shadow, and panel titles its soft 3×3 one.
+- **Shadows:** widget text gets Blender's 1 px drop shadow, and panel titles its soft 3×3 one. `BK_set_text_shadow(0)` turns them off; the Python binding starts with them off (`buipy.kit_set_text_shadow(True)` turns them back on).
 
 FreeType is on by default (CMake `BUI_TEXT_FREETYPE`). With it off, stb_truetype rasterizes glyphs instead; stb_truetype also reads character maps, metrics and kerning tables in both cases.
 

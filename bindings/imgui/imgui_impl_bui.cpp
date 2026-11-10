@@ -49,6 +49,7 @@ struct ImGui_ImplBUI_Data
     bool                    SuperDown = false;
     char*                   ClipboardText = nullptr;
     bool                    InFrame = false;
+    ImGuiErrorRecoveryState FrameState; // before the user's frame, for AbandonFrame
 };
 
 static double now_seconds()
@@ -520,6 +521,7 @@ static void Bui_Frame(void* data, BKNode* node)
 
     bd->InFrame = true;
     ImGui::NewFrame();
+    ImGui::ErrorRecoveryStoreState(&bd->FrameState);
     if (bd->Frame)
         bd->Frame(bd->User);
     ImGui::Render();
@@ -674,6 +676,20 @@ bool ImGui_ImplBUI_Init(BKNode* node, ImGui_ImplBUI_FrameFn frame, void* user, c
     bd->FramesPending = bd->Config.SettleFrames; // new windows size themselves over a few frames
     BK_custom_request_frame(node, 0);
     return true;
+}
+
+void ImGui_ImplBUI_AbandonFrame()
+{
+    // Dear ImGui's recovery for scripting languages: unwind to the state before the user's frame,
+    // without the assert (the caller reports the error)
+    ImGui_ImplBUI_Data* bd = GetBackendData();
+    if (bd == nullptr || !bd->InFrame)
+        return;
+    ImGuiIO& io = ImGui::GetIO();
+    const bool assert_on = io.ConfigErrorRecoveryEnableAssert;
+    io.ConfigErrorRecoveryEnableAssert = false;
+    ImGui::ErrorRecoveryTryToRecoverState(&bd->FrameState);
+    io.ConfigErrorRecoveryEnableAssert = assert_on;
 }
 
 void ImGui_ImplBUI_Shutdown()

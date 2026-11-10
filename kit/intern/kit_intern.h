@@ -166,6 +166,8 @@ void bk_text(float x, float baseline, const char *s, int len, const uchar color[
 void bk_text_f(float x, float baseline, const char *s, int len, const float c[4], bool bold);
 /* Draw `s` inside rect with alignment; returns drawn width. Ellipsizes. */
 float bk_text_in(const BKRect *rect, const char *s, const uchar color[4], int align, bool bold);
+/* Underline byte `index` of the text the next bk_text_in calls draw (-1: none). */
+void bk_text_underline(int index);
 float bk_text_in_pad(const BKRect *rect, const char *s, const uchar color[4], int align, bool bold,
                      int pad);
 /* Text + optional icon in rect (Blender's widget_draw_text_icon). */
@@ -295,6 +297,9 @@ typedef struct BKClass {
   unsigned flags;  /* CLS_* */
   int cursor;      /* hover cursor */
   int drag_cursor; /* while dragged (BK_CURSOR_NONE = continuous grab) */
+  /* bk_anim_start: seconds to animate n->anim to its target, linearly; 0: a panel's
+   * ANIMATION_TIME, eased (do_animate) */
+  double anim_time;
   int drag_group;  /* drag-toggle group (0 = none) */
   void (*init)(BKNode *n);
   void (*free_ext)(BKNode *n);
@@ -311,6 +316,7 @@ typedef struct BKClass {
   int (*move)(BKNode *n, BKEvent *e);
   int (*leave)(BKNode *n);
   int (*key)(BKNode *n, BKEvent *e);
+  int (*key_up)(BKNode *n, BKEvent *e); /* a key release, sent to the top popup */
   int (*wheel)(BKNode *n, BKEvent *e);
   int (*cursor_at)(BKNode *n, int x, int y);
   void (*finish_edit)(BKNode *n, bool confirm);
@@ -472,6 +478,8 @@ void bk_natural(BKNode *n, int *r_w, int *r_h);
 void bk_arrange(BKNode *n, int x, int y, int w, int h);
 void bk_draw_tree(BKNode *n);
 BKNode *bk_hit(BKNode *n, int x, int y);
+/* Window hosts: the window got or lost the keyboard focus. Calls cb->on_focus. */
+void bk_window_focus(BKContext *ctx, BKWindow *win, const BKWindowCallbacks *cb, int active);
 bool bk_contains(const BKNode *n, int x, int y);
 BKRect bk_node_rect(const BKNode *n);
 bool bk_hovered(const BKNode *n);
@@ -565,6 +573,7 @@ struct BKContext {
   int press_x, press_y, off_x, off_y, skip_x, skip_y;
   int ungrab_x, ungrab_y; /* where a continuous drag puts the pointer back */
   int press_button;       /* the button that started the grab (1, 2, 3) */
+  char key_held[32];      /* wmWindow.pie_event_type_last: the key down now, "" = none */
   bool has_ungrab;
   bool has_skip;
   int pointer_x, pointer_y;
@@ -626,7 +635,6 @@ void bk_undo_record(BKNode *n, int kind);
 void bk_anim_start(BKNode *n);
 BKNode *bk_next_editable(BKNode *from, int dir);
 void bk_event(BKNode *n, int kind, int mods, const BKEvent *e);
-BKNode *bk_hit_at(BKContext *ctx, int x, int y);
 bool bk_anim_running(const BKNode *n);
 void bk_edit_next(BKNode *from, int dir);
 int bk_textarea_set_text(BKNode *n, const char *s);

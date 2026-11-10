@@ -61,9 +61,9 @@ win.on('close', () => console.log('bye'))
 | `headless` | No native windows: renders off-screen, for tests and CI. |
 | `quitOnLastWindowClosed` | Quit when the last window closes. Default `true`. |
 
-`app.window(options)` takes `title`, `width`, `height`, `resizable` and `gpu` (to choose per window). `app.quit()` closes every window and ends the UI thread, so Node can exit.
+`app.window(options)` takes `title`, `width`, `height`, `resizable`, `gpu` (to choose per window), `transparent` (per-pixel alpha), `alwaysOnTop` (Windows, macOS and X11), `frame: false` (no frame) and `layerShell` (`{ layer, anchor, exclusiveZone, keyboard }`, a Wayland layer-shell surface; `layer` is `'background'`, `'bottom'`, `'top'` or `'overlay'`, `anchor` a list of `'top'`, `'bottom'`, `'left'` and `'right'`, `keyboard` `'none'`, `'exclusive'` or `'on-demand'`). A Wayland toplevel cannot stay on top: use `layerShell`. `app.quit()` closes every window and ends the UI thread, so Node can exit.
 
-A window gives you `body`, `createElement(tag)`, `createTextNode(text)`, `requestAnimationFrame(cb)`, `screenshot()`, `click(x, y)`, `close()` and `on('close', fn)`.
+A window gives you `body`, `createElement(tag)`, `createTextNode(text)`, `requestAnimationFrame(cb)`, `screenshot()`, `click(x, y)`, `close()` and `on(event, fn)` for `close`, `focus` and `blur` (the window got or lost the keyboard focus).
 
 ## Elements and attributes
 

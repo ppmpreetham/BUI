@@ -920,6 +920,9 @@ int BK_set_num(BKNode *n, const char *key, double v)
   }
   for (size_t i = 0; i < sizeof(g_flag_props) / sizeof(g_flag_props[0]); i++) {
     if (strcmp(key, g_flag_props[i].key) == 0) {
+      if (((n->flags & g_flag_props[i].flag) != 0) == (v != 0)) {
+        return 1; /* unchanged: no relayout, no redraw */
+      }
       if (v != 0) {
         n->flags |= g_flag_props[i].flag;
       }
@@ -1761,29 +1764,7 @@ void bk_close_popups_after(BKContext *ctx, BKNode *after)
   while (ctx->npopups > keep) {
     BKNode *p = ctx->popups[--ctx->npopups];
     bk_invalidate(p);
-    /* clear references into the popup before freeing it */
-    if (ctx->hover && is_within(ctx->hover, p)) {
-      ctx->hover = NULL;
-    }
-    if (ctx->grab && is_within(ctx->grab, p)) {
-      ctx->grab = NULL;
-    }
-    if (ctx->focus && is_within(ctx->focus, p)) {
-      BKNode *f = ctx->focus;
-      ctx->focus = NULL;
-      bk_te_free(f->edit);
-      f->edit = NULL;
-    }
-    if (ctx->tip_node && is_within(ctx->tip_node, p)) {
-      ctx->tip_node = NULL;
-      ctx->tip_shown = 0;
-    }
-    if (ctx->last_click_node && is_within(ctx->last_click_node, p)) {
-      ctx->last_click_node = NULL;
-    }
-    if (ctx->modal && is_within(ctx->modal, p)) {
-      ctx->modal = NULL;
-    }
+    bk_forget(ctx, p); /* references into the popup, its animations, its undo steps */
     /* The popover panel's body belongs to its owner, not the popup. */
     if (p->cls == &bk_cls_popover_panel && p->nkids) {
       BKNode *body = p->kids[0];
@@ -2187,7 +2168,10 @@ static void draw_region(BKContext *ctx, const BKRect *rect)
   const int w = ctx->win_w, h = ctx->win_h;
   bk_clip_reset(w, h);
   bk_clip_push(rect->xmin, rect->ymin, bk_rw(rect), bk_rh(rect));
-  if (!(ctx->root && (ctx->root->flags & NF_OPAQUE))) {
+  if (BUI_raster_alpha(bk_draw.r)) { /* a transparent window: no region background */
+    BUI_raster_clear(bk_draw.r, rect->xmin, rect->ymin, bk_rw(rect), bk_rh(rect));
+  }
+  else if (!(ctx->root && (ctx->root->flags & NF_OPAQUE))) {
     bk_fill(rect->xmin, rect->ymin, bk_rw(rect), bk_rh(rect), bk_theme.region_bg);
   }
   const int top = ctx->header_h, view_h = h - top;
@@ -2792,6 +2776,7 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
   BKEvent e = make_event(ctx, NULL, ctx->pointer_x, ctx->pointer_y, mods);
   e.text = text ? text : "";
   e.keysym = keysym ? keysym : "";
+  snprintf(ctx->key_held, sizeof(ctx->key_held), "%s", e.keysym);
   ctx->interaction++;
   for (BKNode *n = ctx->focus ? ctx->focus : ctx->hover; n; n = n->parent) {
     if (n->flags & NF_EVENTS) { /* Tk/Qt key bindings see the key first */
@@ -3417,6 +3402,13 @@ int BK_key_release(BKContext *ctx, const char *keysym, int mods)
   BKEvent e = make_event(ctx, NULL, ctx->pointer_x, ctx->pointer_y, mods);
   e.text = "";
   e.keysym = keysym ? keysym : "";
+  if (bk_keysym_is(e.keysym, ctx->key_held)) {
+    ctx->key_held[0] = '\0';
+  }
+  BKNode *top = ctx->npopups ? ctx->popups[ctx->npopups - 1] : NULL;
+  if (top && top->cls->key_up && top->cls->key_up(top, &e)) {
+    return 1;
+  }
   for (BKNode *n = ctx->focus ? ctx->focus : ctx->hover; n; n = n->parent) {
     if (BK_IS_CUSTOM(n) && NODE_ENABLED(n)) {
       BKCustomEvent ce;
@@ -3710,9 +3702,10 @@ static void anim_step(BKContext *ctx)
   for (int i = ctx->nanim - 1; i >= 0; i--) {
     BKNode *n = ctx->anim[i];
     const float target = (n->flags & NF_COLLAPSED) ? 0.0f : 1.0f;
+    const double time = n->cls->anim_time;
     /* do_animate: fac = (now - starttime) / ANIMATION_TIME; fac = min(sqrt(fac), 1) */
-    float fac = (float)((now - ctx->anim_start[i]) / ANIMATION_TIME);
-    fac = BK_MIN(sqrtf(BK_MAX(fac, 0.0f)), 1.0f);
+    float fac = (float)((now - ctx->anim_start[i]) / (time > 0.0 ? time : ANIMATION_TIME));
+    fac = BK_MIN(time > 0.0 ? BK_MAX(fac, 0.0f) : sqrtf(BK_MAX(fac, 0.0f)), 1.0f);
     n->anim = fac >= 1.0f ? target : ctx->anim_from[i] + (target - ctx->anim_from[i]) * fac;
     if (n->anim == target) {
       const int last = --ctx->nanim;
@@ -3769,7 +3762,21 @@ BKNode *bk_next_editable(BKNode *from, int dir)
   return list[(at + dir + count) % count];
 }
 
-BKNode *bk_hit_at(BKContext *ctx, int x, int y)
+void bk_window_focus(BKContext *ctx, BKWindow *win, const BKWindowCallbacks *cb, int active)
+{
+  if (!active) {
+    /* pie_handler WINDEACTIVATE: the pie key may be released outside, so cancel the pie */
+    ctx->key_held[0] = '\0';
+    if (ctx->npopups && ctx->popups[ctx->npopups - 1]->cls == &bk_cls_pie) {
+      BK_close_popups(ctx);
+    }
+  }
+  if (cb->on_focus) {
+    cb->on_focus(cb->data, win, active);
+  }
+}
+
+BKNode *BK_hit_at(BKContext *ctx, int x, int y)
 {
   return hit_all(ctx, x, y);
 }

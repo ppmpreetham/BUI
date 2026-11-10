@@ -63,7 +63,7 @@ fn main() {
 | `impl Render for View` | The same: `fn render(&mut self, window, cx) -> impl IntoElement` |
 | `Entity<T>`, `WeakEntity<T>`, `cx.new` | `Copy` handles into the app's entity slots: `read` (returns `&T`), `update`, `downgrade`; `cx.release(e)` drops a value |
 | `Context<T>`: `notify`, `listener`, `entity` | The same; it derefs to `App` |
-| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size` and `gpu` |
+| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size`, `gpu`, `window_background` (`WindowBackgroundAppearance::Transparent`), `kind` (`WindowKind::Floating` stays on top, `PopUp` is on top without a frame, `LayerShell(LayerShellOptions { layer, anchor, exclusive_zone, keyboard_interactivity })` is a Wayland layer-shell surface) and `window_decorations` (`WindowDecorations::Client`: no frame). A Wayland toplevel cannot stay on top: use `LayerShell` |
 | `cx.set_global`, `cx.global` | The same, plus `try_global` and `global_mut` |
 | `cx.stop_propagation()` | The same |
 | `div().flex().gap_2()`, `.when(..)`, `.when_some(..)`, `.map(..)` | The same, from the `Styled` and `FluentBuilder` traits |
@@ -101,7 +101,7 @@ let win = cx.open_window(opts, |_, cx| cx.new(|_| MyView)).unwrap();
 - **`WindowBounds`** is `Windowed`, `Maximized` or `Fullscreen`. Without bounds, a window opens at 1024 × 700; without a title, it's called "BUI".
 - **`gpu: Some(true)`** draws this window on the GPU; `None` follows `Application::gpu` and `BUI_GPU`.
 - **`WindowHandle<V>`** has `root()` (the view's entity) and `update(cx, |view, window, cx| ...)`.
-- **On `App`:** `close_window(id)`, `on_window_closed(|id, cx| ...)`, `notify_all()`, `quit()`. `activate(..)` exists for compatibility and does nothing, because windows come to the front when shown.
+- **On `App`:** `close_window(id)`, `on_window_closed(|id, cx| ...)`, `on_window_activation(|id, active, cx| ...)`, `notify_all()`, `quit()`. `activate(..)` exists for compatibility and does nothing, because windows come to the front when shown.
 
 The event loop runs until every window is closed.
 

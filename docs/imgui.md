@@ -95,7 +95,7 @@ int main(void)
 
 Link `bui::cimgui` (CMake). `cimgui_impl_bui.h` is the backend for C: apps (window or
 headless), `cImGui_ImplBUI_Init(node, frame, user, config)` for a node in an existing BUI
-UI, `cImGui_ImplBUI_StyleBlender`, the UI scale, and headless input helpers. Example:
+UI, `cImGui_ImplBUI_StyleBlender`, `cImGui_ImplBUI_AbandonFrame` (ends a frame that a callback left early on an error), the UI scale, and headless input helpers. Example:
 `examples/imgui_demo_c.c` (`bui_imgui_demo_c`, `--screenshot out.png` for headless).
 
 ## Python

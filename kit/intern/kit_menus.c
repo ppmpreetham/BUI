@@ -870,12 +870,25 @@ const char *BK_menu_row_text(BKNode *menu, int i)
 static const int g_pie_rdir[8] = {6, 2, 4, 0, 7, 1, 5, 3};
 static const short g_pie_angle[8] = {90, 45, 0, 315, 270, 225, 180, 135};
 
+/* pie_menu_begin / pie_handler (interface_handlers.cc): U.pie_tap_timeout (20 cs) and
+ * PIE_CLICK_THRESHOLD_SQ (interface_intern.hh). */
+#define PIE_TAP_TIMEOUT_S 0.2
+#define PIE_MAX_ITEMS 8
+#define PIE_ANIMATION_TIMEOUT_S 0.06 /* U.pie_animation_timeout (6 cs) */
+#define PIE_CLICK_THRESHOLD_SQ 50.0f
+
 typedef struct PieData {
   MenuData menu; /* items in menu.all */
   float cx, cy;
   int at_x, at_y;
-  float dir[2];   /* pie_data->pie_dir: normalized pointer direction, y-up */
-  bool dir_valid; /* !(flags & PIE_INVALID_DIR) */
+  int init_x, init_y; /* pie_center_init: the pointer at open */
+  float dir[2];       /* pie_data->pie_dir: normalized pointer direction, y-up */
+  bool dir_valid;     /* !(flags & PIE_INVALID_DIR) */
+  bool click_style;   /* PIE_CLICK_STYLE: pick on click, not on the key release */
+  bool drag_style;    /* PIE_DRAG_STYLE: moved, so a quick release still picks */
+  char key[32];       /* pie_data->event_type: the key that opened the pie */
+  char accel[PIE_MAX_ITEMS]; /* Button.menu_key: 'a' .. 'z', or 0 */
+  double opened;      /* bk_time at open (the scroll timer's time_duration) */
 } PieData;
 
 #define PIE(n) ((PieData *)(n)->ext)
@@ -914,8 +927,10 @@ static BKRect pie_item_rect(BKNode *n, int i)
   pie_rdir_vec(g_pie_rdir[i], vec);
   const float fx = vec[0] > 0.01f ? 0.0f : (vec[0] < -0.01f ? -1.0f : -0.5f);
   const float fy = vec[1] > 0.99f ? 0.0f : (vec[1] < -0.99f ? -1.0f : -0.5f);
-  const float x = pd->cx + vec[0] * pie_radius() + fx * w;
-  const float y_up = vec[1] * pie_radius() + fy * h; /* bottom edge relative to center, y-up */
+  /* pie_handler's animation: the item's center moves out from the pie center by n->anim */
+  const float fac = n->anim;
+  const float x = pd->cx + (vec[0] * pie_radius() + (fx + 0.5f) * w) * fac - 0.5f * w;
+  const float y_up = (vec[1] * pie_radius() + (fy + 0.5f) * h) * fac - 0.5f * h;
   return bk_rect((int)x, (int)(pd->cy - y_up - h), (int)w, (int)h);
 }
 
@@ -961,7 +976,7 @@ static bool pie_isect_seg(PieData *pd, int i, int mask)
 static int pie_dir_hot(BKNode *n, int x, int y)
 {
   PieData *pd = PIE(n);
-  const int count = BK_MIN(8, pd->menu.nall);
+  const int count = pd->menu.nall;
   const float dx = x - pd->cx, dy = pd->cy - y; /* y-up */
   const float len = hypotf(dx, dy);
   pd->dir_valid = len >= pie_threshold();
@@ -1004,8 +1019,20 @@ static void pie_pick(BKNode *n, int i)
   if (!ctx) {
     return;
   }
-  if (i < 0 || i >= BK_MIN(8, pd->menu.nall) || !pd->menu.all[i].enabled) {
+  if (i < 0 || i >= pd->menu.nall || !pd->menu.all[i].enabled) {
     BK_close_popups(ctx);
+    return;
+  }
+  if (pd->menu.all[i].nsub) {
+    /* pie_menu_level_invoke / wm.call_menu_pie: the sub-pie opens at the pointer, titled by its
+     * item. Copied first: closing the pie frees its items. */
+    const int nsub = pd->menu.all[i].nsub;
+    BKMenuSpec *sub = bk_menuspec_copy(pd->menu.all[i].sub, nsub);
+    char *title = bk_strdup(pd->menu.all[i].text);
+    BK_close_popups(ctx);
+    BK_open_pie(ctx, sub, nsub, title, PLACE_NONE, PLACE_NONE);
+    bk_menuspec_free(sub, nsub);
+    free(title);
     return;
   }
   void (*fn)(void *) = pd->menu.all[i].fn;
@@ -1024,6 +1051,10 @@ static void pie_pick(BKNode *n, int i)
 static int pie_move(BKNode *n, BKEvent *e)
 {
   PieData *pd = PIE(n);
+  const float ix = (float)(e->x - pd->init_x), iy = (float)(e->y - pd->init_y);
+  if (!pd->click_style && ix * ix + iy * iy > PIE_CLICK_THRESHOLD_SQ) {
+    pd->drag_style = true;
+  }
   const bool was_valid = pd->dir_valid;
   const int hot = pie_dir_hot(n, e->x, e->y);
   /* the center sector tracks the pointer direction, so redraw whenever it is shown */
@@ -1060,8 +1091,30 @@ static int pie_press(BKNode *n, BKEvent *e)
 
 static int pie_key(BKNode *n, BKEvent *e)
 {
-  if (e->text && e->text[0] >= '1' && e->text[0] <= '8' && !e->text[1]) {
-    pie_pick(n, e->text[0] - '1');
+  PieData *pd = PIE(n);
+  if (!pd->click_style && bk_keysym_is(e->keysym, pd->key)) {
+    return 1; /* auto-repeat of the held pie key */
+  }
+  /* CASE_NUM_TO_DIR: the number keys are the numpad's directions (5 is the centre) */
+  static const int num_rdir[10] = {-1, 5, 4, 3, 6, -1, 2, 7, 0, 1};
+  if (e->text && e->text[0] >= '1' && e->text[0] <= '9' && !e->text[1]) {
+    const int rdir = num_rdir[e->text[0] - '0'];
+    for (int i = 0; i < pd->menu.nall; i++) {
+      if (rdir >= 0 && g_pie_rdir[i] == rdir) {
+        pie_pick(n, i); /* block_pie_dir_activate */
+        return 1;
+      }
+    }
+    return 1;
+  }
+  /* EVT_AKEY .. EVT_ZKEY with no modifier but Alt: the item with that menu key */
+  if (e->text && isalpha((uchar)e->text[0]) && !e->text[1] && !(e->mods & (BK_SHIFT | BK_CTRL))) {
+    for (int i = 0; i < pd->menu.nall; i++) {
+      if (pd->accel[i] == tolower((uchar)e->text[0])) {
+        pie_pick(n, i);
+        return 1;
+      }
+    }
     return 1;
   }
   if (bk_keysym_is(e->keysym, "Return") || bk_keysym_is(e->keysym, "KP_Enter")) {
@@ -1069,6 +1122,64 @@ static int pie_key(BKNode *n, BKEvent *e)
     return 1;
   }
   return 0;
+}
+
+/* pie_handler, event_type release: a quick tap without a drag keeps the pie open as a click
+ * pie, a later release picks the item in the pointer direction (none: cancel). */
+static int pie_key_up(BKNode *n, BKEvent *e)
+{
+  PieData *pd = PIE(n);
+  if (pd->click_style || !bk_keysym_is(e->keysym, pd->key)) {
+    return 0;
+  }
+  if (bk_time() - pd->opened < PIE_TAP_TIMEOUT_S && !pd->drag_style) {
+    pd->click_style = true;
+    return 1;
+  }
+  pie_pick(n, pie_dir_hot(n, e->x, e->y));
+  return 1;
+}
+
+/* menu_block_set_keyaccels (interface.cc): the first free first letter of a word, then in a
+ * second pass any free letter. */
+static void pie_set_keyaccels(PieData *pd)
+{
+  unsigned mask = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    for (int i = 0; i < pd->menu.nall; i++) {
+      const char *s = pd->menu.all[i].text;
+      if (pd->accel[i] || !s || !s[0] || !strcmp(s, "-")) {
+        continue;
+      }
+      do {
+        const int c = tolower((uchar)*s);
+        if (c >= 'a' && c <= 'z' && !(mask & 1u << (c - 'a'))) {
+          mask |= 1u << (c - 'a');
+          pd->accel[i] = (char)c;
+          break;
+        }
+        if (pass == 0) { /* first pass: skip to the next word */
+          while (isalpha((uchar)*s)) {
+            s++;
+          }
+          if (*s) {
+            s++;
+          }
+        }
+        else {
+          s++;
+        }
+      } while (*s);
+    }
+  }
+}
+
+/* widget_draw_text: the accelerator's position in the text, upper case first; -1 none. */
+static int pie_accel_index(const char *text, char accel)
+{
+  const char *p = accel ? strchr(text, accel - 32) : NULL;
+  p = p ? p : (accel ? strchr(text, accel) : NULL);
+  return p ? (int)(p - text) : -1;
 }
 
 static void pie_draw(BKNode *n)
@@ -1084,7 +1195,7 @@ static void pie_draw(BKNode *n)
   pie_draw_disk(pd->cx, pd->cy, 0.0f, 2.0f * (float)M_PI, r_in, r_out, c);
   if (pd->dir_valid) {
     int mask = 0;
-    for (int i = 0; i < BK_MIN(8, pd->menu.nall); i++) {
+    for (int i = 0; i < pd->menu.nall; i++) {
       mask |= 1 << g_pie_rdir[i];
     }
     const bool has_aligned = (mask & 0x55) != 0, has_diagonal = (mask & 0xAA) != 0;
@@ -1104,7 +1215,7 @@ static void pie_draw(BKNode *n)
     bk_widget_menu_back(&tr, CNR_ALL);
     bk_text_in(&tr, pd->menu.title, bk_theme.menu_back.text, BK_ALIGN_CENTER, false);
   }
-  for (int i = 0; i < BK_MIN(8, pd->menu.nall); i++) {
+  for (int i = 0; i < pd->menu.nall; i++) {
     BKRect r = pie_item_rect(n, i);
     const BKMenuSpec *it = &pd->menu.all[i];
     int st = (i == n->hot ? ST_HOVER : 0) | (it->enabled ? 0 : ST_DISABLED);
@@ -1114,9 +1225,19 @@ static void pie_draw(BKNode *n)
       memcpy(w.text, w.text_sel, 3);
       memcpy(w.inner, w.item, 4);
     }
-    bk_shadow(&r, bk_widget_radius(&w));
+    if (n->anim < 1.0f) { /* widget_menu_pie_itembut: alphafac while the pie animates */
+      uchar *alpha[] = {&w.inner[3], &w.inner_sel[3], &w.item[3],
+                        &w.text[3],  &w.text_sel[3],  &w.outline[3]};
+      for (int k = 0; k < (int)(sizeof(alpha) / sizeof(*alpha)); k++) {
+        *alpha[k] = (uchar)(*alpha[k] * n->anim);
+      }
+    }
+    else {
+      bk_shadow(&r, bk_widget_radius(&w));
+    }
     BKRect wr = r;
     bk_widget_but(&w, &wr, 0, CNR_ALL);
+    bk_text_underline(it->text ? pie_accel_index(it->text, pd->accel[i]) : -1);
     if (it->icon && it->text && it->text[0]) {
       /* BUT_ICON_LEFT pie item (widget_draw_text_icon): rect.xmin += 0.3 * widget_unit, icon
        * at xmin + 4 * scale, text centered in the space after icon_size + 2 * scale. */
@@ -1130,6 +1251,7 @@ static void pie_draw(BKNode *n)
     else {
       bk_text_icon(&r, it->text, it->icon, w.text, BK_ALIGN_CENTER, it->enabled);
     }
+    bk_text_underline(-1);
   }
 }
 
@@ -1143,27 +1265,53 @@ static void pie_free(BKNode *n)
 
 const BKClass bk_cls_pie = {.name = "pie",
                             .flags = CLS_INTERACTIVE | CLS_POPUP,
+                            .anim_time = PIE_ANIMATION_TIMEOUT_S,
                             .free_ext = pie_free,
                             .arrange = pie_arrange,
                             .draw = pie_draw,
                             .hit = pie_hit,
                             .press = pie_press,
                             .move = pie_move,
-                            .key = pie_key};
+                            .key = pie_key,
+                            .key_up = pie_key_up};
 
-void BK_open_pie(BKContext *ctx, const BKMenuSpec *items, int n, const char *title)
+void BK_open_pie(
+    BKContext *ctx, const BKMenuSpec *items, int n, const char *title, int at_x, int at_y)
 {
+  const bool at = at_x > PLACE_NONE && at_y > PLACE_NONE;
+  /* pie_menu_level_create: past PIE_MAX_ITEMS, the last slot is "More" with the rest */
+  BKMenuSpec level[PIE_MAX_ITEMS];
+  if (n > PIE_MAX_ITEMS) {
+    memcpy(level, items, sizeof(BKMenuSpec) * (PIE_MAX_ITEMS - 1));
+    level[PIE_MAX_ITEMS - 1] = (BKMenuSpec){.text = "More",
+                                            .icon = BK_icon_id("PLUS"),
+                                            .checked = -1,
+                                            .enabled = 1,
+                                            .sub = items + PIE_MAX_ITEMS - 1,
+                                            .nsub = n - (PIE_MAX_ITEMS - 1)};
+    items = level;
+    n = PIE_MAX_ITEMS;
+  }
   BKNode *pie = bk_node_new_cls(&bk_cls_pie);
   PieData *pd = (PieData *)calloc(1, sizeof(PieData));
   place_init(&pd->menu.place);
-  pd->menu.all = bk_menuspec_copy(items, BK_MIN(n, 8));
-  pd->menu.nall = BK_MIN(n, 8);
+  pd->menu.all = bk_menuspec_copy(items, n);
+  pd->menu.nall = n;
+  pie_set_keyaccels(pd);
   pd->menu.title = title ? bk_strdup(title) : NULL;
-  pd->at_x = ctx->pointer_x;
-  pd->at_y = ctx->pointer_y;
+  pd->at_x = at ? at_x : ctx->pointer_x;
+  pd->at_y = at ? at_y : ctx->pointer_y;
+  pd->init_x = ctx->pointer_x;
+  pd->init_y = ctx->pointer_y;
+  /* pie_menu_begin: opened while a key is down, its release picks; else click style */
+  snprintf(pd->key, sizeof(pd->key), "%s", ctx->key_held);
+  pd->click_style = !pd->key[0];
+  pd->opened = bk_time();
   pie->ext = pd;
   pie->hot = -1;
+  pie->anim = 0.0f; /* items grow out of the center (none with reduced motion) */
   bk_open_popup(ctx, pie, ctx->root, NULL);
+  bk_anim_start(pie);
 }
 
 /** \} */

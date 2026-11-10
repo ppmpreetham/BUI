@@ -9,7 +9,7 @@
   :class:`bui._surface.TkSurface` blitting the raster.
 
 Both give the same API: ``after``, ``after_cancel``, ``show``, ``close``,
-``title``, ``size``, ``on_close``, ``run`` (one loop for all windows),
+``title``, ``size``, ``on_close``, ``on_focus``, ``run`` (one loop for all windows),
 ``update`` (pump pending events).
 
 SPDX-License-Identifier: GPL-2.0-or-later
@@ -111,6 +111,8 @@ class Window:
         self._title, self._size = title, tuple(size)
         self.native = native_available() if native is None else native
         self.on_close: Optional[Callable[[], object]] = None
+        # called with True when the window gets the keyboard focus, False when it loses it
+        self.on_focus: Optional[Callable[[bool], None]] = None
         self._closed = False
         self._win = None
         self._top = self._surface = None
@@ -119,6 +121,7 @@ class Window:
                 _tk_owns_nsapp()
             self._win = buipy.KitWindow(ctx, title, *self._size)
             self._win.on_close = self._close_requested
+            self._win.on_focus = self._focus
             if gpu:  # None: buipy.set_gpu() / BUI_GPU decide
                 self._win.gpu = True
         else:
@@ -136,6 +139,8 @@ class Window:
         top.configure(bg="#%02x%02x%02x" % tuple(
             int(round(v * 255)) for v in buipy.kit_theme_color("region_bg")[:3]))
         top.protocol("WM_DELETE_WINDOW", self._tk_close)
+        top.bind("<FocusIn>", lambda e: e.widget is top and self._focus(True))
+        top.bind("<FocusOut>", lambda e: e.widget is top and self._focus(False))
         top.withdraw()
         surface = TkSurface(top, _Scene(self.ctx), width=self._size[0], height=self._size[1])
         surface.size_hint = self._size
@@ -171,6 +176,10 @@ class Window:
     def _tk_close(self):
         if self._close_requested():
             self.close()
+
+    def _focus(self, active: bool) -> None:
+        if self.on_focus is not None:
+            self.on_focus(active)
 
     def _close_requested(self):
         if self.on_close is not None:
@@ -268,7 +277,9 @@ class Window:
     def wm(self, key: str, a: float = 0.0, b: float = 0.0) -> None:
         """Window-manager request: pos, minsize, maxsize, resizable, topmost,
         alpha, override, state (0 normal, 1 iconic, 2 withdrawn, 3 zoomed),
-        lift, lower, focus."""
+        lift, lower, focus, transparent (before show on Linux), layer
+        (layer 0-3 or -1, keyboard 0-2) and anchor (edges, exclusive zone) on Wayland
+        compositors with layer shell."""
         if self.native:
             self._win.wm(key, float(a), float(b))
             return

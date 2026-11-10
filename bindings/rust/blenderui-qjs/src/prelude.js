@@ -111,8 +111,8 @@
     get headless () { return host.headless() }
     openWindow (id, c) {
       c = c || {}
-      host.openWindow(id, c.title ?? null, c.width ?? 800, c.height ?? 600, c.resizable ?? null,
-        c.gpu ?? this._options.gpu ?? null)
+      host.openWindow(id, { ...c, width: c.width ?? 800, height: c.height ?? 600,
+        gpu: c.gpu ?? this._options.gpu })
     }
 
     commit (window, ops, strings, animated) { host.commit(window, ops, strings, !!animated) }

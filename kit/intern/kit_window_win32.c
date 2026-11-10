@@ -22,6 +22,7 @@
 #  endif
 #  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
+#  include <dwmapi.h> /* types only: the calls go through dwm_proc */
 #  include <windowsx.h>
 
 #  include "kit_ime_win32.h"
@@ -32,6 +33,11 @@
 #  define ID_WAKE 3 /* BK_TIMER_CUSTOM: custom nodes' frames */
 #  define ID_GPU 4  /* checks the GPU device until it is ready */
 #  define ID_USER_BASE 1000
+
+/* How a transparent window shows its frame: UpdateLayeredWindow copies the software raster
+ * (every frame, on the CPU); LAYER_GPU presents the Direct3D 11 frames to the window and DWM
+ * blends their alpha (blur-behind), and falls back to LAYER_ULW without the device. */
+enum { LAYER_NONE = 0, LAYER_ULW = 1, LAYER_GPU = 2 };
 
 struct BKWindow {
   HWND hwnd;
@@ -47,11 +53,69 @@ struct BKWindow {
   int fixed_w, fixed_h;           /* axes the user may not resize (Tk's resizable) */
   int user_sizing;                /* inside a user move/resize loop */
   DWORD style;                    /* framed style restored by "override" 0 */
+  int override;                   /* "override": no frame */
+  int layered;                    /* "transparent": a LAYER_* way to show per-pixel alpha */
+  BYTE opacity;                   /* "alpha" as 0..255 */
+  struct {                        /* LAYER_ULW: the frame as a DIB section */
+    HDC dc;
+    HBITMAP bmp, old;
+    uint32_t *bits;
+    int w, h;
+  } layer;
   BKImeWin32 ime;                 /* the IME (GHOST_ImeWin32) */
   WPARAM last_vk;                 /* the virtual key of the last WM_KEYDOWN */
+  struct WinTimer {               /* armed timers: reopen() moves them to the new window */
+    UINT_PTR id;
+    ULONGLONG due; /* GetTickCount64 */
+  } *timers;
+  int ntimers;
 };
 
 static int g_open = 0;
+
+static void timer_arm(BKWindow *win, UINT_PTR id, UINT ms)
+{
+  int i = 0;
+  while (i < win->ntimers && win->timers[i].id != id) {
+    i++;
+  }
+  if (i == win->ntimers) {
+    struct WinTimer *t = realloc(win->timers, sizeof(*t) * (size_t)(i + 1));
+    if (t) {
+      win->timers = t;
+      win->ntimers++;
+    }
+    else {
+      i = -1; /* not tracked: it only misses a reopen */
+    }
+  }
+  if (i >= 0) {
+    win->timers[i].id = id;
+    win->timers[i].due = GetTickCount64() + ms;
+  }
+  SetTimer(win->hwnd, id, ms, NULL);
+}
+
+static void timer_kill(BKWindow *win, UINT_PTR id)
+{
+  KillTimer(win->hwnd, id);
+  for (int i = 0; i < win->ntimers; i++) {
+    if (win->timers[i].id == id) {
+      win->timers[i] = win->timers[--win->ntimers];
+      return;
+    }
+  }
+}
+
+/* The window handle changed: arm the timers again on it, for their time that is left. */
+static void timers_rearm(BKWindow *win)
+{
+  const ULONGLONG now = GetTickCount64();
+  for (int i = 0; i < win->ntimers; i++) {
+    const ULONGLONG due = win->timers[i].due;
+    SetTimer(win->hwnd, win->timers[i].id, (UINT)(due > now ? due - now : 1), NULL);
+  }
+}
 
 /* Wake BK_window_run's GetMessage without WM_QUIT: a quit message would also
  * end any other loop on this thread (e.g. a Tk mainloop in the same app). */
@@ -278,11 +342,11 @@ static void host_schedule(void *data, int ms, int timer)
 {
   BKWindow *win = (BKWindow *)data;
   if (timer == BK_TIMER_CUSTOM) { /* its own timer: tooltips keep theirs */
-    SetTimer(win->hwnd, ID_WAKE, (UINT)(ms > 0 ? ms : 1), NULL);
+    timer_arm(win, ID_WAKE, (UINT)(ms > 0 ? ms : 1));
     return;
   }
   win->tip_id = timer;
-  SetTimer(win->hwnd, ID_TIP, (UINT)ms, NULL);
+  timer_arm(win, ID_TIP, (UINT)ms);
 }
 
 static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, double b)
@@ -295,6 +359,17 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 
 /* -- rendering -- */
 
+static FARPROC dwm_proc(const char *name)
+{
+  static HMODULE dwm = NULL;
+  static int loaded = 0;
+  if (!loaded) {
+    loaded = 1;
+    dwm = LoadLibraryW(L"dwmapi.dll");
+  }
+  return dwm ? GetProcAddress(dwm, name) : NULL;
+}
+
 typedef HRESULT(WINAPI *DwmFlushFn)(void);
 
 static void vsync(void)
@@ -303,8 +378,7 @@ static void vsync(void)
   static int loaded = 0;
   if (!loaded) {
     loaded = 1;
-    HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
-    flush = dwm ? (DwmFlushFn)(void *)GetProcAddress(dwm, "DwmFlush") : NULL;
+    flush = (DwmFlushFn)(void *)dwm_proc("DwmFlush");
   }
   if (flush) {
     flush();
@@ -332,7 +406,7 @@ static double refresh_ms(void)
 static void gpu_attach(BKWindow *win)
 {
   if (BUI_raster_gpu_attach(win->raster, win->hwnd, 0)) {
-    SetTimer(win->hwnd, ID_GPU, (UINT)refresh_ms(), NULL);
+    timer_arm(win, ID_GPU, (UINT)refresh_ms());
   }
 }
 
@@ -364,8 +438,97 @@ static void ime_sync(BKWindow *win)
   bk_ime_win32_begin(&win->ime, win->hwnd, s.x, s.y, s.x, s.y, s.restart != 0);
 }
 
+/* The raster on screen: a layered window shows the whole frame, the others the damage. */
+static void gpu_window_check(BKWindow *win);
+
+static void layer_free(BKWindow *win)
+{
+  if (win->layer.old) {
+    SelectObject(win->layer.dc, win->layer.old);
+  }
+  if (win->layer.bmp) {
+    DeleteObject(win->layer.bmp);
+  }
+  if (win->layer.dc) {
+    DeleteDC(win->layer.dc);
+  }
+  memset(&win->layer, 0, sizeof(win->layer));
+}
+
+/* The DIB section at the frame's size; true when it was made now (its pixels are empty). */
+static bool layer_fit(BKWindow *win, int w, int h)
+{
+  if (win->layer.bmp && win->layer.w == w && win->layer.h == h) {
+    return false;
+  }
+  layer_free(win);
+  BITMAPINFO bmi;
+  memset(&bmi, 0, sizeof(bmi));
+  bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bmi.bmiHeader.biWidth = w;
+  bmi.bmiHeader.biHeight = -h; /* top-down, like the raster */
+  bmi.bmiHeader.biPlanes = 1;
+  bmi.bmiHeader.biBitCount = 32;
+  bmi.bmiHeader.biCompression = BI_RGB;
+  win->layer.dc = CreateCompatibleDC(NULL);
+  win->layer.bmp = win->layer.dc ? CreateDIBSection(win->layer.dc, &bmi, DIB_RGB_COLORS,
+                                                    (void **)&win->layer.bits, NULL, 0) :
+                                   NULL;
+  if (!win->layer.bmp) {
+    layer_free(win);
+    return false;
+  }
+  win->layer.old = (HBITMAP)SelectObject(win->layer.dc, win->layer.bmp);
+  win->layer.w = w;
+  win->layer.h = h;
+  return true;
+}
+
+/* LAYER_ULW: the changed pixels go to the DIB, which UpdateLayeredWindow then shows whole.
+ * The raster is premultiplied 0xAARRGGBB, as ULW_ALPHA with AC_SRC_ALPHA needs. */
+static void present_layered(BKWindow *win, int full)
+{
+  BuiRaster *r = win->raster;
+  const int w = BUI_raster_width(r), h = BUI_raster_height(r);
+  const uint32_t *pix = BUI_raster_pixels(r);
+  if (w <= 0 || h <= 0 || !pix) {
+    return;
+  }
+  full |= layer_fit(win, w, h);
+  if (!win->layer.bmp) {
+    return;
+  }
+  const int(*rects)[4];
+  const int n = BUI_raster_damage(r, &rects);
+  if (full) {
+    memcpy(win->layer.bits, pix, (size_t)w * (size_t)h * sizeof(uint32_t));
+  }
+  for (int i = 0; i < n && !full; i++) {
+    for (int y = rects[i][1]; y < rects[i][1] + rects[i][3]; y++) {
+      memcpy(win->layer.bits + (size_t)y * w + rects[i][0], pix + (size_t)y * w + rects[i][0],
+             (size_t)rects[i][2] * sizeof(uint32_t));
+    }
+  }
+  const BLENDFUNCTION blend = {AC_SRC_OVER, 0, win->opacity, AC_SRC_ALPHA};
+  const POINT src = {0, 0};
+  SIZE size = {w, h}; /* a layered window's surface follows this size, not the window's */
+  UpdateLayeredWindow(win->hwnd, NULL, NULL, &size, win->layer.dc, &src, 0,
+                      (BLENDFUNCTION *)&blend, ULW_ALPHA);
+}
+
+static void present(BKWindow *win, int full)
+{
+  if (win->layered == LAYER_ULW) {
+    present_layered(win, full);
+  }
+  else {
+    BUI_raster_present_native(win->raster, win->hwnd, full);
+  }
+}
+
 static void do_render(BKWindow *win)
 {
+  gpu_window_check(win);
   RECT rc;
   GetClientRect(win->hwnd, &rc);
   const int w = BK_MAX(1, rc.right - rc.left), h = BK_MAX(1, rc.bottom - rc.top);
@@ -387,7 +550,7 @@ static void do_render(BKWindow *win)
   QueryPerformanceCounter(&t1);
   win->full = 0;
   if (regions || resized) {
-    BUI_raster_present_native(win->raster, win->hwnd, resized);
+    present(win, resized);
     win->frames++;
   }
   QueryPerformanceCounter(&t2);
@@ -499,10 +662,15 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       EndPaint(hwnd, &ps);
       win->full = 1;
       do_render(win);
-      BUI_raster_present_native(win->raster, hwnd, 1);
+      present(win, 1);
       return 0;
     }
     case WM_ERASEBKGND:
+      if (win->layered == LAYER_GPU) { /* zero alpha: DWM blends the surface with what is behind */
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        PatBlt((HDC)wp, 0, 0, rc.right, rc.bottom, BLACKNESS);
+      }
       return 1;
     case WM_SIZE:
       host_request(win);
@@ -703,31 +871,35 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     case WM_TIMER:
       if (wp == ID_TIP) {
-        KillTimer(hwnd, ID_TIP);
+        timer_kill(win, ID_TIP);
         BK_timer(ctx, win->tip_id);
       }
       else if (wp == ID_WAKE) {
-        KillTimer(hwnd, ID_WAKE);
+        timer_kill(win, ID_WAKE);
         BK_timer(ctx, BK_TIMER_CUSTOM);
       }
       else if (wp == ID_GPU) {
         /* a GPU device that is ready switches an idle window over too */
         if (!BUI_raster_gpu_pending(win->raster)) {
-          KillTimer(hwnd, ID_GPU);
+          timer_kill(win, ID_GPU);
         }
         else if (BUI_raster_gpu_poll(win->raster)) {
-          KillTimer(hwnd, ID_GPU);
+          timer_kill(win, ID_GPU);
           win->full = 1;
           host_request(win);
         }
+        gpu_window_check(win);
       }
       else if (wp >= ID_USER_BASE) {
-        KillTimer(hwnd, wp);
+        timer_kill(win, wp);
         if (win->cb.on_timer) {
           win->cb.on_timer(win->cb.data, win, (int)(wp - ID_USER_BASE));
         }
       }
       return 0;
+    case WM_ACTIVATE:
+      bk_window_focus(win->ctx, win, &win->cb, LOWORD(wp) != WA_INACTIVE);
+      break;
     case WM_CLOSE:
       if (win->cb.on_close && !win->cb.on_close(win->cb.data, win)) {
         return 0;
@@ -767,6 +939,7 @@ BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height
   win->prev = ctx->host;
   win->raster = BUI_raster_create(1, 1);
   win->next_timer = 1;
+  win->opacity = 255;
   win->scale = window_dpi_scale(NULL);
   {
     /* system DPI until the window exists */
@@ -816,8 +989,10 @@ void BK_window_free(BKWindow *win)
   if (win->ctx) {
     BK_context_set_host(win->ctx, &win->prev);
   }
+  layer_free(win);
   BUI_raster_free(win->raster);
   bk_ime_win32_free(&win->ime);
+  free(win->timers);
   free(win);
 }
 
@@ -883,7 +1058,7 @@ BuiRaster *BK_window_raster(BKWindow *win)
 
 void BK_window_set_gpu(BKWindow *win, int on)
 {
-  if (win && on) {
+  if (win && on && win->layered != LAYER_ULW) { /* that way of showing alpha is software */
     gpu_attach(win);
     host_request(win);
   }
@@ -911,7 +1086,7 @@ int BK_window_timer(BKWindow *win, int ms)
 {
   const int id = win->next_timer++;
   if (win->hwnd) {
-    SetTimer(win->hwnd, ID_USER_BASE + (UINT_PTR)id, (UINT)BK_MAX(0, ms), NULL);
+    timer_arm(win, ID_USER_BASE + (UINT_PTR)id, (UINT)BK_MAX(0, ms));
   }
   return id;
 }
@@ -926,7 +1101,7 @@ void BK_window_request_frame(BKWindow *win, int vsync)
 void BK_window_cancel_timer(BKWindow *win, int id)
 {
   if (win->hwnd) {
-    KillTimer(win->hwnd, ID_USER_BASE + (UINT_PTR)id);
+    timer_kill(win, ID_USER_BASE + (UINT_PTR)id);
   }
 }
 
@@ -941,6 +1116,123 @@ static void set_style(HWND hwnd, DWORD style)
                                                          WS_VISIBLE)));
   SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+/* No frame while "override" or "transparent" is on: a layered window is drawn from the
+ * raster alone. */
+static void set_frame(BKWindow *win)
+{
+  if (!win->style) {
+    win->style = (DWORD)GetWindowLongPtrW(win->hwnd, GWL_STYLE) & ~WS_VISIBLE;
+  }
+  set_style(win->hwnd,
+            (win->override || win->layered) ? WS_POPUP | WS_CLIPCHILDREN : win->style);
+}
+
+/* The "alpha" of a window that is not transparent: one opacity for the whole window. */
+static void set_opacity(BKWindow *win)
+{
+  const LONG_PTR ex = GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE);
+  SetWindowLongPtrW(win->hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+  SetLayeredWindowAttributes(win->hwnd, 0, win->opacity, LWA_ALPHA);
+}
+
+/* The same window made again with other extended styles (UpdateLayeredWindow fails once
+ * SetLayeredWindowAttributes was used: WS_EX_LAYERED must be made again). */
+static int reopen(BKWindow *win, LONG_PTR ex)
+{
+  HWND old = win->hwnd;
+  RECT rc;
+  wchar_t title[256];
+  GetWindowRect(old, &rc);
+  GetWindowTextW(old, title, 256);
+  const LONG_PTR style = GetWindowLongPtrW(old, GWL_STYLE);
+  HWND h = CreateWindowExW((DWORD)ex, k_class, title, (DWORD)(style & ~WS_VISIBLE), rc.left,
+                           rc.top, rc.right - rc.left, rc.bottom - rc.top, NULL, NULL,
+                           GetModuleHandleW(NULL), NULL);
+  if (!h) {
+    return 0;
+  }
+  SetWindowLongPtrW(old, GWLP_USERDATA, 0); /* the old window's messages end here */
+  SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)win);
+  win->hwnd = h;
+  timers_rearm(win);
+  DestroyWindow(old);
+  if (style & WS_VISIBLE) {
+    ShowWindow(h, SW_SHOW);
+  }
+  return 1;
+}
+
+/* Per-pixel alpha for a window drawn by the GPU: DWM uses the alpha channel of the surface that
+ * Present fills (DwmEnableBlurBehindWindow over the whole client area). */
+static void set_blur_behind(HWND hwnd, int on)
+{
+  typedef HRESULT(WINAPI * BlurFn)(HWND, const DWM_BLURBEHIND *);
+  BlurFn blur = (BlurFn)(void *)dwm_proc("DwmEnableBlurBehindWindow");
+  if (blur) {
+    DWM_BLURBEHIND bb = {
+        DWM_BB_ENABLE | DWM_BB_BLURREGION, on, CreateRectRgn(0, 0, -1, -1), FALSE};
+    blur(hwnd, &bb);
+    DeleteObject(bb.hRgnBlur);
+  }
+}
+
+/* "transparent": per-pixel alpha. The raster keeps alpha and has no frame to draw (the
+ * window has none either). The GPU renderer stays only with LAYER_GPU. */
+static void set_layering(BKWindow *win, int mode)
+{
+  if (mode == win->layered) {
+    return;
+  }
+  const int gpu = BUI_raster_is_gpu(win->raster) || BUI_raster_gpu_pending(win->raster);
+  const LONG_PTR old_ex = GetWindowLongPtrW(win->hwnd, GWL_EXSTYLE);
+  const LONG_PTR ex = (mode == LAYER_ULW) ? old_ex | WS_EX_LAYERED :
+                                            old_ex & ~(LONG_PTR)WS_EX_LAYERED;
+  BUI_raster_gpu_release(win->raster); /* the device holds the swap chain of the old window */
+  if (ex != old_ex && !reopen(win, ex)) {
+    if (gpu) {
+      gpu_attach(win);
+    }
+    return;
+  }
+  if (win->layered == LAYER_ULW) {
+    layer_free(win);
+  }
+  if (win->layered == LAYER_GPU) {
+    set_blur_behind(win->hwnd, FALSE);
+  }
+  win->layered = mode;
+  BUI_raster_set_alpha(win->raster, mode != LAYER_NONE);
+  set_frame(win);
+  if (mode == LAYER_GPU) {
+    set_blur_behind(win->hwnd, TRUE);
+  }
+  if (mode == LAYER_NONE && win->opacity != 255) {
+    set_opacity(win);
+  }
+  if (mode == LAYER_GPU || (mode == LAYER_NONE && gpu)) {
+    gpu_attach(win); /* made with the alpha setting above */
+  }
+  win->full = 1;
+  host_request(win);
+}
+
+static void set_transparent(BKWindow *win, int on)
+{
+  const int gpu = BUI_raster_is_gpu(win->raster) || BUI_raster_gpu_pending(win->raster);
+  set_layering(win, !on ? LAYER_NONE : gpu ? LAYER_GPU : LAYER_ULW);
+}
+
+/* A LAYER_GPU window shows nothing without its device (it failed to start, or was lost): the
+ * software raster takes over through UpdateLayeredWindow. */
+static void gpu_window_check(BKWindow *win)
+{
+  if (win->layered == LAYER_GPU && !BUI_raster_is_gpu(win->raster) &&
+      !BUI_raster_gpu_pending(win->raster))
+  {
+    set_layering(win, LAYER_ULW);
+  }
 }
 
 void BK_window_wm(BKWindow *win, const char *key, double a, double b)
@@ -973,15 +1265,21 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
   else if (!strcmp(key, "alpha")) {
-    const LONG_PTR ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
-    SetWindowLongPtrW(h, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-    SetLayeredWindowAttributes(h, 0, (BYTE)(BK_CLAMP(a, 0.0, 1.0) * 255.0 + 0.5), LWA_ALPHA);
+    win->opacity = (BYTE)(BK_CLAMP(a, 0.0, 1.0) * 255.0 + 0.5);
+    if (win->layered == LAYER_ULW) { /* the next present scales the frame */
+      win->full = 1;
+      host_request(win);
+    }
+    else if (win->layered == LAYER_NONE) { /* GPU frames with alpha are not scaled */
+      set_opacity(win);
+    }
   }
   else if (!strcmp(key, "override")) {
-    if (!win->style) {
-      win->style = (DWORD)GetWindowLongPtrW(h, GWL_STYLE) & ~WS_VISIBLE;
-    }
-    set_style(h, a ? WS_POPUP | WS_CLIPCHILDREN : win->style);
+    win->override = a != 0.0;
+    set_frame(win);
+  }
+  else if (!strcmp(key, "transparent")) {
+    set_transparent(win, a != 0.0);
   }
   else if (!strcmp(key, "state")) {
     static const int show[4] = {SW_RESTORE, SW_MINIMIZE, SW_HIDE, SW_MAXIMIZE};

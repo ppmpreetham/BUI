@@ -154,6 +154,7 @@ class TkSurface:
             self._overlay = None if buipy.has_native_text() else _TkTextOverlay(self.widget)
         self.widget.pack(fill="both", expand=True)
 
+        self._release = None  # (after id, event) of a held-back key release
         w = self.widget
         w.bind("<ButtonPress-1>", self.on_press)
         w.bind("<ButtonRelease-1>", self.on_release)
@@ -304,6 +305,12 @@ class TkSurface:
         self.request()
 
     def _on_key_release(self, e):
+        # x11 autorepeat sends a release and a press at the same time: hold the release
+        # until idle, and drop it if that press comes (as kit_window_x11.c does).
+        self._release = (self.widget.after_idle(self._send_release, e), e)
+
+    def _send_release(self, e):
+        self._release = None
         self.scene.key_release(e.keysym, Modifiers(e.state))
         self.request()
 
@@ -312,6 +319,10 @@ class TkSurface:
             self.request()
 
     def on_key(self, event) -> None:
+        if self._release and self._release[1].keysym == event.keysym \
+                and self._release[1].time == event.time:
+            self.widget.after_cancel(self._release[0])
+            self._release = None
         self.scene.key(event.char, event.keysym, getattr(event, "keycode", 0),
                        self._mods(event))
         self.request()

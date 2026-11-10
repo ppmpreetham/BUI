@@ -7,3 +7,7 @@ if(NOT MSVC)
   target_link_libraries(bui_gpu_parity PRIVATE m)
 endif()
 add_test(NAME gpu_parity COMMAND bui_gpu_parity)
+
+add_executable(bui_raster_alpha test_raster_alpha.c)
+target_link_libraries(bui_raster_alpha PRIVATE bui_gpu)
+add_test(NAME raster_alpha COMMAND bui_raster_alpha)

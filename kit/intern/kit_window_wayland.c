@@ -4,7 +4,8 @@
  * Modelled on Blender's GHOST_SystemWayland / GHOST_WindowWayland: xdg-shell toplevels with
  * server-side decorations when the compositor offers them, a wl_seat with xkbcommon for keys
  * (key repeat is ours, the compositor only sends the rate and delay), the wl_pointer, wl_data_device
- * for the clipboard, wl_cursor for cursors, buffer scale from the output. libwayland-client and
+ * for the clipboard, cursor-shape for cursors (wl_cursor where the compositor has no cursor-shape),
+ * buffer scale from the output. libwayland-client and
  * libwayland-cursor come through Blender's wayland_dynload (extern/wayland_dynload, loaded when the
  * first window opens) and libxkbcommon is dlopen()ed here, so nothing is linked and a build runs
  * where Wayland is absent.
@@ -28,6 +29,10 @@
 
 #  include <wayland-client.h>
 
+#  include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#  ifdef BUI_WL_CURSOR_SHAPE
+#    include "cursor-shape-v1-client-protocol.h"
+#  endif
 #  include "xdg-decoration-unstable-v1-client-protocol.h"
 #  include "xdg-shell-client-protocol.h"
 
@@ -115,9 +120,15 @@ struct BKWindow {
   struct xdg_surface *xdg_surface;
   struct xdg_toplevel *toplevel;
   struct zxdg_toplevel_decoration_v1 *decoration;
+  struct zwlr_layer_surface_v1 *layer_surface;
   struct wl_callback *frame_cb;
   Buf bufs[2];
-  int open, configured;
+  char *title;
+  int open, configured, hidden;
+  bool frameless; /* "override": no server-side frame (BUI draws none either) */
+  /* "layer": a layer-shell layer (0 background .. 3 overlay), -1 a toplevel; its keyboard
+   * interactivity; "anchor": edges (top 1, bottom 2, left 4, right 8), exclusive zone */
+  int layer, keyboard, anchor, exclusive;
   int render_pending, frames, cursor, tip_id, next_timer, full;
   int want_frame, frame_vsync;
   double frame_start, hold_until;
@@ -145,6 +156,11 @@ static struct {
   struct wl_shm *shm;
   struct xdg_wm_base *wm_base;
   struct zxdg_decoration_manager_v1 *decoration_manager;
+  struct zwlr_layer_shell_v1 *layer_shell;
+#  ifdef BUI_WL_CURSOR_SHAPE
+  struct wp_cursor_shape_manager_v1 *cursor_shape_manager;
+  struct wp_cursor_shape_device_v1 *cursor_shape_device; /* of the pointer, made on first use */
+#  endif
   struct wl_seat *seat;
   struct wl_pointer *pointer;
   struct wl_keyboard *keyboard;
@@ -244,7 +260,10 @@ static bool buf_create(BKWindow *win, Buf *b, int w, int h)
     return false;
   }
   struct wl_shm_pool *pool = wl_shm_create_pool(g.shm, fd, (int32_t)size);
-  b->buffer = wl_shm_pool_create_buffer(pool, 0, w, h, stride, WL_SHM_FORMAT_XRGB8888);
+  /* ARGB8888 is premultiplied: the raster's frame when it keeps alpha (transparent) */
+  b->buffer = wl_shm_pool_create_buffer(pool, 0, w, h, stride,
+                                        BUI_raster_alpha(win->raster) ? WL_SHM_FORMAT_ARGB8888 :
+                                                                        WL_SHM_FORMAT_XRGB8888);
   wl_shm_pool_destroy(pool);
   close(fd);
   wl_buffer_add_listener(b->buffer, &buffer_listener, win);
@@ -306,11 +325,10 @@ static void present(BKWindow *win, Buf *b, int all)
   const uint32_t *px = BUI_raster_pixels(win->raster);
   const int(*rects)[4] = NULL;
   const int n = all ? 0 : BUI_raster_damage(win->raster, &rects);
+  const bool damaged_all = all || n > MAX_RECTS;
   /* this buffer holds the frame before the last: it needs that frame's damage too */
-  const bool whole = all || !b->valid || win->last_full || n > MAX_RECTS;
-  if (whole) {
+  if (damaged_all || !b->valid || win->last_full) {
     memcpy(b->data, px, (size_t)w * (size_t)h * 4);
-    wl_surface_damage_buffer(win->surface, 0, 0, w, h);
   }
   else {
     for (int i = 0; i < win->last_n; i++) {
@@ -318,11 +336,18 @@ static void present(BKWindow *win, Buf *b, int all)
     }
     for (int i = 0; i < n; i++) {
       copy_rect(b, px, w, rects[i]);
-      wl_surface_damage_buffer(win->surface, rects[i][0], rects[i][1], rects[i][2], rects[i][3]);
     }
   }
-  win->last_full = whole;
-  win->last_n = whole ? 0 : n;
+  /* the surface changed only where this frame's raster did */
+  if (damaged_all) {
+    wl_surface_damage_buffer(win->surface, 0, 0, w, h);
+  }
+  for (int i = 0; !damaged_all && i < n; i++) {
+    wl_surface_damage_buffer(win->surface, rects[i][0], rects[i][1], rects[i][2], rects[i][3]);
+  }
+  /* the frame's own damage, not the copy: a full copy must not make every later copy full */
+  win->last_full = damaged_all;
+  win->last_n = damaged_all ? 0 : n;
   for (int i = 0; i < win->last_n; i++) {
     memcpy(win->last_rects[i], rects[i], sizeof(int) * 4);
   }
@@ -442,22 +467,64 @@ static void send_key(BKWindow *win, uint32_t evdev, bool press)
 
 /* -- seat: pointer -- */
 
-/* The cursors are xcursor names, as GHOST_SystemWayland's cursor table (X11's shapes). */
+#  ifdef BUI_WL_CURSOR_SHAPE
+/* BK_CURSOR_* as cursor-shape shapes, from gwl_seat_cursor_find_wl_shape_from_ghost. */
+static bool apply_cursor_shape(int c)
+{
+  static const uint32_t shapes[BK_CURSOR_PROGRESS + 1] = {
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,     WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_EW_RESIZE,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NS_RESIZE,   WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_TEXT,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_CROSSHAIR,   WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_POINTER,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_MOVE,        WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_DEFAULT,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SW_RESIZE,   WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_SE_RESIZE,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_NOT_ALLOWED, WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_WAIT,
+      WP_CURSOR_SHAPE_DEVICE_V1_SHAPE_PROGRESS};
+  if (!g.cursor_shape_manager) {
+    return false;
+  }
+  if (!g.cursor_shape_device) {
+    g.cursor_shape_device = wp_cursor_shape_manager_v1_get_pointer(g.cursor_shape_manager,
+                                                                   g.pointer);
+  }
+  wp_cursor_shape_device_v1_set_shape(g.cursor_shape_device, g.pointer_serial, shapes[c]);
+  return true;
+}
+#  endif
+
+/* The cursor theme, loaded on first use: loading reads every cursor in the theme. */
+static bool cursor_theme_ensure(void)
+{
+  if (!g.cursor_theme && wayland_dynload_cursor_init(false)) {
+    const char *size = getenv("XCURSOR_SIZE");
+    g.cursor_theme = wl_cursor_theme_load(getenv("XCURSOR_THEME"),
+                                          (size ? atoi(size) : 24) * g.cursor_scale, g.shm);
+    g.cursor_surface = wl_compositor_create_surface(g.compositor);
+  }
+  return g.cursor_theme && g.cursor_surface;
+}
+
+/* Without cursor-shape: xcursor names, as GHOST_SystemWayland's cursor table (X11's shapes). */
 static void apply_cursor(BKWindow *win)
 {
   if (!g.pointer || g.pointer_win != win) {
     return;
   }
-  static const char *names[12] = {"left_ptr",   "sb_h_double_arrow", "sb_v_double_arrow",
-                                  "xterm",      "crosshair",         "hand2",
-                                  "fleur",      "left_ptr",          "bottom_left_corner",
-                                  "bottom_right_corner", "X_cursor", "watch"};
-  const int c = BK_CLAMP(win->cursor, 0, 11);
+  static const char *names[BK_CURSOR_PROGRESS + 1] = {
+      "left_ptr",           "sb_h_double_arrow",   "sb_v_double_arrow", "xterm",
+      "crosshair",          "hand2",               "fleur",             "left_ptr",
+      "bottom_left_corner", "bottom_right_corner", "X_cursor",          "watch",
+      "watch"};
+  const int c = BK_CLAMP(win->cursor, 0, BK_CURSOR_PROGRESS);
   if (c == BK_CURSOR_NONE) {
     wl_pointer_set_cursor(g.pointer, g.pointer_serial, NULL, 0, 0);
     return;
   }
-  if (!g.cursor_theme || !g.cursor_surface) {
+#  ifdef BUI_WL_CURSOR_SHAPE
+  if (apply_cursor_shape(c)) {
+    return;
+  }
+#  endif
+  if (!cursor_theme_ensure()) {
     return;
   }
   struct wl_cursor *cursor = wl_cursor_theme_get_cursor(g.cursor_theme, names[c]);
@@ -597,11 +664,18 @@ static void keyboard_enter(void *d, struct wl_keyboard *kb, uint32_t serial, str
 {
   g.keyboard_win = find_window(s);
   g.serial = serial;
+  if (g.keyboard_win) {
+    bk_window_focus(g.keyboard_win->ctx, g.keyboard_win, &g.keyboard_win->cb, 1);
+  }
 }
 
 static void keyboard_leave(void *d, struct wl_keyboard *kb, uint32_t serial, struct wl_surface *s)
 {
-  if (g.keyboard_win == find_window(s)) {
+  BKWindow *win = find_window(s);
+  if (win) {
+    bk_window_focus(win->ctx, win, &win->cb, 0);
+  }
+  if (g.keyboard_win == win) {
     g.keyboard_win = NULL;
   }
   g.repeat_key = 0;
@@ -852,6 +926,15 @@ static void registry_global(void *d, struct wl_registry *reg, uint32_t name, con
   else if (!strcmp(iface, zxdg_decoration_manager_v1_interface.name)) {
     g.decoration_manager = wl_registry_bind(reg, name, &zxdg_decoration_manager_v1_interface, 1);
   }
+  else if (!strcmp(iface, zwlr_layer_shell_v1_interface.name)) {
+    g.layer_shell = wl_registry_bind(reg, name, &zwlr_layer_shell_v1_interface,
+                                     BK_MIN(version, 4u));
+  }
+#  ifdef BUI_WL_CURSOR_SHAPE
+  else if (!strcmp(iface, wp_cursor_shape_manager_v1_interface.name)) {
+    g.cursor_shape_manager = wl_registry_bind(reg, name, &wp_cursor_shape_manager_v1_interface, 1);
+  }
+#  endif
   else if (!strcmp(iface, wl_seat_interface.name) && !g.seat) {
     g.seat = wl_registry_bind(reg, name, &wl_seat_interface, BK_MIN(version, 5u));
     wl_seat_add_listener(g.seat, &seat_listener, NULL);
@@ -937,12 +1020,6 @@ static int open_display(void)
   for (int i = 0; i < g.noutputs; i++) {
     g.cursor_scale = BK_MAX(g.cursor_scale, g.outputs[i].scale);
   }
-  if (wayland_dynload_cursor_init(false)) {
-    const char *size = getenv("XCURSOR_SIZE");
-    g.cursor_theme = wl_cursor_theme_load(getenv("XCURSOR_THEME"),
-                                          (size ? atoi(size) : 24) * g.cursor_scale, g.shm);
-    g.cursor_surface = wl_compositor_create_surface(g.compositor);
-  }
   g.repeat_rate = 25;
   g.repeat_delay = 600;
   state = 1;
@@ -1016,6 +1093,33 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 
 /* -- xdg-shell -- */
 
+static void role_destroy(BKWindow *win)
+{
+  if (win->frame_cb) {
+    wl_callback_destroy(win->frame_cb);
+    win->frame_cb = NULL;
+  }
+  if (win->decoration) {
+    zxdg_toplevel_decoration_v1_destroy(win->decoration);
+  }
+  if (win->toplevel) {
+    xdg_toplevel_destroy(win->toplevel);
+  }
+  if (win->layer_surface) {
+    zwlr_layer_surface_v1_destroy(win->layer_surface);
+    win->layer_surface = NULL;
+  }
+  if (win->xdg_surface) {
+    xdg_surface_destroy(win->xdg_surface);
+  }
+  win->decoration = NULL;
+  win->toplevel = NULL;
+  win->xdg_surface = NULL;
+  win->configured = 0;
+}
+
+static void role_create(BKWindow *win);
+
 static void close_window(BKWindow *win)
 {
   if (!win->open) {
@@ -1029,21 +1133,10 @@ static void close_window(BKWindow *win)
     g.keyboard_win = NULL;
     g.repeat_key = 0;
   }
-  if (win->frame_cb) {
-    wl_callback_destroy(win->frame_cb);
-    win->frame_cb = NULL;
-  }
-  if (win->decoration) {
-    zxdg_toplevel_decoration_v1_destroy(win->decoration);
-  }
-  xdg_toplevel_destroy(win->toplevel);
-  xdg_surface_destroy(win->xdg_surface);
+  role_destroy(win);
   wl_surface_destroy(win->surface);
   buf_destroy(&win->bufs[0]);
   buf_destroy(&win->bufs[1]);
-  win->decoration = NULL;
-  win->toplevel = NULL;
-  win->xdg_surface = NULL;
   win->surface = NULL;
   g_open--;
   wl_display_flush(g.display);
@@ -1060,11 +1153,10 @@ static void xdg_surface_configure(void *d, struct xdg_surface *s, uint32_t seria
 static struct xdg_surface_listener xdg_surface_listener = {.configure =
                                                                      xdg_surface_configure};
 
-static void toplevel_configure(void *d, struct xdg_toplevel *tl, int32_t w, int32_t h,
-                               struct wl_array *states)
+/* A configure's size in logical units; 0: the client picks. */
+static void configure_size(BKWindow *win, int32_t w, int32_t h)
 {
-  BKWindow *win = (BKWindow *)d;
-  if (w > 0 && h > 0 && (w != win->lw || h != win->lh)) { /* 0: the client picks */
+  if (w > 0 && h > 0 && (w != win->lw || h != win->lh)) {
     win->lw = w;
     win->lh = h;
     win->w = w * win->bscale;
@@ -1073,12 +1165,56 @@ static void toplevel_configure(void *d, struct xdg_toplevel *tl, int32_t w, int3
   }
 }
 
-static void toplevel_close(void *d, struct xdg_toplevel *tl)
+static void close_requested(BKWindow *win)
 {
-  BKWindow *win = (BKWindow *)d;
   if (!win->cb.on_close || win->cb.on_close(win->cb.data, win)) {
     close_window(win);
   }
+}
+
+static void toplevel_configure(void *d, struct xdg_toplevel *tl, int32_t w, int32_t h,
+                               struct wl_array *states)
+{
+  configure_size((BKWindow *)d, w, h);
+}
+
+static void toplevel_close(void *d, struct xdg_toplevel *tl)
+{
+  close_requested((BKWindow *)d);
+}
+
+/* -- wlr-layer-shell -- */
+
+static void layer_configure(void *d, struct zwlr_layer_surface_v1 *ls, uint32_t serial,
+                            uint32_t w, uint32_t h)
+{
+  BKWindow *win = (BKWindow *)d;
+  zwlr_layer_surface_v1_ack_configure(ls, serial);
+  configure_size(win, (int32_t)w, (int32_t)h);
+  win->configured = 1;
+  win->render_pending = 1;
+}
+
+static void layer_closed(void *d, struct zwlr_layer_surface_v1 *ls)
+{
+  close_requested((BKWindow *)d);
+}
+
+static struct zwlr_layer_surface_v1_listener layer_listener = {.configure = layer_configure,
+                                                               .closed = layer_closed};
+
+/* Size, anchor and exclusive zone. An axis anchored at both edges takes the output's size (0). */
+static void layer_place(BKWindow *win)
+{
+  const int a = win->anchor;
+  const bool fill_x = (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT) &&
+                      (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+  const bool fill_y = (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) &&
+                      (a & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM);
+  zwlr_layer_surface_v1_set_size(win->layer_surface, fill_x ? 0 : (uint32_t)win->lw,
+                                 fill_y ? 0 : (uint32_t)win->lh);
+  zwlr_layer_surface_v1_set_anchor(win->layer_surface, (uint32_t)a);
+  zwlr_layer_surface_v1_set_exclusive_zone(win->layer_surface, win->exclusive);
 }
 
 static struct xdg_toplevel_listener toplevel_listener = {.configure = toplevel_configure,
@@ -1119,6 +1255,22 @@ static struct wl_surface_listener surface_listener = {
 
 /* -- windows -- */
 
+/* GHOST_WindowWayland (as SDL does): dispatch until the role's first configure, so the window can
+ * draw at once. A display error ends the wait. */
+static void wait_configure(BKWindow *win)
+{
+  while (!win->configured && wl_display_flush(g.display) != -1 &&
+         wl_display_dispatch(g.display) != -1)
+  {
+  }
+}
+
+static void surface_create(BKWindow *win)
+{
+  win->surface = wl_compositor_create_surface(g.compositor);
+  wl_surface_add_listener(win->surface, &surface_listener, win);
+}
+
 BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int height)
 {
   if (!open_display()) {
@@ -1131,20 +1283,10 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
   win->next_timer = 1;
   win->lw = width;
   win->lh = height;
-  win->surface = wl_compositor_create_surface(g.compositor);
-  wl_surface_add_listener(win->surface, &surface_listener, win);
-  win->xdg_surface = xdg_wm_base_get_xdg_surface(g.wm_base, win->surface);
-  xdg_surface_add_listener(win->xdg_surface, &xdg_surface_listener, win);
-  win->toplevel = xdg_surface_get_toplevel(win->xdg_surface);
-  xdg_toplevel_add_listener(win->toplevel, &toplevel_listener, win);
-  const char *app_id = getenv("BUI_APP_ID");
-  xdg_toplevel_set_app_id(win->toplevel, app_id ? app_id : "bui");
-  if (g.decoration_manager) { /* title bar and borders from the compositor, as GHOST asks */
-    win->decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(g.decoration_manager,
-                                                                         win->toplevel);
-    zxdg_toplevel_decoration_v1_set_mode(win->decoration,
-                                         ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-  }
+  surface_create(win);
+  win->title = bk_strdup(title ? title : "");
+  win->layer = -1;
+  role_create(win);
   win->open = 1;
   apply_scale(win, 1);
   /* BUI_UI_SCALE sizes the window in design pixels, as the X11 host does */
@@ -1155,13 +1297,69 @@ BKWindow *bk_wl_window_new(BKContext *ctx, const char *title, int width, int hei
   win->next = g_windows;
   g_windows = win;
   g_open++;
-  bk_wl_window_set_title(win, title);
   BKHost host = {win,           host_request,       host_set_cursor, host_warp,
                  host_clipboard_get, host_clipboard_set, host_schedule, host_emit};
   BK_context_set_host(ctx, &host);
   wl_surface_commit(win->surface); /* the first commit asks for the configure */
-  wl_display_flush(g.display);
+  wait_configure(win);
   return win;
+}
+
+/* GHOST asks for server-side decorations; "override" asks for client-side ones, of which BUI
+ * draws none, so the window has no frame. */
+static void set_frame(BKWindow *win)
+{
+  zxdg_toplevel_decoration_v1_set_mode(win->decoration,
+                                       win->frameless ?
+                                           ZXDG_TOPLEVEL_DECORATION_V1_MODE_CLIENT_SIDE :
+                                           ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+}
+
+/* The xdg_toplevel role. A new role needs a surface with no buffer, and a commit after it
+ * asks for the configure. */
+static void role_create(BKWindow *win)
+{
+  const char *app_id = getenv("BUI_APP_ID");
+  if (win->layer >= 0 && g.layer_shell) {
+    win->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+        g.layer_shell, win->surface, NULL, (uint32_t)win->layer, app_id ? app_id : "bui");
+    zwlr_layer_surface_v1_add_listener(win->layer_surface, &layer_listener, win);
+    zwlr_layer_surface_v1_set_keyboard_interactivity(win->layer_surface,
+                                                     (uint32_t)win->keyboard);
+    layer_place(win);
+    return;
+  }
+  win->xdg_surface = xdg_wm_base_get_xdg_surface(g.wm_base, win->surface);
+  xdg_surface_add_listener(win->xdg_surface, &xdg_surface_listener, win);
+  win->toplevel = xdg_surface_get_toplevel(win->xdg_surface);
+  xdg_toplevel_add_listener(win->toplevel, &toplevel_listener, win);
+  xdg_toplevel_set_app_id(win->toplevel, app_id ? app_id : "bui");
+  xdg_toplevel_set_title(win->toplevel, win->title);
+  if (g.decoration_manager) { /* title bar and borders from the compositor, as GHOST asks */
+    win->decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(g.decoration_manager,
+                                                                         win->toplevel);
+    set_frame(win);
+  }
+}
+
+/* Unmap (a NULL buffer, then no role) or map again with a new role. */
+static void set_hidden(BKWindow *win, int hidden)
+{
+  if (win->hidden == hidden) {
+    return;
+  }
+  win->hidden = hidden;
+  if (hidden) {
+    wl_surface_attach(win->surface, NULL, 0, 0);
+    wl_surface_commit(win->surface);
+    role_destroy(win);
+  }
+  else {
+    role_create(win);
+    wl_surface_commit(win->surface);
+    wait_configure(win);
+    win->full = 1;
+  }
 }
 
 void bk_wl_window_free(BKWindow *win)
@@ -1180,6 +1378,7 @@ void bk_wl_window_free(BKWindow *win)
     BK_context_set_host(win->ctx, &win->prev);
   }
   BUI_raster_free(win->raster);
+  free(win->title);
   free(win);
 }
 
@@ -1191,6 +1390,7 @@ void bk_wl_window_set_callbacks(BKWindow *win, const BKWindowCallbacks *cb)
 void bk_wl_window_show(BKWindow *win)
 {
   if (win->open) { /* a Wayland surface shows with its first buffer, after the configure */
+    set_hidden(win, 0);
     win->full = 1;
     win->render_pending = 1;
   }
@@ -1209,8 +1409,12 @@ int bk_wl_window_is_open(BKWindow *win)
 void bk_wl_window_set_title(BKWindow *win, const char *title)
 {
   if (win->open) {
-    xdg_toplevel_set_title(win->toplevel, title ? title : "");
-    wl_display_flush(g.display);
+    free(win->title);
+    win->title = bk_strdup(title ? title : "");
+    if (win->toplevel) {
+      xdg_toplevel_set_title(win->toplevel, win->title);
+      wl_display_flush(g.display);
+    }
   }
 }
 
@@ -1223,7 +1427,13 @@ void bk_wl_window_set_size(BKWindow *win, int width, int height)
     win->lh = BK_MAX(1, (int)(height * win->ui_scale / win->bscale));
     win->w = win->lw * win->bscale;
     win->h = win->lh * win->bscale;
-    xdg_surface_set_window_geometry(win->xdg_surface, 0, 0, win->lw, win->lh);
+    if (win->xdg_surface) {
+      xdg_surface_set_window_geometry(win->xdg_surface, 0, 0, win->lw, win->lh);
+    }
+    if (win->layer_surface) {
+      layer_place(win);
+      wl_surface_commit(win->surface);
+    }
     win->full = 1;
     win->render_pending = 1;
   }
@@ -1303,6 +1513,46 @@ void bk_wl_window_wm(BKWindow *win, const char *key, double a, double b)
   if (!win->open) {
     return;
   }
+  if (!strcmp(key, "state")) {
+    set_hidden(win, a == 2); /* 2: withdrawn */
+  }
+  else if (!strcmp(key, "layer")) {
+    /* a wl_surface keeps its first role: a new role needs a new surface */
+    const int shown = !win->hidden;
+    set_hidden(win, 1);
+    wl_surface_destroy(win->surface);
+    surface_create(win);
+    win->layer = BK_CLAMP((int)a, -1, 3);
+    win->keyboard = BK_CLAMP((int)b, 0, 2);
+    if (shown) {
+      set_hidden(win, 0);
+    }
+  }
+  else if (!strcmp(key, "anchor")) {
+    win->anchor = (int)a & 15;
+    win->exclusive = (int)b;
+    if (win->layer_surface) {
+      layer_place(win);
+      wl_surface_commit(win->surface);
+    }
+  }
+  else if (!strcmp(key, "override")) {
+    win->frameless = a != 0;
+    if (win->decoration) {
+      set_frame(win);
+    }
+  }
+  else if (!strcmp(key, "transparent") && (a != 0) != BUI_raster_alpha(win->raster)) {
+    BUI_raster_set_alpha(win->raster, a != 0);
+    buf_destroy(&win->bufs[0]); /* new buffers in the other format */
+    buf_destroy(&win->bufs[1]);
+    win->full = 1;
+    win->render_pending = 1;
+  }
+  if (!win->toplevel) {
+    wl_display_flush(g.display);
+    return;
+  }
   if (!strcmp(key, "minsize")) {
     xdg_toplevel_set_min_size(win->toplevel, (int)(a / win->bscale), (int)(b / win->bscale));
   }
@@ -1338,6 +1588,11 @@ int bk_wl_window_wm_get(BKWindow *win, const char *key, double *r_a, double *r_b
     *r_a = g.px;
     *r_b = g.py;
     return g.pointer_win != NULL;
+  }
+  if (!strcmp(key, "layer")) { /* has the compositor layer shell; the window's layer */
+    *r_a = g.layer_shell != NULL;
+    *r_b = win ? win->layer : -1;
+    return 1;
   }
   return 0; /* "pos", "state": not available to a Wayland client */
 }

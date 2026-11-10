@@ -331,7 +331,8 @@ static CGColorSpaceRef srgb(void)
   }
 }
 
-/* The raster as a CGImage: 0x00RRGGBB words are little-endian XRGB. */
+/* The raster as a CGImage: 0x00RRGGBB words are little-endian XRGB, and 0xAARRGGBB words
+ * (a transparent window) premultiplied little-endian ARGB. */
 - (void)drawRect:(NSRect)dirty
 {
   CGContextRef cg = [[NSGraphicsContext currentContext] CGContext];
@@ -341,11 +342,17 @@ static CGColorSpaceRef srgb(void)
   const NSRect b = [self bounds];
   BuiRaster *r = bk ? bk->raster : NULL;
   const int iw = r ? BUI_raster_width(r) : 0, ih = r ? BUI_raster_height(r) : 0;
+  const bool alpha = r && BUI_raster_alpha(r);
   const CGFloat px = bk ? bk->px : 1.0;
   const CGFloat wpt = iw / px, hpt = ih / px;
   if (!r || iw <= 1 || ih <= 1 || wpt < b.size.width || hpt < b.size.height) {
-    CGContextSetRGBFillColor(cg, 0.188, 0.188, 0.188, 1.0); /* Blender's background */
-    CGContextFillRect(cg, NSRectToCGRect(dirty));
+    if (alpha) {
+      CGContextClearRect(cg, NSRectToCGRect(dirty));
+    }
+    else {
+      CGContextSetRGBFillColor(cg, 0.188, 0.188, 0.188, 1.0); /* Blender's background */
+      CGContextFillRect(cg, NSRectToCGRect(dirty));
+    }
   }
   if (!r || iw <= 1 || ih <= 1) {
     return;
@@ -358,7 +365,8 @@ static CGColorSpaceRef srgb(void)
                                  32,
                                  (size_t)iw * 4,
                                  srgb(),
-                                 (CGBitmapInfo)kCGImageAlphaNoneSkipFirst |
+                                 (CGBitmapInfo)(alpha ? kCGImageAlphaPremultipliedFirst :
+                                                        kCGImageAlphaNoneSkipFirst) |
                                      kCGBitmapByteOrder32Little,
                                  prov,
                                  NULL,
@@ -616,6 +624,14 @@ static CGColorSpaceRef srgb(void)
 {
   if (bk) {
     bk->flags = [NSEvent modifierFlags]; /* modifiers may have changed elsewhere */
+    bk_window_focus(bk->ctx, bk, &bk->cb, 1);
+  }
+}
+
+- (void)windowDidResignKey:(NSNotification *)notification
+{
+  if (bk) {
+    bk_window_focus(bk->ctx, bk, &bk->cb, 0);
   }
 }
 
@@ -1011,6 +1027,9 @@ static void present(BKWindow *win, int all)
     }
   }
   [v displayIfNeeded];
+  if (BUI_raster_alpha(win->raster)) {
+    [win->nswin invalidateShadow]; /* the shadow follows the drawn alpha */
+  }
 }
 
 static void do_render(BKWindow *win)
@@ -1596,6 +1615,16 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
     }
     else if (!strcmp(key, "alpha")) {
       [nw setAlphaValue:BK_CLAMP(a, 0.0, 1.0)];
+    }
+    else if (!strcmp(key, "transparent")) { /* per-pixel alpha: a clear, non-opaque window */
+      const int on = a != 0.0;
+      if (on != BUI_raster_alpha(win->raster)) {
+        BUI_raster_set_alpha(win->raster, on);
+        [nw setOpaque:!on];
+        [nw setBackgroundColor:on ? [NSColor clearColor] : [NSColor windowBackgroundColor]];
+        win->full = 1;
+        host_request(win);
+      }
     }
     else if (!strcmp(key, "override")) {
       win->override = a != 0.0;

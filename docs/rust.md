@@ -66,7 +66,7 @@ It follows gpui closely:
 | `impl Render for View`                    | the same: `fn render(&mut self, window, cx) -> impl IntoElement` |
 | `Entity<T>`, `WeakEntity<T>`, `cx.new`    | `Copy` handles into the app's entity slots: `read` (returns `&T`), `update`, `downgrade`; `cx.release(e)` drops a value |
 | `Context<T>`: `notify`, `listener`, `entity` | the same; it derefs to `App`                              |
-| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | the same, plus `is_resizable`, `window_min_size` |
+| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | the same, plus `is_resizable`, `window_min_size`, `gpu`, `window_background` (`WindowBackgroundAppearance::Transparent`), `kind` (`WindowKind::Floating` stays on top, `PopUp` is on top without a frame, `LayerShell(LayerShellOptions { layer, anchor, exclusive_zone, keyboard_interactivity })` is a Wayland layer-shell surface) and `window_decorations` (`WindowDecorations::Client`: no frame); `App::on_window_activation` reports focus. A Wayland toplevel cannot stay on top: use `LayerShell` |
 | `cx.set_global`, `cx.global`              | the same                                                       |
 | `cx.stop_propagation()`                   | the same                                                       |
 

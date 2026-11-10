@@ -41,6 +41,7 @@ static void bi_app_frame(void* user)
     PyObject* r = PyObject_CallNoArgs(a->frame);
     if (r == nullptr)
     {
+        cimgui::cImGui_ImplBUI_AbandonFrame(); // the exception may leave Begin() without End()
         PyErr_Fetch(&a->et, &a->ev, &a->etb);
         cimgui::cImGui_ImplBUI_CloseApp(a->app);
         return;

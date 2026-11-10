@@ -89,7 +89,13 @@
   F(XSetWMNormalHints) \
   F(XSetWMProtocols) \
   F(XStoreName) \
-  F(XWarpPointer)
+  F(XWarpPointer) \
+  F(XIconifyWindow) \
+  F(XWithdrawWindow) \
+  F(XMatchVisualInfo) \
+  F(XCreateColormap) \
+  F(XFreeColormap) \
+  F(XGetWindowAttributes)
 
 #  define BK_X11_DECL(f) static __typeof__(&f) p_##f;
 BK_X11_FUNCS(BK_X11_DECL)
@@ -163,6 +169,12 @@ static int x11_load(void)
 #  define XSetWMProtocols (*p_XSetWMProtocols)
 #  define XStoreName (*p_XStoreName)
 #  define XWarpPointer (*p_XWarpPointer)
+#  define XIconifyWindow (*p_XIconifyWindow)
+#  define XWithdrawWindow (*p_XWithdrawWindow)
+#  define XMatchVisualInfo (*p_XMatchVisualInfo)
+#  define XCreateColormap (*p_XCreateColormap)
+#  define XFreeColormap (*p_XFreeColormap)
+#  define XGetWindowAttributes (*p_XGetWindowAttributes)
 
 #  define MAX_TIMERS 64
 
@@ -179,6 +191,11 @@ struct BKWindow {
   BKWindowCallbacks cb;
   XImage *image;
   GC gc;
+  Visual *visual;  /* the window's: 32-bit ARGB when transparent */
+  int depth;
+  Colormap cmap;   /* for the ARGB visual, else None */
+  char *title;
+  bool frameless, above; /* "override", "topmost": kept for a new X window */
   int render_pending, frames, cursor, tip_id, next_timer, full;
   int want_frame, frame_vsync;
   double frame_start;
@@ -405,7 +422,8 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 static void gpu_attach(BKWindow *win)
 {
   if (win->xid) {
-    BuiGpuX11Window target = {g_dpy, (unsigned long)win->xid};
+    BuiGpuX11Window target = {g_dpy, (unsigned long)win->xid,
+                              win->visual->visualid};
     BUI_raster_gpu_attach(win->raster, &target, 0);
   }
 }
@@ -426,12 +444,12 @@ static void present(BKWindow *win, int all)
       win->image->data = NULL; /* the raster owns the pixels */
       XDestroyImage(win->image);
     }
-    Visual *vis = DefaultVisual(g_dpy, DefaultScreen(g_dpy));
-    win->image = XCreateImage(g_dpy, vis, 24, ZPixmap, 0, NULL, (unsigned)w, (unsigned)h, 32,
-                              w * 4);
+    win->image = XCreateImage(g_dpy, win->visual, (unsigned)win->depth, ZPixmap, 0, NULL,
+                              (unsigned)w, (unsigned)h, 32, w * 4);
     all = 1;
   }
-  /* 0xAARRGGBB words are B, G, R, A bytes: the 24-bit TrueColor layout */
+  /* 0xAARRGGBB words are B, G, R, A bytes: the 24-bit TrueColor layout, and the 32-bit ARGB
+   * visual's (premultiplied, as compositors read it) */
   win->image->data = (char *)BUI_raster_pixels(win->raster);
   if (all) {
     XPutImage(g_dpy, win->xid, win->gc, win->image, 0, 0, 0, 0, (unsigned)w, (unsigned)h);
@@ -644,6 +662,13 @@ static void handle_event(XEvent *ev)
       }
       handle_key(win, &ev->xkey, ev->type == KeyPress);
       break;
+    case FocusIn:
+    case FocusOut:
+      /* a pointer or keyboard grab keeps the focus */
+      if (ev->xfocus.mode != NotifyGrab && ev->xfocus.mode != NotifyUngrab) {
+        bk_window_focus(win->ctx, win, &win->cb, ev->type == FocusIn);
+      }
+      break;
     case ClientMessage:
       if ((Atom)ev->xclient.data.l[0] == a_delete) {
         if (!win->cb.on_close || win->cb.on_close(win->cb.data, win)) {
@@ -655,6 +680,105 @@ static void handle_event(XEvent *ev)
 }
 
 /* -- windows -- */
+
+/* GHOST_WindowX11::netwmMaximized: ask the window manager to add or remove two _NET_WM_STATE
+ * properties (the second may be NULL). Before the window is mapped, the client sets the property
+ * itself (EWMH), so an add is appended there. */
+static void net_wm_state(BKWindow *win, bool add, const char *prop1, const char *prop2)
+{
+  XWindowAttributes wa;
+  if (XGetWindowAttributes(g_dpy, win->xid, &wa) && wa.map_state == IsUnmapped) {
+    if (add) {
+      const Atom atoms[2] = {XInternAtom(g_dpy, prop1, False),
+                             prop2 ? XInternAtom(g_dpy, prop2, False) : None};
+      XChangeProperty(g_dpy, win->xid, XInternAtom(g_dpy, "_NET_WM_STATE", False), XA_ATOM, 32,
+                      PropModeAppend, (const unsigned char *)atoms, prop2 ? 2 : 1);
+    }
+    return;
+  }
+  XEvent xev;
+  memset(&xev, 0, sizeof(xev));
+  xev.xclient.type = ClientMessage;
+  xev.xclient.send_event = True;
+  xev.xclient.window = win->xid;
+  xev.xclient.message_type = XInternAtom(g_dpy, "_NET_WM_STATE", False);
+  xev.xclient.format = 32;
+  xev.xclient.data.l[0] = add ? 1 : 0; /* _NET_WM_STATE_ADD / _REMOVE */
+  xev.xclient.data.l[1] = (long)XInternAtom(g_dpy, prop1, False);
+  xev.xclient.data.l[2] = prop2 ? (long)XInternAtom(g_dpy, prop2, False) : 0;
+  XSendEvent(g_dpy, RootWindow(g_dpy, DefaultScreen(g_dpy)), False,
+             SubstructureRedirectMask | SubstructureNotifyMask, &xev);
+}
+
+/* GHOST_WindowX11::motifShowWindowFrame: _MOTIF_WM_HINTS decorations on or off. */
+static void motif_frame(BKWindow *win, bool show)
+{
+  const long hints[4] = {1L << 1 /* MWM_HINTS_DECORATIONS */, 0, show ? 1 : 0, 0};
+  const Atom a = XInternAtom(g_dpy, "_MOTIF_WM_HINTS", False);
+  XChangeProperty(g_dpy, win->xid, a, a, 32, PropModeReplace, (const unsigned char *)hints, 4);
+}
+
+/* The X window, with the default visual or, transparent, a 32-bit ARGB one (GHOST's
+ * alpha background). A window's visual is fixed, so "transparent" makes a new window. */
+static bool create_xid(BKWindow *win, bool transparent)
+{
+  const int screen = DefaultScreen(g_dpy);
+  const Window root = RootWindow(g_dpy, screen);
+  XSetWindowAttributes attr;
+  memset(&attr, 0, sizeof(attr));
+  attr.event_mask = ExposureMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask |
+                    ButtonReleaseMask | KeyPressMask | KeyReleaseMask | LeaveWindowMask |
+                    FocusChangeMask;
+  unsigned long mask = CWBackPixel | CWEventMask;
+  XVisualInfo vi;
+  win->visual = DefaultVisual(g_dpy, screen);
+  win->depth = 24;
+  win->cmap = None;
+  if (transparent && XMatchVisualInfo(g_dpy, screen, 32, TrueColor, &vi)) {
+    win->visual = vi.visual;
+    win->depth = 32;
+    win->cmap = XCreateColormap(g_dpy, root, vi.visual, AllocNone);
+    attr.colormap = win->cmap;
+    mask |= CWColormap | CWBorderPixel; /* a visual other than the parent's needs both */
+  }
+  else {
+    attr.background_pixel = BlackPixel(g_dpy, screen);
+  }
+  win->xid = XCreateWindow(g_dpy, root, 0, 0, (unsigned)win->w, (unsigned)win->h, 0,
+                           win->depth == 32 ? 32 : CopyFromParent, InputOutput,
+                           win->depth == 32 ? win->visual : CopyFromParent, mask, &attr);
+  if (!win->xid) {
+    return false;
+  }
+  XSetWMProtocols(g_dpy, win->xid, &a_delete, 1);
+  win->gc = XCreateGC(g_dpy, win->xid, 0, NULL);
+  BK_window_set_title(win, win->title);
+  BUI_raster_set_alpha(win->raster, win->depth == 32);
+  if (win->frameless) {
+    motif_frame(win, false);
+  }
+  if (win->above) {
+    net_wm_state(win, true, "_NET_WM_STATE_ABOVE", NULL);
+  }
+  return true;
+}
+
+/* Drop the X window and what was made for it, before a new one (the window stays open). */
+static void destroy_xid(BKWindow *win)
+{
+  BUI_raster_gpu_release(win->raster);
+  if (win->image) {
+    win->image->data = NULL;
+    XDestroyImage(win->image);
+    win->image = NULL;
+  }
+  XFreeGC(g_dpy, win->gc);
+  XDestroyWindow(g_dpy, win->xid);
+  if (win->cmap) {
+    XFreeColormap(g_dpy, win->cmap);
+  }
+  win->xid = 0;
+}
 
 BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height)
 {
@@ -670,24 +794,13 @@ BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height
   BK_set_scale(win->scale);
   win->w = (int)(width * win->scale);
   win->h = (int)(height * win->scale);
-  const int screen = DefaultScreen(g_dpy);
-  XSetWindowAttributes attr;
-  memset(&attr, 0, sizeof(attr));
-  attr.background_pixel = BlackPixel(g_dpy, screen);
-  attr.event_mask = ExposureMask | StructureNotifyMask | PointerMotionMask | ButtonPressMask |
-                    ButtonReleaseMask | KeyPressMask | KeyReleaseMask | LeaveWindowMask |
-                    FocusChangeMask;
-  win->xid = XCreateWindow(g_dpy, RootWindow(g_dpy, screen), 0, 0, (unsigned)win->w,
-                           (unsigned)win->h, 0, CopyFromParent, InputOutput, CopyFromParent,
-                           CWBackPixel | CWEventMask, &attr);
-  if (!win->xid) {
+  win->title = bk_strdup(title ? title : "");
+  if (!create_xid(win, false)) {
     BUI_raster_free(win->raster);
+    free(win->title);
     free(win);
     return NULL;
   }
-  XSetWMProtocols(g_dpy, win->xid, &a_delete, 1);
-  win->gc = XCreateGC(g_dpy, win->xid, 0, NULL);
-  BK_window_set_title(win, title);
   win->next = g_windows;
   g_windows = win;
   g_open++;
@@ -719,10 +832,14 @@ void BK_window_free(BKWindow *win)
   if (win->gc) {
     XFreeGC(g_dpy, win->gc);
   }
+  if (win->cmap) {
+    XFreeColormap(g_dpy, win->cmap);
+  }
   if (win->ctx) {
     BK_context_set_host(win->ctx, &win->prev);
   }
   BUI_raster_free(win->raster);
+  free(win->title);
   free(win);
 }
 
@@ -756,6 +873,11 @@ void BK_window_set_title(BKWindow *win, const char *title)
     return;
   }
   const char *t = title ? title : "";
+  if (t != win->title) {
+    free(win->title);
+    win->title = bk_strdup(t);
+    t = win->title;
+  }
   XChangeProperty(g_dpy, win->xid, XInternAtom(g_dpy, "_NET_WM_NAME", False), a_utf8, 8,
                   PropModeReplace, (const unsigned char *)t, (int)strlen(t));
   XStoreName(g_dpy, win->xid, t);
@@ -853,6 +975,28 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
   if (!strcmp(key, "pos")) {
     XMoveWindow(g_dpy, win->xid, (int)a, (int)b);
   }
+  else if (!strcmp(key, "override")) { /* no frame (not override_redirect: that gets no keys) */
+    win->frameless = a != 0;
+    motif_frame(win, !win->frameless);
+  }
+  else if (!strcmp(key, "topmost")) {
+    win->above = a != 0;
+    net_wm_state(win, win->above, "_NET_WM_STATE_ABOVE", NULL);
+  }
+  else if (!strcmp(key, "transparent")) { /* before show: the window is made again */
+    if ((a != 0) != (win->depth == 32)) {
+      const bool gpu = BUI_raster_is_gpu(win->raster) || BUI_raster_gpu_pending(win->raster);
+      destroy_xid(win);
+      if (!create_xid(win, a != 0)) {
+        g_open--; /* no window: closed */
+        return;
+      }
+      if (gpu) { /* the device was made for the old window: GLX needs a config for the new visual */
+        gpu_attach(win);
+      }
+      win->full = 1;
+    }
+  }
   else if (!strcmp(key, "minsize") || !strcmp(key, "maxsize") || !strcmp(key, "resizable")) {
     XSizeHints *hints = XAllocSizeHints();
     long supplied;
@@ -889,6 +1033,20 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
   }
   else if (!strcmp(key, "focus")) {
     XSetInputFocus(g_dpy, win->xid, RevertToParent, CurrentTime);
+  }
+  else if (!strcmp(key, "state")) { /* GHOST_WindowX11::setState; 2 hides (ICCCM withdraw) */
+    const int state = BK_CLAMP((int)a, 0, 3);
+    if (state == 1) {
+      XIconifyWindow(g_dpy, win->xid, DefaultScreen(g_dpy));
+    }
+    else if (state == 2) {
+      XWithdrawWindow(g_dpy, win->xid, DefaultScreen(g_dpy));
+    }
+    else {
+      XMapWindow(g_dpy, win->xid);
+      net_wm_state(win, state == 3, "_NET_WM_STATE_MAXIMIZED_HORZ",
+                   "_NET_WM_STATE_MAXIMIZED_VERT");
+    }
   }
   XFlush(g_dpy);
 }
