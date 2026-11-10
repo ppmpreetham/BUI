@@ -73,6 +73,9 @@ All notable changes to **blenderui** (BUI). The format follows
 - **X11 frame pacing:** an animation frame is due one refresh after the previous frame started, so the render time is part
   of the interval, as the docs say. The loop slept a full refresh after each frame, so a 3000-cell animation on the GPU
   renderer ran at 24 fps instead of 49 fps.
+- **A display list that changes everywhere** (`BK_canvas_put_item` each frame) compared and damaged every item one by one.
+  Once the damage covers half the canvas, or the window redraws whole, the canvas redraws whole and items are no longer
+  compared, as Blender's `ED_region_tag_redraw_partial` does. 3000 animated cells: 1.5 ms of flush per frame, 0.5 ms now.
 - **Closing a pie during its open animation** freed it while the animation still pointed at it, so the next render read freed
   memory (`bui_lua_context` crashed in CI). Closing a popup now clears everything that refers into it through `bk_forget`.
 - **Wayland frames copied the whole window every frame** after the first full one: the double-buffer copy kept

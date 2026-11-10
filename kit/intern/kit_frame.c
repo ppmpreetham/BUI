@@ -698,6 +698,10 @@ typedef struct CanvasData {
   int *idx_key, *idx_pos;
   int idx_cap, idx_count;
   bool idx_valid;
+  /* damage since the last draw: past half the canvas, the whole canvas is redrawn and items
+   * are not compared or damaged one by one (Blender's ED_region_tag_redraw_partial) */
+  long damaged_px;
+  bool all_damaged;
 } CanvasData;
 
 #define IDX_EMPTY INT_MIN
@@ -929,13 +933,29 @@ static bool citem_bbox(const CItem *ci, float b[4])
   return true;
 }
 
+/* True when the whole canvas is redrawn this frame anyway. */
+static bool canvas_all_damaged(BKNode *n)
+{
+  const BKContext *ctx = bk_ctx(n);
+  return CANVAS(n)->all_damaged || (ctx && ctx->full_dirty);
+}
+
+static void canvas_damage_all(BKNode *n)
+{
+  CANVAS(n)->all_damaged = true;
+  bk_invalidate(n);
+}
+
 /* Redraw only where item `ci` paints (the whole canvas when that's unknown). */
 static void canvas_damage(BKNode *n, const CItem *ci)
 {
+  if (canvas_all_damaged(n)) {
+    return;
+  }
   BKContext *ctx = bk_ctx(n);
   float b[4];
   if (!ctx || n->w <= 0 || n->h <= 0 || !citem_bbox(ci, b)) {
-    bk_invalidate(n);
+    canvas_damage_all(n);
     return;
   }
   const float ox = (float)(n->x - n->scroll_x), oy = (float)(n->y - n->scroll);
@@ -943,6 +963,12 @@ static void canvas_damage(BKNode *n, const CItem *ci)
   const int x1 = BK_MIN(n->x + n->w, (int)ceilf(ox + b[2]));
   const int y1 = BK_MIN(n->y + n->h, (int)ceilf(oy + b[3]));
   if (x1 > x0 && y1 > y0) {
+    CanvasData *d = CANVAS(n);
+    d->damaged_px += (long)(x1 - x0) * (y1 - y0);
+    if (d->damaged_px * 2 > (long)n->w * n->h) {
+      canvas_damage_all(n);
+      return;
+    }
     bk_ctx_dirty_rect(ctx, bk_rect(x0, y0, x1 - x0, y1 - y0));
   }
 }
@@ -1016,6 +1042,9 @@ void BK_canvas_put_item(BKNode *n, int index, const BKCanvasItem *item)
       d->items = (CItem *)realloc(d->items, sizeof(CItem) * (size_t)d->cap);
     }
     memset(&d->items[d->n++], 0, sizeof(CItem));
+  }
+  else if (canvas_all_damaged(n)) {
+    /* redrawn anyway: assign without comparing */
   }
   else if (citem_same(&d->items[index], item)) {
     return; /* the same item: nothing to redraw */
@@ -1582,6 +1611,8 @@ static void canvas_draw(BKNode *n)
     bk_fill_f(n->x, n->y, n->w, n->h, n->color);
   }
   CanvasData *d = CANVAS(n);
+  d->damaged_px = 0;
+  d->all_damaged = false;
   bk_clip_push(n->x, n->y, n->w, n->h);
   const float ox = (float)(n->x - n->scroll_x), oy = (float)(n->y - n->scroll);
   const double t0 = now_ms();
