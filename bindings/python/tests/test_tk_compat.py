@@ -629,7 +629,7 @@ def test_quit_asks_windows_to_close():
     objc.objc_getClass.restype = objc.sel_registerName.restype = ctypes.c_void_p
 
     def msg(obj, sel, *args):
-        # PYFUNCTYPE keeps the GIL: the Python close handler may run inside the call
+        # PYFUNCTYPE keeps the GIL: Quit runs the Python close handler inside the call
         call = ctypes.PYFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
                                  *[ctypes.c_long] * len(args))(("objc_msgSend", objc))
         return call(obj, objc.sel_registerName(sel), *args)
@@ -643,9 +643,7 @@ def test_quit_asks_windows_to_close():
         for i in range(msg(menu, b"numberOfItems") or 0):
             key = msg(msg(menu, b"itemAtIndex:", i), b"keyEquivalent")
             if ctypes.cast(msg(key, b"UTF8String"), ctypes.c_char_p).value == b"q":
-                # queued on the run loop: BUI refuses a close that arrives inside a Python callback
-                msg(menu, b"performSelectorOnMainThread:withObject:waitUntilDone:",
-                    objc.sel_registerName(b"performActionForItemAtIndex:"), i, 0)
+                msg(menu, b"performActionForItemAtIndex:", i)
                 return
         raise AssertionError("no Quit item in Tk's application menu")
     root.after(50, choose_quit)
