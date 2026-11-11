@@ -2,7 +2,7 @@
 //! `table()` ...), all building the one [`Div`] type, plus the user-agent
 //! stylesheet that gives them their default look (Blender's theme).
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::css::Stylesheet;
 use crate::element::Div;
@@ -237,16 +237,70 @@ pub fn ua_styled_css(theme: &str) -> String {
     css
 }
 
-/// The parsed `styled` sheet for the active theme ([`crate::set_theme`],
-/// `BUI_THEME`): [`UA_STYLED_CSS`] or its light variant (each parsed once).
-pub fn ua_styled_stylesheet() -> &'static Stylesheet {
-    static DARK: OnceLock<Stylesheet> = OnceLock::new();
-    static LIGHT: OnceLock<Stylesheet> = OnceLock::new();
-    if crate::theme_name() == "light" {
-        LIGHT.get_or_init(|| Stylesheet::parse(&ua_styled_css("light")))
+/// `#rrggbb`, or `rgba(...)` when the color is not opaque.
+fn css_color(rgba: [f32; 4]) -> String {
+    let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    if rgba[3] >= 1.0 {
+        format!("#{:02x}{:02x}{:02x}", b(rgba[0]), b(rgba[1]), b(rgba[2]))
     } else {
-        DARK.get_or_init(|| Stylesheet::parse(UA_STYLED_CSS))
+        format!("rgba({}, {}, {}, {:.3})", b(rgba[0]), b(rgba[1]), b(rgba[2]), rgba[3])
     }
+}
+
+/// The `styled` sheet of the active theme: the dark or light sheet its `mode` names, with the
+/// background, text and accent colors the theme gives (`region.background`, `text`,
+/// `button.background.selected`). A built-in theme gives exactly [`UA_STYLED_CSS`] or its light variant.
+pub fn themed_styled_css() -> String {
+    let light = crate::theme_name() == "light";
+    let mut css = ua_styled_css(if light { "light" } else { "dark" });
+    // (the sheet's own color, the preset's value of the key it follows): a color the theme leaves as
+    // the preset has keeps the sheet's, so a built-in theme gives exactly the sheet it always did
+    // (Blender_Light.xml's `text` is black, the sheet's is the properties editor's #1a1a1a)
+    let (bg0, bg_preset) = if light { ("#b3b3b3", "#b3b3b3") } else { ("#303030", "#303030") };
+    let (fg0, fg_preset) = if light { ("#1a1a1a", "#000000") } else { ("#e6e6e6", "#e6e6e6") };
+    let theme = |key: &str, preset: &str| {
+        crate::theme_color(key).map(css_color).filter(|c| c != preset)
+    };
+    let (bg, fg) = (theme("region.background", bg_preset), theme("text", fg_preset));
+    css = css.replacen(
+        &format!("background-color: {bg0}; color: {fg0};"),
+        &format!(
+            "background-color: {}; color: {};",
+            bg.as_deref().unwrap_or(bg0),
+            fg.as_deref().unwrap_or(fg0)
+        ),
+        1,
+    );
+    // the accent of the dark sheet (the light sheet keeps Blender's, which is not a theme key of its own)
+    if !light && let Some(accent) = theme("button.background.selected", "#4772b3") {
+        css = css.replace("#4772b3", &accent);
+    }
+    css
+}
+
+/// The parsed `styled` sheet for the active theme ([`crate::set_theme`], `BUI_THEME`, a theme loaded
+/// with [`crate::load_theme`], single colors set at run time). Parsed again when the theme changes
+/// to a different sheet. Only the sheet in use is kept: whoever holds the `Arc` (a layout pass)
+/// keeps it alive, and it is freed after that, so a theme editor changing a color on every drag
+/// event does not pile up sheets.
+pub fn ua_styled_stylesheet() -> Arc<Stylesheet> {
+    use std::sync::Mutex;
+    /// The theme generation the sheet was made for, its CSS (to tell if a new generation changed
+    /// anything) and the parsed sheet.
+    static CURRENT: Mutex<Option<(i32, String, Arc<Stylesheet>)>> = Mutex::new(None);
+    let generation = crate::theme_generation();
+    let mut cur = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, _, sheet)) = cur.as_ref().filter(|(g, _, _)| *g == generation) {
+        return Arc::clone(sheet);
+    }
+    let css = themed_styled_css();
+    if let Some((g, _, sheet)) = cur.as_mut().filter(|(_, old_css, _)| *old_css == css) {
+        *g = generation;
+        return Arc::clone(sheet);
+    }
+    let sheet = Arc::new(Stylesheet::parse(&css));
+    *cur = Some((generation, css, Arc::clone(&sheet)));
+    sheet
 }
 
 #[cfg(test)]

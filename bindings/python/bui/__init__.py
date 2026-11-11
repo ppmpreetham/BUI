@@ -190,7 +190,8 @@ def set_reduced_motion(on: bool = True) -> None:
 
 def set_theme(name: str = "dark") -> None:
     """Switch every BUI window to Blender's ``"dark"`` (default) or
-    ``"light"`` theme (its Blender_Light.xml preset); open windows redraw.
+    ``"light"`` theme (its Blender_Light.xml preset), or to a theme loaded with
+    :func:`load_theme`; open windows redraw.
     Without a call the ``BUI_THEME`` environment variable picks the theme."""
     from bui import theme as _theme
     buipy.kit_set_theme(str(name))
@@ -198,8 +199,57 @@ def set_theme(name: str = "dark") -> None:
 
 
 def theme_name() -> str:
-    """The active theme: ``"dark"`` or ``"light"``."""
+    """The active theme: ``"dark"``, ``"light"`` or the name of a theme you loaded."""
     return buipy.kit_theme_name()
+
+
+def load_theme(source) -> list:
+    """Register the themes of a theme file (a path) or of theme JSON text; returns the names of all
+    the themes loaded so far.
+
+    Choose one with :func:`set_theme`. The format is gpui-kit's, with Blender's color names
+    (``docs/theming.md``). Raises ``ValueError`` with the line and column of a mistake; a file with a
+    mistake in it adds none of its themes. Keys BUI has no use for are ignored.
+    """
+    import os
+    if isinstance(source, os.PathLike) or (isinstance(source, str) and not source.lstrip().startswith(("{", "["))):
+        buipy.kit_theme_load_file(source)
+    else:
+        buipy.kit_theme_load_json(str(source))
+    return buipy.kit_theme_names()
+
+
+def themes() -> list:
+    """The names of the themes loaded with :func:`load_theme`."""
+    return buipy.kit_theme_names()
+
+
+def set_theme_color(key: str, color) -> None:
+    """Set one color of the active theme (until the next :func:`set_theme`).
+
+    ``key`` is a plain-English key (``"button.background"``) or Blender's (``"user_interface.wcol_regular.inner"``);
+    ``color`` is ``"#rrggbb[aa]"`` or a tuple of 0..1 floats. Raises ``KeyError`` for an unknown key.
+    """
+    from bui import theme as _theme
+    if isinstance(color, str):
+        h = color.lstrip("#")
+        if len(h) in (3, 4):
+            h = "".join(ch * 2 for ch in h)
+        vals = [int(h[i:i + 2], 16) / 255.0 for i in range(0, len(h), 2)]
+        color = tuple(vals)
+    buipy.kit_theme_set_color(key, tuple(color))
+    _theme._sync()
+
+
+def set_theme_value(key: str, value) -> None:
+    """Set a number of the active theme: ``"button.roundness"``, ``"button.border.width"`` (pixels),
+    ``"button.corners.top_left"`` (``False`` keeps that corner square), ``"button.emboss.enabled"`` ..."""
+    buipy.kit_theme_set_num(key, float(value))
+
+
+def theme_value(key: str) -> float:
+    """A number of the active theme (booleans are 0.0 or 1.0)."""
+    return buipy.kit_theme_num(key)
 
 
 def theme_color(key: str):

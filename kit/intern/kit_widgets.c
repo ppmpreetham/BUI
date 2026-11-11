@@ -3395,7 +3395,8 @@ static float html_bw(void)
 static float html_font_begin(const BKNode *n)
 {
   const float saved = bk_text_scale;
-  bk_text_scale = (n->font_scale > 0.0f ? n->font_scale : 1.0f) * BK_HTML_FONT;
+  /* a form control keeps its 13.33 px whatever size the theme gives the UI text */
+  bk_text_scale = (n->font_scale > 0.0f ? n->font_scale : 1.0f) * BK_HTML_SCALE();
   bk_html_text_scale = bk_text_scale; /* text in this bracket uses the form-control font */
   return saved;
 }

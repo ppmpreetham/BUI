@@ -230,8 +230,17 @@ export class App {
   quitOnLastWindowClosed: boolean
   window (options?: WindowOptions): Window
   setSlug (on: boolean): void
-  /** Blender's 'dark' (default) or 'light' theme; open windows redraw. */
+  /** Blender's 'dark' (default) or 'light' theme, or a theme loaded with `loadTheme` (that returns a promise); open windows redraw. */
   setTheme (name: 'dark' | 'light'): void
+  setTheme (name: string): Promise<void>
+  /** Register the themes of a theme file (a path) or of theme JSON text; resolves with how many were added. */
+  loadTheme (source: string): Promise<number>
+  /** The names of the themes loaded with `loadTheme`. */
+  themes (): Promise<string[]>
+  /** One color of the active theme: a key such as 'button.background', '#rrggbb[aa]' or [r, g, b, a] in 0..1. */
+  setThemeColor (key: string, color: string | [number, number, number, number?]): Promise<void>
+  /** One number of the active theme: 'button.roundness', 'button.border.width', 'button.corners.top_left', ... */
+  setThemeValue (key: string, value: number | boolean): Promise<void>
   quit (): void
 }
 

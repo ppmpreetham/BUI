@@ -90,6 +90,89 @@ def test_env_var():
     assert name == "light" and abs(float(r) - 179 / 255) < 1e-6, out.stdout
 
 
+def test_theme_file_and_keys():
+    """A theme file: plain-English and Blender keys, short names, numbers, errors."""
+    text = """{ "name": "set", "themes": [
+      { "name": "Plum", "mode": "dark", "radius": 0.8,
+        "colors": { "primary.background": "#112233", "button.background": "#445566",
+                    "user_interface.wcol_num.inner": "#0a0b0c", "button.border.width": 3,
+                    "button.corners.top_left": false, "nonsense.key": "#ffffff" } } ] }"""
+    try:
+        added, ignored = buipy.kit_theme_load_json(text)
+        assert (added, ignored) == (1, 1)
+        assert "Plum" in bui.themes()
+        count = len(bui.themes())
+        bui.set_theme("plum")
+        assert bui.theme_name() == "Plum"
+        near = lambda c, rgb: all(abs(a - b / 255) < 2e-3 for a, b in zip(c, rgb))
+        assert near(bui.theme_color("button.background"), (0x44, 0x55, 0x66))
+        assert near(bui.theme_color("tool_button.background.selected"), (0x11, 0x22, 0x33))
+        assert near(bui.theme_color("number_field.background"), (0x0a, 0x0b, 0x0c))
+        assert bui.theme_value("button.border.width") == 3
+        assert bui.theme_value("button.corners.top_left") == 0
+        assert abs(bui.theme_value("slider.roundness") - 0.8) < 1e-6
+        # the module's own colors follow (bui.theme.WCOL is what the Python components draw with)
+        assert near(theme.WCOL["regular"].inner, (0x44, 0x55, 0x66))
+        # single values
+        bui.set_theme_color("button.background", "#ff0000")
+        assert near(bui.theme_color("button.background"), (255, 0, 0))
+        bui.set_theme_color("button.background", (0.0, 1.0, 0.0))
+        assert near(bui.theme_color("button.background"), (0, 255, 0))
+        bui.set_theme_value("button.roundness", 0.25)
+        assert abs(bui.theme_value("button.roundness") - 0.25) < 1e-6
+        for bad in (lambda: bui.set_theme_color("button.nope", "#fff"), lambda: bui.theme_value("button.nope")):
+            try:
+                bad()
+            except KeyError:
+                pass
+            else:
+                raise AssertionError("expected KeyError")
+        # mistakes say where, and add nothing
+        try:
+            bui.load_theme('{"themes": [ {"name": "A"}, {} ]}')
+        except ValueError as e:
+            assert "themes[1]" in str(e), e
+        else:
+            raise AssertionError("expected ValueError")
+        assert len(bui.themes()) == count  # the bad file added none
+        try:
+            bui.set_theme("no such theme")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("expected ValueError")
+        # from a file path
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as f:
+            f.write(text.replace("Plum", "FromFile"))
+        try:
+            assert "FromFile" in bui.load_theme(f.name)
+        finally:
+            os.unlink(f.name)
+    finally:
+        bui.set_theme("dark")
+
+
+def test_example_theme_file():
+    """docs/themes/catppuccin.json loads whole (every key it uses exists) and each theme applies."""
+    path = os.path.join(HERE, "..", "..", "..", "docs", "themes", "catppuccin.json")
+    try:
+        added, ignored = buipy.kit_theme_load_file(path)
+        assert added == 3 and ignored == 0, (added, ignored)
+        for name in ("Catppuccin Mocha", "Catppuccin Latte", "Mocha Flat"):
+            assert name in bui.themes()
+            bui.set_theme(name)
+            assert bui.theme_name() == name
+        bui.set_theme("Catppuccin Mocha")
+        assert abs(bui.theme_color("region.background")[0] - 0x18 / 255) < 2e-3
+        bui.set_theme("Mocha Flat")
+        assert bui.theme_value("number_field.corners.top_left") == 0
+        assert bui.theme_value("button.border.width") == 2
+        assert bui.theme_value("button.emboss.enabled") == 0
+    finally:
+        bui.set_theme("dark")
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

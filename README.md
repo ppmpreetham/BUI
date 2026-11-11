@@ -207,7 +207,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 - **Ctrl+Z / Ctrl+Shift+Z** on every UI edit, and inside a text field while you type; Tab between fields.
 - Blender's float display precision, multi-field vertical drags, and panels that collapse with Blender's animation.
 - The HSV color wheel, color ramps, curves, trees, lists, text areas, canvases, a node editor and Blender's File Browser.
-- **Blender's Dark and Light themes**, switchable at run time.
+- **Blender's Dark and Light themes**, switchable at run time, and **your own themes** from a JSON file (gpui-kit's format, Blender's color names, per-widget corners and borders; [docs/theming.md](docs/theming.md)).
 
 ### Python
 
@@ -1284,6 +1284,16 @@ run time, and every open window relayouts and redraws:
 | JavaScript              | `new App({ theme: "light" })`, `app.setTheme("light")`, or React's `render(..., { theme: "light" })`        |
 | Dear ImGui              | Its Blender style follows the kit's theme (pick it before the backend starts)                               |
 | Any app, no code change | `BUI_THEME=light` (or `dark`)                                                                               |
+
+**Your own themes.** A theme file is JSON in the shape of gpui-kit's, with Blender's names for the colors
+(`user_interface.wcol_regular.inner`, or in plain English `button.background`). It starts from Dark or Light and
+lists only what it changes: colors, a few short palette names (`background`, `primary.background`) that fill in
+many keys at once, and per widget the roundness, which corners are round, the border width, the emboss and the
+gradient. `bui.load_theme("my-themes.json")` (Python), `blenderui::load_theme_file` (Rust), `app.loadTheme`
+(JavaScript), `bui.load_theme` (Lua) and `BK_theme_load_file` (C) load it; `set_theme(name)` chooses it, and
+`set_theme_color(key, "#rrggbb")` changes one color. [docs/theming.md](docs/theming.md) has the format,
+[docs/theme-keys.md](docs/theme-keys.md) lists all 782 of Blender's keys and which BUI uses, and
+[docs/themes/catppuccin.json](docs/themes/catppuccin.json) is an example.
 
 Widgets, panels, the region background, the `styled` HTML sheet and ImGui's
 Blender style all follow the theme. Plain HTML keeps a browser's look either

@@ -225,7 +225,7 @@ static bool menu_has_icons(BKMenuSpec *items, int count)
 static float html_menu_font_begin(void)
 {
   const float saved = bk_text_scale;
-  bk_text_scale = BK_HTML_FONT;
+  bk_text_scale = BK_HTML_SCALE();
   bk_html_text_scale = bk_text_scale;
   return saved;
 }

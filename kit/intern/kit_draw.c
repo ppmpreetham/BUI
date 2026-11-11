@@ -34,9 +34,12 @@ int BK_unit(void)
 {
   return bk_unit();
 }
+static void measure_cache_clear(void);
+
 void BK_set_font(const char *family)
 {
   strncpy(g_font_family, family ? family : "", sizeof(g_font_family) - 1);
+  measure_cache_clear(); /* the cached widths are of the old family */
 }
 
 /* wm_window.cc WM_window_dpi_set_userdef: U.dpi = int(72 * ui_scale), pixelsize =
@@ -69,9 +72,20 @@ const char *bk_font_family(void)
   return g_font_family;
 }
 
+static float g_ui_points = 11.0f; /* UI_DEFAULT_TEXT_POINTS; a theme may change it */
+
+void BK_set_font_size(float points)
+{
+  g_ui_points = BK_CLAMP(points, 6.0f, 48.0f);
+}
+float BK_font_size_points(void)
+{
+  return g_ui_points;
+}
+
 float bk_font_size(void)
 {
-  return floorf(11.0f * bk_scale_fac * bk_text_scale + 0.5f); /* UI_DEFAULT_TEXT_POINTS */
+  return floorf(g_ui_points * bk_scale_fac * bk_text_scale + 0.5f);
 }
 
 /* Password fields: every UTF-8 character shows as `mask`. */
@@ -640,12 +654,20 @@ static void widgetbase_draw_ex(WidgetBase *wtb, const BKWCol *wcol, const float 
       bk_rgba(down, p->inner2);
     }
   }
-  if (wtb->draw_outline) {
+  if (wtb->draw_outline && wcol->border_extra > -1.0f) {
     bk_rgba(wcol->outline, p->outline);
   }
   /* Emboss only if the outline is not fully transparent (it looks like a gap). */
-  if (wtb->draw_emboss && wcol->outline[3] != 0) {
+  if (wtb->draw_emboss && wcol->outline[3] != 0 && !wcol->no_emboss) {
     bk_rgba(bk_theme.emboss, p->emboss);
+  }
+  /* The theme's own options (kit_theme.c): a wider outline, corners kept square. */
+  p->corners &= ~(int)wcol->square_corners;
+  if (wcol->border_extra != 0.0f) {
+    const float width = BK_CLAMP(1.0f + wcol->border_extra, 0.0f, 16.0f);
+    /* no outline: the fill reaches the edge (the rasterizer insets it by `pixelsize`, which may not be 0) */
+    p->pixelsize = width > 0.0f ? bk_px() * width : 0.01f;
+    p->radi = BK_MAX(0.0f, p->rad - p->pixelsize);
   }
   p->alpha_checker = alpha_checker;
   BUI_raster_widget_base(bk_draw.r, p);
@@ -1044,6 +1066,11 @@ typedef struct MeasureSlot {
 } MeasureSlot;
 #define MEASURE_SLOTS 8192
 static MeasureSlot g_measure[MEASURE_SLOTS];
+
+static void measure_cache_clear(void)
+{
+  memset(g_measure, 0, sizeof(g_measure));
+}
 
 static uint64_t hash_str(const char *s, int len, bool bold)
 {

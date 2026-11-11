@@ -267,9 +267,48 @@ class App {
   /** GPU text: Slug (glyph outlines) or the glyph atlas. */
   setSlug (on) { this.native.setSlug(!!on) }
 
-  /** Blender's 'dark' (default) or 'light' theme; open windows redraw. */
+  /**
+   * Blender's 'dark' (default) or 'light' theme, or a theme loaded with `loadTheme`; open windows
+   * redraw. A built-in name switches at once; a loaded theme's name returns a promise (the theme
+   * lives on the UI thread) that rejects for an unknown name.
+   */
   setTheme (name) {
-    if (!this.native.setTheme(String(name))) throw new RangeError(`unknown theme ${name} (expected 'dark' or 'light')`)
+    name = String(name)
+    if (this.native.setTheme(name)) return Promise.resolve()
+    return this.native.setCustomTheme(name).then((ok) => {
+      if (!ok) throw new RangeError(`unknown theme ${name} (expected 'dark', 'light' or a theme loaded with loadTheme)`)
+    })
+  }
+
+  /**
+   * Register the themes of a theme file (a path) or of theme JSON text (gpui-kit's format with
+   * Blender's color names, docs/theming.md) and resolve with how many were added. Choose one with
+   * `setTheme(name)`. Rejects with the line and column of a mistake; a file with one adds no themes.
+   */
+  loadTheme (source) {
+    const text = String(source)
+    return this.native.loadTheme(text, !text.trimStart().startsWith('{'))
+  }
+
+  /** The names of the themes loaded with `loadTheme`. */
+  themes () { return this.native.themes() }
+
+  /** One color of the active theme: a key such as 'button.background' and a '#rrggbb[aa]' string or [r, g, b, a] in 0..1. */
+  async setThemeColor (key, color) {
+    let c = color
+    if (typeof color === 'string') {
+      let h = color.replace('#', '')
+      if (h.length <= 4) h = [...h].map((ch) => ch + ch).join('')
+      if (!/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(h)) throw new RangeError(`not a color: ${color}`)
+      c = [0, 2, 4, 6].slice(0, h.length / 2).map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+    }
+    const [r, g, b, a = 1] = c
+    if (!(await this.native.setThemeColor(String(key), r, g, b, a))) throw new RangeError(`no theme color ${key}`)
+  }
+
+  /** One number of the active theme: 'button.roundness', 'button.border.width', 'button.corners.top_left' (false keeps the corner square), ... */
+  async setThemeValue (key, value) {
+    if (!(await this.native.setThemeValue(String(key), Number(value)))) throw new RangeError(`no theme value ${key}`)
   }
 
   /** Close every window and end the UI thread (Node may then exit). */

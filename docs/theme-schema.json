@@ -1,0 +1,3846 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BUI theme set",
+  "description": "A BUI theme file: a name and a list of themes (see docs/theming.md).",
+  "type": "object",
+  "required": [
+    "name",
+    "themes"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "author": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "themes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Theme"
+      }
+    }
+  },
+  "$defs": {
+    "Rgba": {
+      "type": "string",
+      "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+    },
+    "Theme": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "default": "dark",
+          "description": "The built-in theme this one starts from."
+        },
+        "font.family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font.size": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "UI text size in points (11)."
+        },
+        "radius": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Roundness (0 to 1) of every widget."
+        },
+        "shadow": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Text shadows."
+        },
+        "colors": {
+          "type": "object",
+          "properties": {
+            "axis_w": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "axis_x": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "axis_y": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "axis_z": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.0.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.0.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.0.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.0.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.1.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.1.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.1.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.1.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.10.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.10.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.10.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.10.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.11.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.11.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.11.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.11.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.12.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.12.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.12.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.12.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.13.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.13.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.13.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.13.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.14.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.14.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.14.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.14.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.15.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.15.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.15.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.15.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.16.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.16.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.16.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.16.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.17.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.17.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.17.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.17.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.18.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.18.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.18.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.18.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.19.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.19.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.19.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.19.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.2.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.2.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.2.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.2.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.3.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.3.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.3.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.3.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.4.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.4.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.4.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.4.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.5.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.5.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.5.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.5.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.6.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.6.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.6.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.6.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.7.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.7.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.7.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.7.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.8.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.8.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.8.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.8.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.9.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.9.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.9.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "bone_colors.9.show_colored_constraints": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "box.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "box.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "box.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "box.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "box.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "box.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "box.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "box.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "box.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "box.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "box.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "button.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "button.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "button.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "button.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "caret": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checkbox.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checkbox.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checkbox.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checkbox.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checkbox.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checkbox.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "checkbox.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "checkbox.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "checkbox.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "checkbox.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checkbox.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "checker.primary": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "checker.secondary": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "checker.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.active_marker": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.disabled_marker": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.locked_marker": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.marker": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.marker_outline": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.metadata.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.metadata.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.path_after": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.path_before": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.path_keyframe_after": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.path_keyframe_before": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.selected_marker": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "clip_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.0.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.1.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.2.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.3.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.4.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.5.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.6.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "collection_colors.7.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.channel": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.channel_group": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.channel_group.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.channels": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.channels.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.channels_sub": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_breakdown": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_breakdown.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_extreme": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_extreme.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_generated": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_generated.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_jitter": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_jitter.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_moving_hold": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.keyframe_moving_hold.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.long.key": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.long.key.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.playhead": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.anim.preview_range": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle.selected_align": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle.selected_auto": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle.selected_auto_clamped": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle.selected_free": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle.selected_vect": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_align": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_auto": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_auto_clamped": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_free": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_vect": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_vertex": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_vertex.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "common.curves.handle_vertex_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.cursor": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.line_error": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.line_info": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.line_input": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.line_output": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "console.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.animated_interpolation_constant": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.animated_interpolation_linear": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.animated_interpolation_other": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.keyframe.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.keyframe.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.keyframe_scale_factor": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.simulated_frames": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dope_sheet.summary": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "dropdown.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "dropdown.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "dropdown.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "dropdown.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "dropdown.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "dropdown.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "dropdown.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "dropdown.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "dropdown.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "dropdown.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "dropdown.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "editor.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "editor.outline": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "editor.outline.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "file_browser.row_alternate": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "file_browser.selected_file": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "file_browser.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "file_browser.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "file_browser.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "file_browser.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "file_browser.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "file_browser.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "file_browser.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.panel_title.character_weight": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.panel_title.shadow": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.panel_title.shadow.alpha": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.panel_title.shadow_offset_x": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.panel_title.shadow_offset_y": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.panel_title.shadow_value": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.panel_title.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.tooltip.character_weight": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.tooltip.shadow": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.tooltip.shadow.alpha": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.tooltip.shadow_offset_x": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.tooltip.shadow_offset_y": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.tooltip.shadow_value": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.tooltip.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.widget.character_weight": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.widget.shadow": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.widget.shadow.alpha": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.widget.shadow_offset_x": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.widget.shadow_offset_y": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.widget.shadow_value": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "font.widget.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "gizmo.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "gizmo_a": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "gizmo_b": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "gizmo_primary": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "gizmo_secondary": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "gizmo_view_align": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.vertex": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.vertex.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.vertex.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "graph_editor.vertex_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon.alpha": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon.border_intensity": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_autokey": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_collection": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_folder": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_modifier": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_object": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_object_data": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_saturation": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_scene": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "icon_shading": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.edge.width": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.edge_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.edit_mesh.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.face": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.face_dot.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.face_mode_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.face_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.metadata.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.metadata.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.preview_stitch.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.preview_stitch_edge": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.preview_stitch_face": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.preview_stitch_stitchable": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.preview_stitch_unstitchable": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.preview_stitch_vertex": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.scope.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.uv_shadow": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.vertex": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.vertex.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.vertex_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "image_editor.wire_edit": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info.selected.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_debug": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_debug.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_error.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_info.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_operator": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_operator.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_property": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_property.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.info_warning.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "info_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "list_item.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "list_item.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "list_item.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "list_item.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "list_item.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "list_item.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "list_item.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "list_item.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "list_item.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "list_item.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "list_item.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu.shadow.size": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu.shadow.strength": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu_item.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu_item.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu_item.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu_item.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu_item.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu_item.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu_item.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu_item.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu_item.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu_item.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "menu_item.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "nla_editor.active_action": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.active_action_unset": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.keyframe.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.keyframe.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.meta_strips": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.meta_strips.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.sound_strips": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.sound_strips.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.strips": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.strips.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.transition_strips": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.transition_strips.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.tweak": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "nla_editor.tweak_duplicate": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.attribute_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.closure_zone": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.color_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.converter_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.dash.alpha": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.distort_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.filter_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.foreach_geometry_element_zone": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.frame_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.geometry_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "node_editor.grid_levels": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.group_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.group_socket_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.input_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.matte_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.node.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "node_editor.node.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "node_editor.node_backdrop": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.node_outline": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "node_editor.noodle_curving": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.output_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.repeat_zone": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.script_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.shader_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.simulation_zone": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "node_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.texture_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.vector_node": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.wire": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "node_editor.wire_inner": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "node_editor.wire_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "number_field.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "number_field.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "number_field.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "number_field.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "number_field.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "number_field.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "number_field.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "number_field.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "number_field.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "number_field.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "number_field.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "outliner.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.active_object": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.edited_object": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.match": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.row_alternate": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.selected.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.selected_object": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "outliner.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "panel.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "panel.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "panel.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "panel.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "panel.sub_background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "panel.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "panel.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "pie_menu.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "pie_menu.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "pie_menu.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "pie_menu.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "pie_menu.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "pie_menu.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "pie_menu.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "pie_menu.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "pie_menu.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "pie_menu.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "pie_menu.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "popup.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "popup.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "popup.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "popup.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "popup.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "popup.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "popup.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "popup.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "popup.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "popup.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "popup.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "preferences_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "preferences_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "preferences_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "preferences_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "preferences_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "preferences_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "preferences_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "progress_bar.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "progress_bar.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "progress_bar.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "progress_bar.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "progress_bar.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "progress_bar.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "progress_bar.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "progress_bar.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "progress_bar.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "progress_bar.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "progress_bar.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "properties_editor.active_modifier": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.match": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "properties_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "radio_button.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "radio_button.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "radio_button.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "radio_button.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "radio_button.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "radio_button.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "radio_button.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "radio_button.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "radio_button.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "radio_button.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "radio_button.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "regions.asset_shelf.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.asset_shelf.header.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.channels.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.channels.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.channels.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.scrubbing.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.scrubbing.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.scrubbing.time_marker": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.scrubbing.time_marker.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.sidebars.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "regions.sidebars.tab.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "scrollbar.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "scrollbar.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "scrollbar.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "scrollbar.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "scrollbar.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "scrollbar.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "scrollbar.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "scrollbar.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "scrollbar.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "scrollbar.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "scrollbar.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "sequencer.active_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.audio_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.color_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.effect_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.image_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.mask_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.meta_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.metadata.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.metadata.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.movie_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.movieclip_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.preview.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.row_alternate": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.scene_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.selected.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.selected_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.text_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.text_strip_cursor": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "sequencer.transition_strip": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "slider.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "slider.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "slider.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "slider.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "slider.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "slider.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "slider.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "slider.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "slider.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "slider.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "slider.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "spreadsheet.row_alternate": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "spreadsheet.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "spreadsheet.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "spreadsheet.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "spreadsheet.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "spreadsheet.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "spreadsheet.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "spreadsheet.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.animated": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.animated.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.changed": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.changed.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.driven": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.driven.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.key": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.key.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.overridden": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.background.overridden.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.blend": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.error": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.info": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.success": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status.warning": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status_bar.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status_bar.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status_bar.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status_bar.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status_bar.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status_bar.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "status_bar.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.0.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.1.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.2.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.3.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.4.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.5.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.6.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.7.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "strip_colors.8.color": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "tab.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "tab.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tab.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tab.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tab.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tab.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tab.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tab.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tab.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tab.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tab.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text_editor.cursor": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.line_numbers": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.line_numbers.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.selected.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_builtin": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_comment": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_numbers": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_preprocessor": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_reserved": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_special": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_string": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_editor.syntax_symbols": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "text_field.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text_field.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text_field.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text_field.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text_field.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text_field.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "text_field.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "text_field.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "text_field.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "text_field.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text_field.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toggle_button.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toggle_button.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toggle_button.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toggle_button.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toggle_button.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toggle_button.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "toggle_button.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "toggle_button.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "toggle_button.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "toggle_button.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toggle_button.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tool_button.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tool_button.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tool_button.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tool_button.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tool_button.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tool_button.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tool_button.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tool_button.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tool_button.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tool_button.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tool_button.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "toolbar_button.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.gradient.bottom": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.gradient.enabled": {
+              "type": "boolean",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.gradient.top": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.roundness": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "toolbar_button.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "tooltip.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tooltip.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tooltip.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tooltip.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tooltip.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tooltip.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tooltip.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tooltip.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tooltip.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tooltip.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tooltip.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "top_bar.space.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "top_bar.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "top_bar.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "top_bar.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "top_bar.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "top_bar.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "top_bar.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.after_current_frame": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.before_current_frame": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.bevel": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.bone_locked_weight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.bone_pose": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.bone_pose.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.bone_solid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.bundle_solid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.camera": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.camera_passepartout": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.camera_path": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.clipping.border_3d": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.crease": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.edge.width": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.edge_mode_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.edge_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.edit_mesh.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.empty": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.extra_edge_angle": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.extra_edge_length": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.extra_face_angle": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.extra_face_area": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.face": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.face.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.face_dot.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.face_front": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.face_mode_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.face_retopology": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.face_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.freestyle": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.grease_pencil_vertex": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.grease_pencil_vertex.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.grease_pencil_vertex_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.grease_pencil_wire_edit": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.grid": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.grid_major": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.light": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.nurb.selected_uline": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.nurb.selected_vline": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.nurb_uline": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.nurb_vline": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.object.active": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.object.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.object_origin.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.outline.width": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.seam": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.sharp": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.skin_root": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.gradients.background_type": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.gradients.gradient": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.gradients.high_gradient": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.header": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.header.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.header.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.space.title": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.speaker": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.split_normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.text_grease_pencil": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.transform": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.vertex": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.vertex.size": {
+              "type": "number",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.vertex_normal": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.vertex_select": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.vertex_unreferenced": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.view_overlay": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.wire": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "viewport_3d.wire_edit": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Blender's key; BUI has no use for it yet and ignores it."
+            },
+            "widget.emboss": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "button.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "button.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "button.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "button.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "button.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "button.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tool_button.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tool_button.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tool_button.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tool_button.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tool_button.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tool_button.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "toggle_button.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "toggle_button.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "toggle_button.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "toggle_button.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "toggle_button.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "toggle_button.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "radio_button.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "radio_button.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "radio_button.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "radio_button.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "radio_button.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "radio_button.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "checkbox.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "checkbox.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "checkbox.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "checkbox.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "checkbox.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "checkbox.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "text_field.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "text_field.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "text_field.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "text_field.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "text_field.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "text_field.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "number_field.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "number_field.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "number_field.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "number_field.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "number_field.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "number_field.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "slider.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "slider.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "slider.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "slider.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "slider.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "slider.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "dropdown.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "dropdown.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "dropdown.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "dropdown.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "dropdown.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "dropdown.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "popup.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "popup.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "popup.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "popup.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "popup.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "popup.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu_item.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "menu_item.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu_item.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu_item.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu_item.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "menu_item.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "list_item.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "list_item.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "list_item.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "list_item.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "list_item.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "list_item.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "box.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "box.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "box.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "box.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "box.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "box.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "scrollbar.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "scrollbar.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "scrollbar.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "scrollbar.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "scrollbar.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "scrollbar.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "progress_bar.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "progress_bar.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "progress_bar.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "progress_bar.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "progress_bar.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "progress_bar.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tooltip.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tooltip.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tooltip.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tooltip.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tooltip.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tooltip.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tab.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "tab.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tab.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tab.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tab.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "tab.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "pie_menu.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "pie_menu.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "pie_menu.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "pie_menu.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "pie_menu.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "pie_menu.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "curve.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "curve.border.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "curve.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "curve.background.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "curve.fill": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "curve.text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "curve.text.selected": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "curve.gradient.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "curve.gradient.top": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "curve.gradient.bottom": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "curve.roundness": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "curve.border.width": {
+              "type": "number",
+              "description": "Used by BUI."
+            },
+            "curve.emboss.enabled": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "curve.corners.top_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "curve.corners.top_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "curve.corners.bottom_right": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "curve.corners.bottom_left": {
+              "type": "boolean",
+              "description": "Used by BUI."
+            },
+            "region.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "header.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "tab_bar.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "text.highlight": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "selection.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "node_editor.node.body": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "area_header.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "Used by BUI."
+            },
+            "background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "foreground": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "primary.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "primary.foreground": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "secondary.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "secondary.foreground": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "accent.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "accent.foreground": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "popover.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "popover.foreground": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "input.border": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "muted.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "tab.foreground": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "tab.active.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "tab.active.foreground": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            },
+            "scrollbar.thumb.background": {
+              "$ref": "#/$defs/Rgba",
+              "description": "A short palette name: fills in several keys (docs/theming.md)."
+            }
+          },
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

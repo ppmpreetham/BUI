@@ -465,6 +465,9 @@ struct Builder<'a> {
     /// `tpos` for the element about to be built.
     next_tpos: (u32, u32),
     author: &'a Stylesheet,
+    /// Blender's `styled` UA sheet as it was when this pass began (the pass holds it, see
+    /// [`ua_styled_stylesheet`]).
+    ua_styled: &'a Stylesheet,
     author_hash: u64,
     containers: &'a Containers,
     /// Media query results of the UA and author sheets this frame.
@@ -907,7 +910,7 @@ impl<'a> Builder<'a> {
 
     /// The UA and author rules matching element `i`: from the memo when an
     /// element with the same fingerprint was matched before.
-    fn matched_rules(&mut self, i: usize) -> (crate::css::Matches<'static>, crate::css::Matches<'a>) {
+    fn matched_rules(&mut self, i: usize) -> (crate::css::Matches<'a>, crate::css::Matches<'a>) {
         let (ua_sheet, ua_media) = self.ua_for(i);
         let author: &'a Stylesheet = self.author;
         let memo = {
@@ -933,9 +936,9 @@ impl<'a> Builder<'a> {
 
     /// The UA sheet for box `i` (plain, or Blender's inside `styled`) and
     /// its media query results.
-    fn ua_for(&self, i: usize) -> (&'static Stylesheet, &Vec<bool>) {
+    fn ua_for(&self, i: usize) -> (&'a Stylesheet, &Vec<bool>) {
         if self.nodes[i].styled {
-            (ua_styled_stylesheet(), &self.ua_styled_media)
+            (self.ua_styled, &self.ua_styled_media)
         } else {
             (ua_stylesheet(), &self.ua_media)
         }
@@ -2229,6 +2232,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         caches.matched.map.clear();
         caches.matched.author = caches.author.hash;
     }
+    let ua_styled = ua_styled_stylesheet();
     let LayoutCaches { styles, text, images, author, taffy, box_of, acc, matched, recon, text_box, containers,
                        wrap_widths, anim, .. } = caches;
     let mut b = Builder {
@@ -2246,9 +2250,10 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         changed: false,
         next_tpos: (1, 1),
         author: &author.sheet,
+        ua_styled: &ua_styled,
         author_hash: author.hash,
         ua_media: ua_stylesheet().media_results(&crate::css::MediaEnv::viewport(viewport)),
-        ua_styled_media: ua_styled_stylesheet().media_results(&crate::css::MediaEnv::viewport(viewport)),
+        ua_styled_media: ua_styled.media_results(&crate::css::MediaEnv::viewport(viewport)),
         au_media: author.sheet.media_results(&crate::css::MediaEnv::viewport(viewport)),
         state,
         viewport,

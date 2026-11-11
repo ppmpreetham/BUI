@@ -48,6 +48,11 @@ typedef struct BKWCol {
   uchar shaded;
   short shadetop, shadedown;
   float roundness;
+  /* What BUI adds to Blender's widget colors (kit_theme.c, "border.width" and friends in a theme
+   * file). All zero is Blender's own drawing, so the presets need not mention them. */
+  float border_extra;   /* the outline is 1 + border_extra pixels wide; -1 or less: no outline */
+  uchar square_corners; /* CNR_* corners drawn square whatever the layout asks */
+  uchar no_emboss;      /* nonzero: no emboss line under the widget */
 } BKWCol;
 
 typedef struct BKTheme {
@@ -73,6 +78,13 @@ typedef struct BKTheme {
 extern BKTheme bk_theme;
 extern const BKTheme bk_theme_dark, bk_theme_light;
 extern int bk_theme_gen;
+/* The theme machinery (kit_core.c: the presets; kit_theme.c: custom themes and keys). */
+int bk_theme_from_name(const char *name); /* 0 dark, 1 light, -1 unknown */
+void bk_theme_load_preset(int light);     /* into bk_theme, nothing redrawn yet */
+bool bk_theme_is_light(void);
+void bk_theme_mark_set(void);             /* a theme was chosen: BUI_THEME no longer applies */
+void bk_theme_changed(void);              /* bk_theme changed: every context redraws */
+int bk_theme_key_color(const char *key, float r_rgba[4]);
 
 /* Metrics (U.widget_unit, U.pixelsize, UI text size). */
 extern float bk_scale_fac;
@@ -690,6 +702,8 @@ extern const BKClass bk_cls_column, bk_cls_row, bk_cls_split, bk_cls_grid, bk_cl
  * (Windows, light). The core calls these for NF_HTML nodes before the class's
  * own measure/draw; they return false for classes without a browser look. */
 #define BK_HTML_FONT (40.0f / 33.0f) /* 13.333px text over the 11px UI text */
+/* the same, whatever size the theme gives the UI text (BK_set_font_size) */
+#define BK_HTML_SCALE() (BK_HTML_FONT * (11.0f / BK_font_size_points()))
 extern float bk_html_text_scale;
 extern int bk_text_shadow; /* 0 none, 1 drop shadow (Blender UI text), 3 blurred; browser-look controls draw none */
 bool bk_html_measure(BKNode *n, int *r_w, int *r_h);
