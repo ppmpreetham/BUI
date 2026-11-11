@@ -241,13 +241,28 @@ static int vector_key(BKNode *n, BKEvent *e)
   }
   BKContext *ctx = bk_ctx(n);
   if (bk_keysym_is(e->keysym, "c")) {
-    char buf[512] = "[", num[64];
+    char num[64];
+    /* "[", every component (at most sizeof(num) - 1 characters) and ", " after it, "]", NUL */
+    char *buf = (char *)malloc((size_t)BK_MAX(n->nkids, 1) * (sizeof(num) + 1) + 3);
+    if (!buf) {
+      return 1;
+    }
+    size_t len = 0;
+    buf[len++] = '[';
     for (int i = 0; i < n->nkids; i++) {
       format_number(n->kids[i], n->kids[i]->value, num, sizeof(num));
-      strcat(buf, num);
-      strcat(buf, i + 1 < n->nkids ? ", " : "]");
+      const size_t k = strlen(num);
+      memcpy(buf + len, num, k);
+      len += k;
+      if (i + 1 < n->nkids) {
+        buf[len++] = ',';
+        buf[len++] = ' ';
+      }
     }
+    buf[len++] = ']';
+    buf[len] = '\0';
     bk_clipboard_set(ctx, buf);
+    free(buf);
     return 1;
   }
   if (bk_keysym_is(e->keysym, "v")) {
