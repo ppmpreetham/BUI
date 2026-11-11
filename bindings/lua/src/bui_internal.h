@@ -34,6 +34,8 @@ typedef struct {
   int on_frame_ref;  /* LUA_NOREF if not set */
   int self_ref;      /* this userdata, while a callback needs to be given it: LUA_NOREF otherwise */
   int ctx_ref;       /* the Context the window shows: it must outlive the window */
+  int depth;         /* callbacks of this window running right now: the backend is using the window */
+  BKWindow *zombie;  /* a window freed from inside a callback: closed, its memory freed once they are done */
 } luabui_Window;
 
 typedef struct {

@@ -342,6 +342,8 @@ static int l_new_window(lua_State *L) {
   wud->on_timer_ref = LUA_NOREF;
   wud->on_frame_ref = LUA_NOREF;
   wud->self_ref = LUA_NOREF;
+  wud->depth = 0;
+  wud->zombie = NULL;
   lua_pushvalue(L, 1); /* the window draws this context: keep it alive as long as the window is */
   wud->ctx_ref = luaL_ref(L, LUA_REGISTRYINDEX);
   luaL_getmetatable(L, LUABUI_WINDOW_MT);

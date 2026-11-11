@@ -164,7 +164,10 @@ static int call_window_fn(luabui_Window *wud, int ref, int fallback) {
     return fallback;
   }
   lua_rawgeti(L, LUA_REGISTRYINDEX, wud->self_ref);
-  if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+  wud->depth++; /* the window must stay allocated until the backend is done with it (win_release) */
+  const int status = lua_pcall(L, 1, 1, 0);
+  wud->depth--;
+  if (status != LUA_OK) {
     const char *msg = lua_tostring(L, -1);
     fprintf(stderr, "bui: window callback: %s\n", msg ? msg : "error");
     lua_pop(L, 1);
@@ -230,17 +233,41 @@ static int l_win_set_on_frame(lua_State *L) {
   return 0;
 }
 
-/* The native window goes first, then what it used: the callbacks' functions, this userdata's own
- * reference, and the context. */
-static void win_release(lua_State *L, luabui_Window *wud) {
-  if (!wud->win) return;
-  BK_window_free(wud->win);
-  wud->win = NULL;
+/* Let go of what the window used: the callbacks' functions, this userdata's own reference and, when
+ * `with_ctx`, the context (which has to outlive the native window). */
+static void drop_refs(lua_State *L, luabui_Window *wud, int with_ctx) {
   int *refs[] = {&wud->on_close_ref, &wud->on_timer_ref, &wud->on_frame_ref, &wud->self_ref, &wud->ctx_ref};
-  for (size_t i = 0; i < sizeof(refs) / sizeof(refs[0]); i++) {
+  const size_t n = sizeof(refs) / sizeof(refs[0]) - (with_ctx ? 0 : 1);
+  for (size_t i = 0; i < n; i++) {
     if (*refs[i] != LUA_NOREF) luaL_unref(L, LUA_REGISTRYINDEX, *refs[i]);
     *refs[i] = LUA_NOREF;
   }
+}
+
+/* Free the native window, then what it used. From inside one of its own callbacks the backend is
+ * still using the window when this returns (it reads it again after the callback), so there it is
+ * only closed, which the kit allows in a frame callback, and the memory is freed by the next
+ * `free()` or the collector, once no callback is running. */
+static void win_release(lua_State *L, luabui_Window *wud) {
+  if (wud->win) {
+    if (wud->depth > 0) {
+      BKWindowCallbacks none;
+      memset(&none, 0, sizeof(none)); /* nothing may call back into this userdata any more */
+      BK_window_set_callbacks(wud->win, &none);
+      BK_window_close(wud->win);
+      wud->zombie = wud->win;
+      wud->win = NULL;
+      drop_refs(L, wud, 0);
+      return;
+    }
+    BK_window_free(wud->win);
+    wud->win = NULL;
+  }
+  if (wud->zombie && wud->depth == 0) {
+    BK_window_free(wud->zombie);
+    wud->zombie = NULL;
+  }
+  if (!wud->zombie) drop_refs(L, wud, 1);
 }
 
 static int l_win_free(lua_State *L) {
