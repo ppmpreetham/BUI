@@ -32,6 +32,8 @@ local major, minor, patch = bui.version()
 check(type(major) == "number", "bui.version() major not a number")
 check(type(minor) == "number", "bui.version() minor not a number")
 check(type(patch) == "number", "bui.version() patch not a number")
+check(("%d.%d.%d"):format(major, minor, patch) == bui.KIT_VERSION, "bui.version() should be the kit's version, got " .. major .. "." .. minor .. "." .. patch .. " vs " .. tostring(bui.KIT_VERSION))
+check(bui._VERSION == bui.KIT_VERSION, "bui._VERSION should be the kit's version")
 
 -- Event constants
 check(bui.EV_CHANGE ~= nil, "bui.EV_CHANGE missing")

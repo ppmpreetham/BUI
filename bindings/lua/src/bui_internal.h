@@ -31,6 +31,11 @@ typedef struct {
   lua_State *L;
   int on_close_ref;  /* LUA_NOREF if not set */
   int on_timer_ref;  /* LUA_NOREF if not set */
+  int on_frame_ref;  /* LUA_NOREF if not set */
+  int self_ref;      /* this userdata, while a callback needs to be given it: LUA_NOREF otherwise */
+  int ctx_ref;       /* the Context the window shows: it must outlive the window */
+  int depth;         /* callbacks of this window running right now: the backend is using the window */
+  BKWindow *zombie;  /* a window freed from inside a callback: closed, its memory freed once they are done */
 } luabui_Window;
 
 typedef struct {
@@ -132,7 +137,18 @@ int luabui_build_menuspec(lua_State *L, int idx, BKMenuSpec **out);
 
 
 /* Lua module entry point (defined in bui_lua.c) */
-LUAMOD_API int luaopen_bui(lua_State *L);
+/* The module's entry points are exported by name: Lua's own LUAMOD_API is a dllimport in a module that
+ * does not define LUA_LIB, and a function cannot be defined as one. */
+#if defined(_WIN32)
+#  define BUI_LUA_ENTRY __declspec(dllexport)
+#elif defined(__GNUC__)
+#  define BUI_LUA_ENTRY __attribute__((visibility("default")))
+#else
+#  define BUI_LUA_ENTRY
+#endif
+
+BUI_LUA_ENTRY int luaopen_bui(lua_State *L);
+BUI_LUA_ENTRY int luaopen__bui(lua_State *L); /* the loadable module's name: _bui */
 
 /* Factory functions (defined in bui_image.c) */
 int l_image_decode(lua_State *L);

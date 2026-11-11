@@ -641,6 +641,9 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         win->want_frame = 0;
         QueryPerformanceCounter(&win->frame_start);
         win->cb.on_frame(win->cb.data, win);
+        if (!win->hwnd) { /* the frame callback can close the window (as on X11, Wayland and Cocoa) */
+          return 0;
+        }
       }
       win->render_pending = 0;
       do_render(win);

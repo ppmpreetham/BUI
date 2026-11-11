@@ -393,6 +393,12 @@ static int l_new_window(lua_State *L) {
   wud->L = L;
   wud->on_close_ref = LUA_NOREF;
   wud->on_timer_ref = LUA_NOREF;
+  wud->on_frame_ref = LUA_NOREF;
+  wud->self_ref = LUA_NOREF;
+  wud->depth = 0;
+  wud->zombie = NULL;
+  lua_pushvalue(L, 1); /* the window draws this context: keep it alive as long as the window is */
+  wud->ctx_ref = luaL_ref(L, LUA_REGISTRYINDEX);
   luaL_getmetatable(L, LUABUI_WINDOW_MT);
   lua_setmetatable(L, -2);
   return 1;
@@ -478,7 +484,7 @@ static const struct luaL_Reg bui_module[] = {
   {NULL, NULL}
 };
 
-LUAMOD_API int luaopen_bui(lua_State *L) {
+BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   /* Version check: refuse to load if the kit version doesn't match the header */
   int kit_ver = BK_version();
   int hdr_ver = BUI_KIT_VERSION;
@@ -596,4 +602,10 @@ LUAMOD_API int luaopen_bui(lua_State *L) {
   lua_pushinteger(L, BK_WS_EDITING); lua_setfield(L, -2, "WS_EDITING");   lua_pushinteger(L, BK_WS_OPEN); lua_setfield(L, -2, "WS_OPEN");
 
   return 1;
+}
+
+/* The loadable module is the CMake target `_bui` (the name avoids a clash with bui.lua), and Lua looks
+ * for luaopen_<file name> in it: luaopen__bui. */
+BUI_LUA_ENTRY int luaopen__bui(lua_State *L) {
+  return luaopen_bui(L);
 }

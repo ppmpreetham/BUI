@@ -61,6 +61,12 @@ else()
 
   add_library(bui_lua STATIC ${LUA_SRC})
   target_include_directories(bui_lua PUBLIC ${LUA_SRC_DIR})
+  if(NOT WIN32)
+    # lua.org's makefile defines these (LUA_USE_LINUX / LUA_USE_MACOSX): without LUA_USE_DLOPEN
+    # package.loadlib, and so `require` of any C module, is disabled
+    target_compile_definitions(bui_lua PRIVATE LUA_USE_POSIX LUA_USE_DLOPEN)
+    target_link_libraries(bui_lua PUBLIC ${CMAKE_DL_LIBS})
+  endif()
   if(MSVC)
     target_compile_options(bui_lua PRIVATE /W0)
   else()
@@ -105,9 +111,12 @@ add_library(_bui MODULE ${LUABUI_SRC})
 target_link_libraries(_bui PRIVATE ${LUABUI_LIBS})
 target_include_directories(_bui PRIVATE src)
 set_target_properties(_bui PROPERTIES MODULE_NAME "_bui")
-if(MSVC)
+if(WIN32) # MSVC and MinGW alike: _bui.dll, not lib_bui.dll
   set_target_properties(_bui PROPERTIES PREFIX "" SUFFIX ".dll")
-  target_compile_definitions(_bui PRIVATE LUA_BUILD_AS_DLL)
+  if(LUA_TARGET STREQUAL "bui_lua_sys")
+    # a system Lua on Windows is a DLL, and its API is imported from it; the Lua built here is static
+    target_compile_definitions(_bui PRIVATE LUA_BUILD_AS_DLL)
+  endif()
 elseif(APPLE)
   set_target_properties(_bui PROPERTIES PREFIX "" SUFFIX ".so")
   target_link_options(_bui PRIVATE -Wl,-undefined,dynamic_lookup)
@@ -145,6 +154,17 @@ if(BUI_BUILD_TESTS)
     COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_theme.lua
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(bui_lua_theme PROPERTIES TIMEOUT 30)
+
+  # the loadable module: Lua looks for luaopen__bui in _bui.dll / _bui.so
+  add_test(NAME bui_lua_module
+    COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_module.lua $<TARGET_FILE:_bui>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(bui_lua_module PROPERTIES TIMEOUT 30)
+
+  add_test(NAME bui_lua_window
+    COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_window.lua
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(bui_lua_window PROPERTIES TIMEOUT 30)
 
   add_test(NAME bui_lua_filebrowser
     COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_filebrowser.lua

@@ -1419,12 +1419,18 @@ BKContext *BK_context_new(BKNode *root)
   return ctx;
 }
 
+static void undo_entry_free(BKUndo *u);
+
 void BK_context_free(BKContext *ctx)
 {
   if (!ctx) {
     return;
   }
   BK_close_popups(ctx);
+  for (int i = 0; i < ctx->nundo; i++) {
+    undo_entry_free(&ctx->undo[i]); /* the text steps own their strings */
+  }
+  ctx->nundo = ctx->undo_pos = 0;
   bk_image_forget_context(ctx);
   for (int i = 0; i < ctx->nkeys; i++) {
     bk_release(ctx->keys[i].ref);

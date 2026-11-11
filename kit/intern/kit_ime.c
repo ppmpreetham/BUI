@@ -136,7 +136,7 @@ int BK_ime_event(BKContext *ctx, int type, const BKImeEvent *e)
          * and reports a live change like every other character */
         const bool was = c->composing;
         c->composing = false;
-        BK_key(ctx, e->result, e->result, 0);
+        BK_key(ctx, e->result, "", 0); /* text, not a key name: "left" or "return" are letters here */
         c->composing = was;
       }
       break;
@@ -160,7 +160,7 @@ void bk_ime_commit(BKContext *ctx)
     memcpy(s, c->text, (size_t)c->len + 1);
     c->composing = false;
     bk_ime_comp_set(c, &(BKImeEvent){"", "", -1, -1, -1});
-    BK_key(ctx, s, s, 0);
+    BK_key(ctx, s, "", 0);
     free(s);
   }
 }

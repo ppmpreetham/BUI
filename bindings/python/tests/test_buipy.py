@@ -23,6 +23,8 @@ from bui.svg import SvgSink  # noqa: E402
 
 def main() -> int:
     assert buipy.version().startswith("0."), buipy.version()
+    from bui._version import __version__ as package_version
+    assert buipy.version() == package_version, (buipy.version(), package_version)  # the engine and the package agree
 
     sink = SvgSink(640, 480)
     buipy.set_backend(sink)

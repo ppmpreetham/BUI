@@ -105,6 +105,14 @@ All notable changes to **blenderui** (BUI). The format follows
 - **Dear ImGui from Python:** an exception after `Begin()` in a frame callback aborted the process in builds with
   asserts ("Missing End()"). The frame is unwound now and the exception reaches Python.
 - Pies with more than 8 items dropped the rest; they now get Blender's "More" item.
+- **IME:** committed text was handed to the key handler as a key name, so composing "left" or "return" moved the cursor or pressed Enter instead of typing the word. It is inserted as text now.
+- **C API:** `bui_version_string()` and `BUI_VERSION_*` were stuck at 0.1.0; they follow the kit version now (a test keeps them equal, and so do the Python and Lua tests).
+- `BK_context_free` leaked every undo entry (about 60 KB per context with text history).
+- **Vector fields:** Ctrl+Alt+C on a vector with many wide components overflowed a 512-byte stack buffer.
+- **Lua:** a window's `on_close` callback was given a copy of the window userdata; when the copy was collected it freed the live window. It gets the window itself now, errors in it are reported instead of unwinding through the loop, and a window keeps its Context alive. New `window:on_frame(fn)`; freeing a window from inside its own callback closes it and frees it once the callback is done. A window with callbacks is collected once it is closed (it used to stay alive for as long as the Lua state did).
+- **Windows:** a frame callback that closed its window crashed the host: the Win32 backend rendered the closed window (X11, Wayland and Cocoa already returned).
+- **Lua:** the loadable module (`_bui.dll`/`.so`) could not be loaded: it exported `luaopen_bui` but Lua looks for `luaopen__bui`; also fixed the MinGW file name, and Lua built from source (Linux, macOS) now has `package.loadlib`, so `require` can load C modules.
+- **CI:** the crates.io dry run always failed (`[ ... ] && sleep` under `bash -e`); the PyPI wheels workflow now checks the tag against the versions in the repo before building or publishing.
 
 ## [0.5.0] - 2026-11-08
 

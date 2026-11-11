@@ -109,8 +109,11 @@ jobs:
               echo "::warning::$crate: attempt $attempt failed; retrying"
               sleep $((attempt * 30))
             done
-            # the next crate needs this one in the index
-            [ "$PUBLISH" = true ] && sleep 20
+            # the next crate needs this one in the index (an `if`, not `[ ... ] && sleep`: on a dry run
+            # that list ends the loop with status 1 and the whole step, with every publish passed, fails)
+            if [ "$PUBLISH" = true ]; then
+              sleep 20
+            fi
           done
 
   npm-native:
