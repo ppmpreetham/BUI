@@ -69,5 +69,22 @@ do
   w3:free()
 end
 
+-- a window with a callback that is closed and dropped is collected: the callback's own reference to
+-- the window must not keep it (and its context) alive once it can no longer be called
+do
+  local weak = setmetatable({}, {__mode = "v"})
+  do
+    local ctx3 = bui.Context(bui.Node("frame"))
+    local w4 = bui.Window(ctx3, "bui-lua-window-test-4", 100, 60)
+    w4:on_frame(function(w) end)
+    w4:on_close(function(w) return true end)
+    weak[1] = w4
+    check(weak[1] ~= nil, "the window exists")
+    w4:close()
+  end
+  for _ = 1, 3 do collectgarbage("collect") end
+  check(weak[1] == nil, "a closed window with callbacks is collected")
+end
+
 io.write("OK: test_window.lua\n")
 os.exit(0)
