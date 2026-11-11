@@ -1925,6 +1925,8 @@ C/C++ toolchain (Visual Studio Build Tools on Windows).
 
 With GNU Make installed, run `make` to configure and build, or `make test`
 to build and run the CTest suites. `make help` lists the available targets.
+These commands reuse the cached build type (Release for a new directory);
+set `BUILD_TYPE=Debug` or `BUILD_TYPE=Release` to override it.
 See [Getting started](docs/getting-started.md#build-with-make) for build overrides.
 
 You need **CMake 3.20+**, a **C11 / C++20 compiler** (MSVC, GCC/MinGW or

@@ -4,7 +4,7 @@ description: Every option you can pass when building BUI from source with CMake,
 section: Reference
 order: 20
 languages: ["c", "cpp", "imgui"]
-sources: ["CMakeLists.txt", "features.json", "features.cmake", "kit/CMakeLists.txt", "gpu/CMakeLists.txt", "ui/CMakeLists.txt", "bindings/imgui/CMakeLists.txt", "bindings/python/CMakeLists.txt", "backends/qt/CMakeLists.txt", "examples/CMakeLists.txt", "docs/getting-started.md", "pyproject.toml", "bindings/rust/blenderui-sys/build.rs"]
+sources: ["Makefile", "CMakeLists.txt", "features.json", "features.cmake", "kit/CMakeLists.txt", "gpu/CMakeLists.txt", "ui/CMakeLists.txt", "bindings/imgui/CMakeLists.txt", "bindings/python/CMakeLists.txt", "backends/qt/CMakeLists.txt", "examples/CMakeLists.txt", "docs/getting-started.md", "pyproject.toml", "bindings/rust/blenderui-sys/build.rs"]
 ---
 
 When you build BUI from source, a handful of CMake options decide what gets built and how text is drawn. The defaults suit almost everyone, so you only need this page when you want something specific: C only, Windows' own fonts, or Dear ImGui with Blender's widgets.
@@ -60,6 +60,11 @@ Every sizeable optional part of the C kit is one row of `features.json`, the sin
 See [Text and fonts](../../concepts/text-and-fonts/) for what these change on screen.
 
 ## Compiler
+
+The repository's Makefile preserves the build directory's cached build type.
+After `make configure BUILD_TYPE=Debug`, both `make build` and `make test`
+use Debug. Set `BUILD_TYPE=Release` to switch it explicitly; a new directory
+defaults to Release.
 
 | Option | Default | What it does |
 | --- | --- | --- |

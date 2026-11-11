@@ -43,6 +43,11 @@ make CMAKE_ARGS="-DBUI_BUILD_EXAMPLES=ON"
 make test CTEST_ARGS="-R bui_version_test"
 ```
 
+`BUILD_TYPE` defaults to the type in the build directory's CMake cache, or
+`Release` for a new directory. For example, `make configure BUILD_TYPE=Debug`
+followed by `make build` or `make test` keeps Debug. Pass `BUILD_TYPE=Release`
+to explicitly switch that directory to Release.
+
 `CMAKE` and `CTEST` can also point to alternative executable paths. On Windows,
 CMake uses its default generator (typically Visual Studio); for MSYS2 / MinGW-w64,
 use `make CMAKE_ARGS='-G "MinGW Makefiles"'` from an MSYS2 shell. Use a separate

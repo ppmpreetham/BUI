@@ -5,7 +5,8 @@
 CMAKE ?= cmake
 CTEST ?= ctest
 BUILD_DIR ?= build
-BUILD_TYPE ?= Release
+# Reuse the configured type; command-line/environment overrides still win.
+BUILD_TYPE ?= $(or $(word 2,$(subst =, ,$(filter CMAKE_BUILD_TYPE:%,$(file <$(BUILD_DIR)/CMakeCache.txt)))),Release)
 JOBS ?= 2
 CMAKE_ARGS ?=
 CTEST_ARGS ?=
@@ -21,14 +22,14 @@ build: configure
 	"$(CMAKE)" --build "$(BUILD_DIR)" --config "$(BUILD_TYPE)" --parallel $(JOBS)
 
 test: build
-	"$(CTEST)" --test-dir "$(BUILD_DIR)" -C "$(BUILD_TYPE)" --output-on-failure $(CTEST_ARGS)
+	"$(CTEST)" --test-dir "$(BUILD_DIR)" -C "$(BUILD_TYPE)" --output-on-failure $(CTEST_ARGS) --no-tests=error
 
 # Use CMake's clean target; retain the configuration and downloaded dependencies.
 clean:
 	"$(CMAKE)" --build "$(BUILD_DIR)" --config "$(BUILD_TYPE)" --target clean
 
 help:
-	@echo "make           Configure and build BUI (Release by default)"
+	@echo "make           Configure and build BUI (cached type, otherwise Release)"
 	@echo "make configure Configure without building"
 	@echo "make test      Build and run the CTest suites"
 	@echo "make clean     Clean a configured build, keeping its CMake cache"
