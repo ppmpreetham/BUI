@@ -9,7 +9,7 @@ use taffy::prelude::*;
 use crate::color::Rgba;
 use crate::geometry::{rect, Bounds, Length, Units};
 use crate::layout::{BoxNode, Content, Frame, Replaced, StyleStore};
-use crate::style::{BorderStyle, BoxEdge, Computed, DecoStyle, DisplayKind, TextAlign, WhiteSpace};
+use crate::style::{key_hasher, BorderStyle, BoxEdge, Computed, DecoStyle, DisplayKind, TextAlign, WhiteSpace};
 use crate::text::{self, TextCache};
 use blenderui_sys as sys;
 
@@ -805,7 +805,7 @@ fn paint_layer(cx: &mut LayerCx, root: usize, list: &[usize], p: &mut Painter, b
         fx::mul(&fx::mul(&[1.0, 0.0, 0.0, 1.0, ox, oy], &lin), &[1.0, 0.0, 0.0, 1.0, -ox, -oy])
     };
     let key = {
-        let mut hh = Fnv64::default();
+        let mut hh = key_hasher();
         sub.content_hash(&mut hh);
         format!("{e:?}").hash(&mut hh);
         (x0.to_bits(), y0.to_bits(), w, h, cx.scale.to_bits(), rel_opacity.to_bits(),
@@ -963,23 +963,6 @@ fn paint_source(p: &mut Painter, src: &crate::effects::ImageSource, area: Bounds
             }
             paint_background_image(p, &st, area, area);
         }
-    }
-}
-
-/// FNV-1a for layer keys.
-#[derive(Default)]
-struct Fnv64(u64);
-
-impl std::hash::Hasher for Fnv64 {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        let mut h = if self.0 == 0 { 0xcbf29ce484222325 } else { self.0 };
-        for b in bytes {
-            h = (h ^ *b as u64).wrapping_mul(0x100000001b3);
-        }
-        self.0 = h;
     }
 }
 

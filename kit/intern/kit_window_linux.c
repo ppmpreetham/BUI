@@ -57,13 +57,18 @@ static int backend(void)
 BK_WINDOW_FUNCS(BK_WINDOW_DISPATCH)
 #  undef BK_WINDOW_DISPATCH
 
-/* Whether windows can be opened at all: either host will do. */
+/* Whether windows can be opened at all: either host will do. Wayland connects here and the
+ * globals arrive while the program sets up. Only without X11 does this wait for them. */
 int BK_window_supported(void)
 {
-  return g_backend == BACKEND_WAYLAND ? 1 :
-         g_backend == BACKEND_X11     ? bk_x11_window_supported() :
-                                        (bk_x11_window_supported() ||
-                                         (wants_wayland() && bk_wl_window_supported()));
+  if (g_backend != BACKEND_UNDECIDED) {
+    return g_backend == BACKEND_WAYLAND || bk_x11_window_supported();
+  }
+  const bool wayland = wants_wayland();
+  if (wayland) {
+    bk_wl_window_connect();
+  }
+  return bk_x11_window_supported() || (wayland && bk_wl_window_supported());
 }
 
 /* Process-wide state goes to both hosts (see kit_window_linux.h). */

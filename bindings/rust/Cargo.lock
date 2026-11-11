@@ -44,6 +44,7 @@ dependencies = [
  "blenderui-table",
  "blenderui-tailwind",
  "blenderui-vlist",
+ "foldhash",
  "paste",
  "png",
  "smallvec",

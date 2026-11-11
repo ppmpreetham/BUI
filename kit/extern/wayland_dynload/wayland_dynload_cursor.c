@@ -32,9 +32,7 @@ bool wayland_dynload_cursor_init(const bool verbose)
   if (!(lib = dynamic_library_open_array_with_error(paths, paths_num, verbose, &path_index))) {
     return false;
   }
-  if (atexit(wayland_dynload_cursor_exit)) {
-    return false;
-  }
+  /* BUI: no `atexit` close, see wayland_dynload_client.c. */
 
 #define WAYLAND_DYNLOAD_FN(symbol) \
   if (!(wayland_dynload_cursor.symbol = dynamic_library_find_with_error( \

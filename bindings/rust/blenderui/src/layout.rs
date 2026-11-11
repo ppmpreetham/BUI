@@ -20,13 +20,13 @@ use taffy::prelude::*;
 use taffy::style::Overflow;
 
 use crate::css::{Decl, Prop, Rule, Stylesheet, Subject};
-use crate::element::{AnyElement, Div, Listeners, PaintFn, ParentElement, SharedString};
+use crate::element::{AnyElement, Div, Listeners, PaintFn, ParentElement, ReplacedSource, SharedString};
 use crate::geometry::{rect, Bounds, Units};
 use crate::html::{tag_kind, ua_styled_stylesheet, ua_stylesheet, TagKind};
 use crate::paint::{Image, ImageCache, ImageFile};
 use crate::prof::{span, Phase};
 use crate::style::ContentPart;
-use crate::style::{apply, Computed, DisplayKind, Fnv, FnvMap, TextAlign, TextTransform, VAlign, WhiteSpace};
+use crate::style::{apply, key_hasher, Computed, DisplayKind, KeyMap, TextAlign, TextTransform, VAlign, WhiteSpace};
 use crate::text::{self, TextCache};
 use crate::widgets::WidgetSpec;
 
@@ -37,8 +37,8 @@ use crate::widgets::WidgetSpec;
 /// parent's key, tag and position.
 pub(crate) type Key = u64;
 
-fn fnv(parts: &[&[u8]]) -> u64 {
-    let mut h = Fnv::default();
+fn hash_parts(parts: &[&[u8]]) -> u64 {
+    let mut h = key_hasher();
     for p in parts {
         h.write(p);
         h.write(&[0xff]);
@@ -48,11 +48,11 @@ fn fnv(parts: &[&[u8]]) -> u64 {
 
 /// The key of the element with `.id(id)`.
 pub(crate) fn id_key(id: &str) -> Key {
-    fnv(&[b"#", id.as_bytes()])
+    hash_parts(&[b"#", id.as_bytes()])
 }
 
 fn child_key(parent: Key, tag: &str, n: usize) -> Key {
-    fnv(&[&parent.to_le_bytes(), tag.as_bytes(), &(n as u64).to_le_bytes()])
+    hash_parts(&[&parent.to_le_bytes(), tag.as_bytes(), &(n as u64).to_le_bytes()])
 }
 
 /// The key of the `<html>` element.
@@ -98,7 +98,7 @@ struct StyleKey {
 /// by [`StyleId`].
 pub(crate) struct StyleStore {
     styles: Vec<Computed>,
-    cache: FnvMap<u64, Vec<(StyleKey, StyleId)>>,
+    cache: KeyMap<u64, Vec<(StyleKey, StyleId)>>,
     /// Custom property maps the styles point into (`Computed::vars`).
     vars: crate::vars::Vars,
     /// The author sheet whose `@property` initial values seed the root
@@ -164,8 +164,8 @@ impl StyleStore {
 #[derive(Default)]
 pub(crate) struct TwJit {
     on: bool,
-    seen: FnvMap<u64, ()>,
-    known: FnvMap<String, ()>,
+    seen: KeyMap<u64, ()>,
+    known: KeyMap<String, ()>,
     rules: Vec<((u32, u32), usize, String)>,
     css: String,
     dirty: bool,
@@ -176,7 +176,7 @@ pub(crate) static TAILWIND: std::sync::atomic::AtomicBool = std::sync::atomic::A
 
 impl TwJit {
     fn scan(&mut self, classes: &str) {
-        let h = fnv(&[classes.as_bytes()]);
+        let h = hash_parts(&[classes.as_bytes()]);
         if self.seen.insert(h, ()).is_some() {
             return;
         }
@@ -317,7 +317,7 @@ pub(crate) enum Measure {
 /// every subtree whose style, content and children didn't change.
 #[derive(Default)]
 struct Recon {
-    map: FnvMap<Key, (NodeId, u32)>,
+    map: KeyMap<Key, (NodeId, u32)>,
     stamp: u32,
     /// Nodes for duplicate keys this frame: removed next frame.
     extra: Vec<NodeId>,
@@ -339,10 +339,10 @@ pub(crate) struct LayoutCaches {
     matched: MatchCache,
     recon: Recon,
     /// Measured text leaves: key -> box index, this frame.
-    text_box: FnvMap<Key, usize>,
+    text_box: KeyMap<Key, usize>,
     /// Content widths of blocks with `overflow-wrap: anywhere` from the last
     /// layout: their long words are split to fit before layout.
-    wrap_widths: FnvMap<Key, f32>,
+    wrap_widths: KeyMap<Key, f32>,
     tw: TwJit,
     /// `@container`: query containers' content sizes from the last layout.
     containers: Containers,
@@ -380,7 +380,7 @@ impl LayoutCaches {
 /// a change re-renders once more).
 #[derive(Default)]
 pub(crate) struct Containers {
-    map: FnvMap<Key, (f32, f32, u8, Option<Box<str>>)>,
+    map: KeyMap<Key, (f32, f32, u8, Option<Box<str>>)>,
     /// Hash of `map`, part of the selector-match memo.
     generation: u64,
     /// Consecutive re-renders caused by container size changes.
@@ -390,7 +390,7 @@ pub(crate) struct Containers {
 impl Containers {
     /// After a layout: record the containers; true when a re-render is needed.
     fn update(&mut self, frame: &Frame, styles: &StyleStore, queried: bool) -> bool {
-        let mut map: FnvMap<Key, (f32, f32, u8, Option<Box<str>>)> = FnvMap::default();
+        let mut map: KeyMap<Key, (f32, f32, u8, Option<Box<str>>)> = KeyMap::default();
         for n in &frame.nodes {
             let c = &styles[n.style];
             if c.container_type != 0 && n.taffy.is_some() {
@@ -398,7 +398,7 @@ impl Containers {
                 map.insert(n.key, (b.size.width, b.size.height, c.container_type, c.container_name.clone()));
             }
         }
-        let mut h = Fnv::default();
+        let mut h = key_hasher();
         let mut keys: Vec<&Key> = map.keys().collect();
         keys.sort_unstable();
         for k in keys {
@@ -425,7 +425,7 @@ type RuleIds = smallvec::SmallVec<[u32; 8]>;
 
 #[derive(Default)]
 struct MatchCache {
-    map: FnvMap<u64, (RuleIds, RuleIds)>,
+    map: KeyMap<u64, (RuleIds, RuleIds)>,
     author: u64,
 }
 
@@ -441,8 +441,8 @@ impl Default for LayoutCaches {
             acc: Vec::new(),
             matched: MatchCache::default(),
             recon: Recon::default(),
-            text_box: FnvMap::default(),
-            wrap_widths: FnvMap::default(),
+            text_box: KeyMap::default(),
+            wrap_widths: KeyMap::default(),
             tw: TwJit::default(),
             containers: Containers::default(),
             anim: Default::default(),
@@ -459,7 +459,7 @@ struct Builder<'a> {
     images: &'a mut ImageCache,
     matched: &'a mut MatchCache,
     recon: &'a mut Recon,
-    text_box: &'a mut FnvMap<Key, usize>,
+    text_box: &'a mut KeyMap<Key, usize>,
     /// Set when a node changed while building the current subtree.
     changed: bool,
     /// `tpos` for the element about to be built.
@@ -482,8 +482,8 @@ struct Builder<'a> {
     /// instance is scoped to (dropped when that box is finished).
     counters: Vec<(Box<str>, i32, usize)>,
     /// Column widths of each table (by box), computed before its cells.
-    table_cols: FnvMap<usize, TableCols>,
-    wrap_widths: &'a FnvMap<Key, f32>,
+    table_cols: KeyMap<usize, TableCols>,
+    wrap_widths: &'a KeyMap<Key, f32>,
     anim: &'a mut crate::anim::Animations,
 }
 
@@ -836,7 +836,7 @@ impl<'a> Builder<'a> {
         let rule_ids = || ua.iter().map(|r| *r as *const Rule as usize).chain(au.iter().map(|r| r.order));
         // probe without building a key: hash the inputs, compare in place
         let hash = {
-            let mut h = Fnv::default();
+            let mut h = key_hasher();
             parent.hash(&mut h);
             viewport.hash(&mut h);
             self.author_hash.hash(&mut h);
@@ -914,7 +914,7 @@ impl<'a> Builder<'a> {
         let (ua_sheet, ua_media) = self.ua_for(i);
         let author: &'a Stylesheet = self.author;
         let memo = {
-            let mut h = Fnv::default();
+            let mut h = key_hasher();
             self.nodes[i].fp.hash(&mut h);
             self.nodes[i].styled.hash(&mut h);
             self.containers.generation.hash(&mut h);
@@ -947,7 +947,7 @@ impl<'a> Builder<'a> {
     /// The fingerprint of element `i` (see [`BoxNode::fp`]).
     fn fingerprint(&self, i: usize) -> u64 {
         let n = &self.nodes[i];
-        let mut h = Fnv::default();
+        let mut h = key_hasher();
         n.parent.map(|p| self.nodes[p].fp).unwrap_or(0).hash(&mut h);
         // the previous element sibling (text in between doesn't count)
         let mut k = n.prev;
@@ -1217,12 +1217,12 @@ impl<'a> Builder<'a> {
                 }
             }
             TagKind::Replaced => {
-                let r = if let Some(f) = div.paint.take() {
-                    Replaced::Painted(f)
-                } else if let Some(img) = div.image.take() {
-                    Replaced::Image(img)
-                } else if let Some(v) = div.video.take() {
-                    Replaced::Video(v)
+                let r = if let Some(s) = div.rare.as_mut().and_then(|r| r.source.take()) {
+                    match s {
+                        ReplacedSource::Painted(f) => Replaced::Painted(f),
+                        ReplacedSource::Image(img) => Replaced::Image(img),
+                        ReplacedSource::Video(v) => Replaced::Video(v),
+                    }
                 } else if div.tag == "video" && let Some(v) = self.video_src(i) {
                     Replaced::Video(v)
                 } else if let Some(file) = self.attr(i, "src").map(str::to_owned).and_then(|s| self.images.load(&s)) {
@@ -1313,7 +1313,7 @@ impl<'a> Builder<'a> {
         let tag = if pe == crate::css::PseudoElement::Before { "::before" } else { "::after" };
         // shared like element styles: same parent + same rules = same style
         let hash = {
-            let mut h = Fnv::default();
+            let mut h = key_hasher();
             (parent, tag, self.author_hash).hash(&mut h);
             for r in ua.iter().chain(au.iter()) {
                 (*r as *const Rule as usize).hash(&mut h);
@@ -1736,7 +1736,7 @@ impl<'a> Builder<'a> {
     fn text_measure(&mut self, key: Key, node: usize, c: StyleId, nowrap: bool) -> Measure {
         self.text_box.insert(key, node);
         let hash = match &self.nodes[node].content {
-            Content::Text(t) => fnv(&[t.as_bytes()]),
+            Content::Text(t) => hash_parts(&[t.as_bytes()]),
             _ => 0,
         };
         let c = &self.styles[c];
@@ -2212,7 +2212,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         css.push('\n');
         css.push_str(caches.tw.css());
     }
-    let css_hash = fnv(&[css.as_bytes()]);
+    let css_hash = hash_parts(&[css.as_bytes()]);
     if css_hash != caches.author.hash {
         caches.author = AuthorSheet { hash: css_hash, sheet: Stylesheet::parse(&css) };
         load_font_faces(&caches.author.sheet);
@@ -2260,7 +2260,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         title,
         widgets,
         counters: Vec::new(),
-        table_cols: FnvMap::default(),
+        table_cols: KeyMap::default(),
         anim,
     };
     // the document: <html><body> unless the app built them itself

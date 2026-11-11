@@ -5,8 +5,10 @@
 //! each property has exactly one implementation.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasher, Hasher};
 use std::sync::OnceLock;
 
+use foldhash::quality::FixedState;
 use taffy::geometry::MinMax;
 use taffy::prelude::*;
 use taffy::style::Overflow;
@@ -630,7 +632,7 @@ pub(crate) fn supports_decl(prop: &str, value: &str) -> bool {
 
 /// The property index of `name` (run-time lookup for parsed CSS).
 pub(crate) fn prop_index(name: &str) -> Prop {
-    static MAP: OnceLock<FnvMap<&'static str, u16>> = OnceLock::new();
+    static MAP: OnceLock<KeyMap<&'static str, u16>> = OnceLock::new();
     let map = MAP.get_or_init(|| {
         HANDLERS.iter().map(|(n, _)| *n).chain(ACCEPTED.iter().copied()).enumerate()
             .map(|(i, n)| (n, i as u16)).collect()
@@ -741,27 +743,20 @@ const INHERITED: &[&str] = &[
     "overflow-wrap", "word-wrap", "tab-size", "text-underline-offset",
 ];
 
-/// FNV-1a: property names are short, so this beats the default SipHash.
-#[derive(Default, Clone, Copy)]
-pub(crate) struct Fnv(pub u64);
+/// The one hasher for keys, caches and maps: foldhash, a word at a time (FNV took a byte at a
+/// time). The fixed seed keeps keys the same for the whole run; the quality variant keeps
+/// element keys, which are identities with no equality check, collision-free in practice.
+pub(crate) type KeyState = FixedState;
 
-impl std::hash::Hasher for Fnv {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-    fn write(&mut self, bytes: &[u8]) {
-        let mut h = if self.0 == 0 { 0xcbf29ce484222325 } else { self.0 };
-        for b in bytes {
-            h = (h ^ *b as u64).wrapping_mul(0x100000001b3);
-        }
-        self.0 = h;
-    }
+/// A new hasher with the crate's fixed seed.
+pub(crate) fn key_hasher() -> impl Hasher {
+    KeyState::default().build_hasher()
 }
 
-pub(crate) type FnvMap<K, V> = HashMap<K, V, std::hash::BuildHasherDefault<Fnv>>;
+pub(crate) type KeyMap<K, V> = HashMap<K, V, KeyState>;
 
-fn handlers() -> &'static FnvMap<&'static str, Handler> {
-    static MAP: OnceLock<FnvMap<&'static str, Handler>> = OnceLock::new();
+fn handlers() -> &'static KeyMap<&'static str, Handler> {
+    static MAP: OnceLock<KeyMap<&'static str, Handler>> = OnceLock::new();
     MAP.get_or_init(|| HANDLERS.iter().copied().collect())
 }
 

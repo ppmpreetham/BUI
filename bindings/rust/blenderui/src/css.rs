@@ -259,7 +259,7 @@ impl Prop {
     /// The property for custom property `name` (`--x`), interned.
     pub fn custom(name: &str) -> Prop {
         use std::sync::{Mutex, OnceLock};
-        type Names = (crate::style::FnvMap<&'static str, u16>, Vec<&'static str>);
+        type Names = (crate::style::KeyMap<&'static str, u16>, Vec<&'static str>);
         static NAMES: OnceLock<Mutex<Names>> = OnceLock::new();
         let mut t = NAMES.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
         if let Some(&i) = t.0.get(name) {

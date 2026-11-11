@@ -10,6 +10,7 @@
 
 use crate::css::Tok;
 use crate::geometry::{Units, ROOT_FONT_SIZE};
+use crate::style::{key_hasher, KeyMap};
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
@@ -292,8 +293,8 @@ impl Resolved {
 /// Every distinct expression, kept for the life of the process (they are
 /// few: the stylesheets' and styles' calc() values).
 fn intern(c: Calc) -> &'static Calc {
-    static MAP: OnceLock<Mutex<crate::style::FnvMap<u64, Vec<&'static Calc>>>> = OnceLock::new();
-    let mut h = crate::style::Fnv::default();
+    static MAP: OnceLock<Mutex<KeyMap<u64, Vec<&'static Calc>>>> = OnceLock::new();
+    let mut h = key_hasher();
     c.hash_into(&mut h);
     let key = h.finish();
     let mut map = MAP.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());

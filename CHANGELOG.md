@@ -82,6 +82,24 @@ All notable changes to **blenderui** (BUI). The format follows
   reads the setting when it starts.
 
 ### Fixed
+- **Crash at exit on Wayland:** `exit` on another thread closed libwayland-client while the event loop still called into
+  it (SIGSEGV in about 1 of 15 benchmark exits). The library now stays loaded until the process ends.
+- **X11 frame pacing:** an animation frame is due one refresh after the previous frame started, so the render time is part
+  of the interval, as the docs say. The loop slept a full refresh after each frame, so a 3000-cell animation on the GPU
+  renderer ran at 24 fps instead of 49 fps.
+- **Wayland start:** `BK_window_supported` only connects and asks for the globals; the first window waits for them, so
+  the compositor answers while the program sets up (as GTK does). It no longer opens an X11 connection first in a Wayland
+  session. While a new Wayland window waits for its first configure, the UI font and its ASCII glyphs load, so the first
+  frame does not: about 2 ms less from configure to the first frame.
+- **Rust: one hasher, a word at a time.** Style, layout and paint keys hashed with two copies of a byte-at-a-time FNV;
+  they now share foldhash (already in the dependency tree). 3000 animated cells: the cascade 3.0 to 4.7 ms per frame,
+  now 2.2 to 2.7 ms.
+- **Rust: elements are 136 bytes, not 176.** Every builder call moves the element; its rarely used parts (a canvas paint
+  callback, an image or video, deferred work) are one boxed field now, allocated only when used. A replaced element
+  shows the last source it was given.
+- **A display list that changes everywhere** (`BK_canvas_put_item` each frame) compared and damaged every item one by one.
+  Once the damage covers half the canvas, or the window redraws whole, the canvas redraws whole and items are no longer
+  compared, as Blender's `ED_region_tag_redraw_partial` does. 3000 animated cells: 1.5 ms of flush per frame, 0.5 ms now.
 - **Closing a pie during its open animation** freed it while the animation still pointed at it, so the next render read freed
   memory (`bui_lua_context` crashed in CI). Closing a popup now clears everything that refers into it through `bk_forget`.
 - **Wayland frames copied the whole window every frame** after the first full one: the double-buffer copy kept

@@ -23,7 +23,7 @@ use crate::color::Rgba;
 use crate::css::{Decl, Prop, Tok};
 use crate::geometry::{Length, Units};
 use crate::effects::{Filter as FilterFn, TransformFn};
-use crate::style::{BorderStyle, Computed, Ctx, FnvMap, Gradient, ImageStyle, LineHeight, Shadow};
+use crate::style::{BorderStyle, Computed, Ctx, KeyMap, Gradient, ImageStyle, LineHeight, Shadow};
 
 // ==========================================================================
 // Timing functions
@@ -1199,7 +1199,7 @@ pub(crate) struct Env<'a> {
 pub(crate) struct Animations {
     now: f64,
     frame: u64,
-    els: FnvMap<u64, ElState>,
+    els: KeyMap<u64, ElState>,
     /// Something is moving: render another frame.
     running: bool,
 }

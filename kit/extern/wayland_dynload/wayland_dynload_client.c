@@ -39,9 +39,9 @@ bool wayland_dynload_client_init(const bool verbose)
   if (!(lib = dynamic_library_open_array_with_error(paths, paths_num, verbose, &path_found))) {
     return false;
   }
-  if (atexit(wayland_dynload_client_exit)) {
-    return false;
-  }
+  /* BUI: no `atexit(wayland_dynload_client_exit)` as in Blender. A program can call `exit` on
+   * another thread while the event loop still calls into the library; closing it then crashes.
+   * The process exit frees it. */
 
 #define WAYLAND_DYNLOAD_IFACE(symbol) \
   { \
