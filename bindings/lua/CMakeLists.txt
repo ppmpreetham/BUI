@@ -105,9 +105,12 @@ add_library(_bui MODULE ${LUABUI_SRC})
 target_link_libraries(_bui PRIVATE ${LUABUI_LIBS})
 target_include_directories(_bui PRIVATE src)
 set_target_properties(_bui PROPERTIES MODULE_NAME "_bui")
-if(MSVC)
+if(WIN32) # MSVC and MinGW alike: _bui.dll, not lib_bui.dll
   set_target_properties(_bui PROPERTIES PREFIX "" SUFFIX ".dll")
-  target_compile_definitions(_bui PRIVATE LUA_BUILD_AS_DLL)
+  if(LUA_TARGET STREQUAL "bui_lua_sys")
+    # a system Lua on Windows is a DLL, and its API is imported from it; the Lua built here is static
+    target_compile_definitions(_bui PRIVATE LUA_BUILD_AS_DLL)
+  endif()
 elseif(APPLE)
   set_target_properties(_bui PROPERTIES PREFIX "" SUFFIX ".so")
   target_link_options(_bui PRIVATE -Wl,-undefined,dynamic_lookup)
@@ -145,6 +148,17 @@ if(BUI_BUILD_TESTS)
     COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_theme.lua
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(bui_lua_theme PROPERTIES TIMEOUT 30)
+
+  # the loadable module: Lua looks for luaopen__bui in _bui.dll / _bui.so
+  add_test(NAME bui_lua_module
+    COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_module.lua $<TARGET_FILE:_bui>
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(bui_lua_module PROPERTIES TIMEOUT 30)
+
+  add_test(NAME bui_lua_window
+    COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_window.lua
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(bui_lua_window PROPERTIES TIMEOUT 30)
 
   add_test(NAME bui_lua_filebrowser
     COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_filebrowser.lua
