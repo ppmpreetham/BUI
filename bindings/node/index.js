@@ -274,7 +274,7 @@ class App {
    */
   setTheme (name) {
     name = String(name)
-    if (this.native.setTheme(name)) return undefined
+    if (this.native.setTheme(name)) return Promise.resolve()
     return this.native.setCustomTheme(name).then((ok) => {
       if (!ok) throw new RangeError(`unknown theme ${name} (expected 'dark', 'light' or a theme loaded with loadTheme)`)
     })
@@ -299,6 +299,7 @@ class App {
     if (typeof color === 'string') {
       let h = color.replace('#', '')
       if (h.length <= 4) h = [...h].map((ch) => ch + ch).join('')
+      if (!/^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(h)) throw new RangeError(`not a color: ${color}`)
       c = [0, 2, 4, 6].slice(0, h.length / 2).map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
     }
     const [r, g, b, a = 1] = c
