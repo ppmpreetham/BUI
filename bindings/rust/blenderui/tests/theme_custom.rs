@@ -89,6 +89,17 @@ fn custom_themes() {
         assert!(!blenderui::set_theme_color("button.border.width", [0.0; 4])); // a number
         let img = draw(cx);
         assert_eq!(at(&img, 190.0, 38.0), 0x00ff00);
+
+        // a color changing on every event (a picker being dragged) must not pile up sheets: the cache
+        // keeps the sheet in use only, so one an earlier pass held is freed when that pass lets go
+        let first = blenderui::html::ua_styled_stylesheet();
+        for i in 0..50u8 {
+            assert!(blenderui::set_theme_color("region.background", [f32::from(i) / 50.0, 0.0, 0.0, 1.0]));
+            drop(blenderui::html::ua_styled_stylesheet());
+        }
+        assert_eq!(std::sync::Arc::strong_count(&first), 1, "an old sheet is still cached");
+        assert!(std::sync::Arc::ptr_eq(&blenderui::html::ua_styled_stylesheet(), &blenderui::html::ua_styled_stylesheet()));
+        assert!(blenderui::set_theme_color("region.background", [0.0, 1.0, 0.0, 1.0]));
         assert!(blenderui::set_theme_value("button.roundness", 0.25));
         assert_eq!(blenderui::theme_value("button.roundness"), Some(0.25));
 

@@ -2,7 +2,7 @@
 //! `table()` ...), all building the one [`Div`] type, plus the user-agent
 //! stylesheet that gives them their default look (Blender's theme).
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use crate::css::Stylesheet;
 use crate::element::Div;
@@ -279,29 +279,27 @@ pub fn themed_styled_css() -> String {
 }
 
 /// The parsed `styled` sheet for the active theme ([`crate::set_theme`], `BUI_THEME`, a theme loaded
-/// with [`crate::load_theme`], single colors set at run time). Parsed again when the theme changes,
-/// and once for each distinct sheet.
-pub fn ua_styled_stylesheet() -> &'static Stylesheet {
-    use std::collections::HashMap;
-    use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+/// with [`crate::load_theme`], single colors set at run time). Parsed again when the theme changes
+/// to a different sheet. Only the sheet in use is kept: whoever holds the `Arc` (a layout pass)
+/// keeps it alive, and it is freed after that, so a theme editor changing a color on every drag
+/// event does not pile up sheets.
+pub fn ua_styled_stylesheet() -> Arc<Stylesheet> {
     use std::sync::Mutex;
-    static GEN: AtomicI32 = AtomicI32::new(-1);
-    static CURRENT: AtomicPtr<Stylesheet> = AtomicPtr::new(std::ptr::null_mut());
-    static SHEETS: Mutex<Option<HashMap<String, &'static Stylesheet>>> = Mutex::new(None);
+    /// The theme generation the sheet was made for, its CSS (to tell if a new generation changed
+    /// anything) and the parsed sheet.
+    static CURRENT: Mutex<Option<(i32, String, Arc<Stylesheet>)>> = Mutex::new(None);
     let generation = crate::theme_generation();
-    let cur = CURRENT.load(Ordering::Acquire);
-    if !cur.is_null() && GEN.load(Ordering::Acquire) == generation {
-        // SAFETY: only leaked sheets are stored, which live for the whole program.
-        return unsafe { &*cur };
+    let mut cur = CURRENT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, _, sheet)) = cur.as_ref().filter(|(g, _, _)| *g == generation) {
+        return Arc::clone(sheet);
     }
     let css = themed_styled_css();
-    let mut sheets = SHEETS.lock().unwrap_or_else(|e| e.into_inner());
-    let sheet: &'static Stylesheet = sheets
-        .get_or_insert_with(HashMap::new)
-        .entry(css.clone())
-        .or_insert_with(|| Box::leak(Box::new(Stylesheet::parse(&css))));
-    CURRENT.store(sheet as *const Stylesheet as *mut Stylesheet, Ordering::Release);
-    GEN.store(generation, Ordering::Release);
+    if let Some((g, _, sheet)) = cur.as_mut().filter(|(_, old_css, _)| *old_css == css) {
+        *g = generation;
+        return Arc::clone(sheet);
+    }
+    let sheet = Arc::new(Stylesheet::parse(&css));
+    *cur = Some((generation, css, Arc::clone(&sheet)));
     sheet
 }
 
