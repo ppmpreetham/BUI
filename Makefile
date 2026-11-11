@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Keep build rules and dependency discovery in CMake.
+.DEFAULT_GOAL := build
+
+CMAKE ?= cmake
+CTEST ?= ctest
+BUILD_DIR ?= build
+BUILD_TYPE ?= Release
+JOBS ?= 2
+CMAKE_ARGS ?=
+CTEST_ARGS ?=
+
+.PHONY: all configure build test clean help
+
+all: build
+
+configure:
+	"$(CMAKE)" -S . -B "$(BUILD_DIR)" -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) $(CMAKE_ARGS)
+
+build: configure
+	"$(CMAKE)" --build "$(BUILD_DIR)" --config "$(BUILD_TYPE)" --parallel $(JOBS)
+
+test: build
+	"$(CTEST)" --test-dir "$(BUILD_DIR)" -C "$(BUILD_TYPE)" --output-on-failure $(CTEST_ARGS)
+
+# Use CMake's clean target; retain the configuration and downloaded dependencies.
+clean:
+	"$(CMAKE)" --build "$(BUILD_DIR)" --config "$(BUILD_TYPE)" --target clean
+
+help:
+	@echo "make           Configure and build BUI (Release by default)"
+	@echo "make configure Configure without building"
+	@echo "make test      Build and run the CTest suites"
+	@echo "make clean     Clean a configured build, keeping its CMake cache"
+	@echo "Options: BUILD_DIR=build BUILD_TYPE=Release JOBS=2"
+	@echo "Extra flags: CMAKE_ARGS and CTEST_ARGS (see docs/getting-started.md)"

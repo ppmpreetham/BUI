@@ -22,6 +22,33 @@ cmake -S . -B build -G "MinGW Makefiles"
 cmake --build build
 ```
 
+### Build with Make
+
+With GNU Make installed alongside the requirements above, run these commands
+from the repository root:
+
+```sh
+make               # configure and build Release in build/
+make test          # build, then run the CTest suites
+make clean         # clean an existing build; keep its configuration
+make help          # list targets and options
+```
+
+The Makefile delegates to CMake, including its dependency discovery and build
+rules. Override settings on the command line:
+
+```sh
+make BUILD_DIR=build-debug BUILD_TYPE=Debug JOBS=4
+make CMAKE_ARGS="-DBUI_BUILD_EXAMPLES=ON"
+make test CTEST_ARGS="-R bui_version_test"
+```
+
+`CMAKE` and `CTEST` can also point to alternative executable paths. On Windows,
+CMake uses its default generator (typically Visual Studio); for MSYS2 / MinGW-w64,
+use `make CMAKE_ARGS='-G "MinGW Makefiles"'` from an MSYS2 shell. Use a separate
+`BUILD_DIR` when switching generators. The default build uses two parallel jobs;
+set `JOBS` to change this independently of Make's `-j` option.
+
 ### Build options
 
 | Option | Default | Effect |

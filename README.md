@@ -1913,6 +1913,10 @@ and [docs/getting-started.md](docs/getting-started.md#environment-variables).
 
 ## 38. Building from source and CMake options
 
+With GNU Make installed, run `make` to configure and build, or `make test`
+to build and run the CTest suites. `make help` lists the available targets.
+See [Getting started](docs/getting-started.md#build-with-make) for build overrides.
+
 You need **CMake 3.20+**, a **C11 / C++20 compiler** (MSVC, GCC/MinGW or
 Clang) and **Python 3.11+** with headers. On Linux, also the X11 headers.
 
