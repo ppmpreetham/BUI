@@ -17,15 +17,16 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const exeName = process.platform === "win32" ? "bench_list_gpui.exe" : "bench_list_gpui";
-const exe = join(here, "..", "..", "target", "release", "examples", exeName);
-if (!existsSync(exe)) throw new Error("build the example first");
+const candidates = [join(here, "..", "target", "release", "examples", exeName), join(here, "..", "..", "blenderui-table-gpui", "target", "release", "examples", exeName)];
+const exe = candidates.find(existsSync);
+if (!exe) throw new Error("build the example first");
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const reps = Number(arg("--reps", 3));
 const seconds = arg("--seconds", "5");
 const sizes = arg("--sizes", "100,10000,1000000,10000000").split(",").map(Number);
 const capMb = arg("--cap-mb", "4096");
 const limit = arg("--limit-seconds", "150");
-const dir = join(here, "..", "..", "target", "bench-logs");
+const dir = join(here, "..", "target", "bench-logs");
 mkdirSync(dir, { recursive: true });
 
 const libs = ["ours", "list", "virtual"];

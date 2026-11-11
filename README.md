@@ -1780,7 +1780,7 @@ time, CPU used to start, memory and idle CPU, and writes `bench/results.json`.
 cmake -S . -B build && cmake --build build --config Release --target buipy  # Python extension
 cd bindings/node && npm run build && cd ../..                                # Node addon
 cd bindings/rust && cargo build --release --example bench_app && cd ../..    # Rust app
-cd bindings/rust/bench && cargo build --release -p bui-bench -p gpui-bench -p gpui-fast-bench && cd ../../..        # gpui comparison
+cd bindings/rust/bench && cargo build --release --bins && cd ../../..        # gpui comparison
 py -3 bench/run.py 10 20        # launches per app, seconds of idle measurement
 ```
 
@@ -1801,8 +1801,8 @@ set GPUI_FXC_PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\fx
 cargo build --release
 py run.py --reps 3                                   # all apps, 100 / 1000 / 3000 cells, about 12 minutes
 py run.py --cells 3000 --apps blenderui,blenderui-gpu --reps 1
-..\target\release\bui-bench --cells 3000 --mode anim   # one run by hand (--mode one / idle, --uncapped)
-set BUI_GPU=1 && ..\target\release\bui-bench --cells 3000 --mode anim   # on the GPU renderer
+target\release\bui-bench --cells 3000 --mode anim   # one run by hand (--mode one / idle, --uncapped)
+set BUI_GPU=1 && target\release\bui-bench --cells 3000 --mode anim   # on the GPU renderer
 ```
 
 Method and full results: [bindings/rust/bench/README.md](bindings/rust/bench/README.md).
@@ -1913,25 +1913,6 @@ and [docs/getting-started.md](docs/getting-started.md#environment-variables).
 
 ## 38. Building from source and CMake options
 
-For Rust, run `cargo build` and `cargo test` from the repository root.
-Root-level `cargo test` selects every Rust workspace member, including the
-showcase, GPUI adapters and benchmark binaries. GPUI adds its native platform
-dependencies to the first build; on Windows it also needs the Windows SDK
-shader compiler (`fxc.exe`, or set `GPUI_FXC_PATH`). Packages with no tests
-still print `running 0 tests`; each test binary reports its own result.
-
-Cargo builds the native C kit through CMake; install Rust 1.88+, CMake and a
-C/C++ toolchain (Visual Studio Build Tools on Windows).
-
-**The repository Makefile requires GNU Make 4.2 or newer.** GNU Make 4.1 and
-older are unsupported; use the direct CMake commands below instead.
-
-Run `make` to configure and build, or `make test` to build and run the CTest
-suites. `make help` lists the available targets.
-These commands reuse the cached build type (Release for a new directory);
-set `BUILD_TYPE=Debug` or `BUILD_TYPE=Release` to override it.
-See [Getting started](docs/getting-started.md#build-with-make) for build overrides.
-
 You need **CMake 3.20+**, a **C11 / C++20 compiler** (MSVC, GCC/MinGW or
 Clang) and **Python 3.11+** with headers. On Linux, also the X11 headers.
 
@@ -1943,7 +1924,7 @@ ctest --test-dir build                      # C, C++, ImGui and Python test suit
 export PYTHONPATH=$PWD/bindings/python      # Windows: set PYTHONPATH=%CD%\bindings\python
 python examples/components_demo.py
 
-cargo test                                  # Rust: CSS, Tailwind, rsx!, hooks, effects, headless windows
+cd bindings/rust && cargo test              # Rust: CSS, Tailwind, rsx!, hooks, effects, headless windows
 ```
 
 | Option                      | Default                  | What it does                                                                                        |

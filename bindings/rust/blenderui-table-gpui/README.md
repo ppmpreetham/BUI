@@ -71,13 +71,13 @@ the visible cells, 2,048 at least).
 
 ## Building
 
-This crate is a member of the root Cargo workspace. Root-level `cargo test`
-includes its adapter tests. On Windows gpui needs `fxc.exe`:
+This crate is its own Cargo workspace, outside the main one, because gpui is a
+very large build. On Windows gpui needs `fxc.exe`:
 
 ```text
 set GPUI_FXC_PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\fxc.exe
 cargo build --release -j 1
-cargo test -p blenderui-table-gpui -j 1                       # the adapter on gpui's test platform
+cargo test -j 1                       # the adapter on gpui's test platform
 ```
 
 ## Benchmark against gpui-component 0.9.0

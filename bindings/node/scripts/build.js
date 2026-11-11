@@ -15,7 +15,7 @@ const debug = process.argv.includes('--debug')
 const only = process.argv.includes('--only') ? process.argv[process.argv.indexOf('--only') + 1] : null
 const rust = path.resolve(__dirname, '../../rust')
 // shipped binaries: the `dist` profile (release + fat LTO, one codegen unit:
-// smaller and faster; see Cargo.toml)
+// smaller and faster; see bindings/rust/Cargo.toml)
 const profile = debug ? [] : ['--profile', 'dist']
 const target = path.join(rust, 'target', debug ? 'debug' : 'dist')
 

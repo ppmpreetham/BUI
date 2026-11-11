@@ -122,8 +122,8 @@ There are three modes:
 4. **Or run one by hand.**
 
    ```sh
-   ..\target\release\bui-bench --cells 3000 --mode anim               # --mode one / idle, --uncapped
-   set BUI_GPU=1 && ..\target\release\bui-bench --cells 3000 --mode anim   # on the GPU renderer
+   target\release\bui-bench --cells 3000 --mode anim               # --mode one / idle, --uncapped
+   set BUI_GPU=1 && target\release\bui-bench --cells 3000 --mode anim   # on the GPU renderer
    ```
 
    `--uncapped` animates without waiting for the display, to see the raw frame rate.
@@ -150,7 +150,7 @@ For each app it measures the median time from launch until the first frame is on
    cmake -S . -B build && cmake --build build --config Release --target buipy  # Python extension
    cd bindings/node && npm run build && cd ../..                                # Node addon
    cd bindings/rust && cargo build --release --example bench_app && cd ../..    # Rust app
-   cd bindings/rust/bench && cargo build --release -p bui-bench -p gpui-bench -p gpui-fast-bench && cd ../../..        # gpui comparison
+   cd bindings/rust/bench && cargo build --release --bins && cd ../../..        # gpui comparison
    ```
 
 2. **Run it.**

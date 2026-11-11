@@ -13,12 +13,15 @@ keywords = ["gpui", "table", "datagrid", "virtualization", "blender"]
 categories = ["gui"]
 readme = "README.md"
 include = ["src/**", "examples/**", "README.md", "Cargo.toml"]
+# not published yet; also kept out of the main workspace (gpui is a huge build)
 publish = false
 
+# its own workspace: like `bench/`, it never enters the normal CI builds
+[workspace]
 
 [dependencies]
 blenderui-table = { path = "../blenderui-table", version = "0.5.0" }
-blenderui-paint-gpui = { path = "../blenderui-paint-gpui" }
+blenderui-paint-gpui = { path = "../blenderui-paint-gpui", version = "0.5.0" }
 gpui = { package = "gpui-pre", version = "=0.3.11" }
 
 [dev-dependencies]
@@ -45,6 +48,9 @@ optional = true
 name = "bench_gpui"
 path = "examples/bench_gpui.rs"
 required-features = ["bench"]
+
+[profile.release]
+debug = false
 
 [lints.clippy]
 all = { level = "warn", priority = -2 }
