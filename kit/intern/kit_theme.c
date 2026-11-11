@@ -125,18 +125,35 @@ static bool key_set_color(const TKey *k, const uchar c[4])
   return true;
 }
 
+/** Floats Blender keeps in 0..1 (the roundness of a widget, the strength of the menu shadow). */
+static bool key_is_fraction(const TKey *k)
+{
+  const size_t n = strlen(k->name);
+  return strcmp(k->name, "menu.shadow.strength") == 0 ||
+         (n >= 10 && strcmp(k->name + n - 10, ".roundness") == 0);
+}
+
+/** The widest a menu's shadow can be, in pixels: it grows the popup's redraw rectangle. */
+#define TK_MAX_SHADOW_SIZE 200.0
+
 static bool key_set_num(const TKey *k, double v)
 {
   uchar *base = (uchar *)&bk_theme + k->off;
+  if (!isfinite(v)) { /* a number from JSON can overflow to infinity */
+    return false;
+  }
   switch (k->kind) {
     case TK_K_FLOAT:
-      *(float *)base = (float)v;
+      *(float *)base = key_is_fraction(k) ? (float)BK_CLAMP(v, 0.0, 1.0) : (float)BK_CLAMP(v, -1e9, 1e9);
       return true;
     case TK_K_INT:
-      *(int *)base = (int)lround(v);
+      if (strcmp(k->name, "menu.shadow.size") == 0) {
+        v = BK_CLAMP(v, 0.0, TK_MAX_SHADOW_SIZE);
+      }
+      *(int *)base = (int)lround(BK_CLAMP(v, -1e9, 1e9)); /* bounded first: lround of a huge value is undefined */
       return true;
     case TK_K_SHORT:
-      *(short *)base = (short)BK_CLAMP(lround(v), -32768, 32767);
+      *(short *)base = (short)lround(BK_CLAMP(v, -32768.0, 32767.0));
       return true;
     case TK_K_FLAG:
       *base = v != 0.0;
@@ -274,7 +291,10 @@ static int g_ndefs = 0;
 static char g_error[256] = "";
 static int g_ignored = 0;
 static char g_active[64] = ""; /* the registered theme in use; "" for a built-in one */
-static bool g_applied_text = false; /* the active theme set the font, its size or the shadow */
+/** Which text properties the active theme set (and so which to undo when it is left). */
+static struct {
+  bool font, size, shadow;
+} g_applied;
 
 const char *BK_theme_error(void)
 {
@@ -554,16 +574,29 @@ static void apply_entry(const Entry *e)
   }
 }
 
+/** What the previous theme gave the text goes back, property by property; what an application set
+ * itself (a font it chose, a size, the shadow) stays. */
+static void reset_applied_text(void)
+{
+  if (g_applied.font) {
+    BK_set_font("");
+  }
+  if (g_applied.size) {
+    BK_set_font_size(11.0f);
+  }
+  if (g_applied.shadow) {
+    BK_set_text_shadow(1);
+  }
+  memset(&g_applied, 0, sizeof(g_applied));
+}
+
 static void apply_def(const ThemeDef *d)
 {
   bk_theme_load_preset(d->light);
-  /* what the previous theme gave the text goes back; what an application set itself stays */
-  if (g_applied_text) {
-    BK_set_font("");
-    BK_set_font_size(11.0f);
-    BK_set_text_shadow(1);
-  }
-  g_applied_text = d->font_family || d->font_size > 0.0f || d->shadow >= 0;
+  reset_applied_text();
+  g_applied.font = d->font_family != NULL;
+  g_applied.size = d->font_size > 0.0f;
+  g_applied.shadow = d->shadow >= 0;
   if (d->font_family) {
     BK_set_font(d->font_family);
   }
@@ -611,12 +644,7 @@ int BK_set_theme(const char *name)
   if (t < 0) {
     return 0;
   }
-  if (g_applied_text) { /* leaving a custom theme that set the text */
-    BK_set_font("");
-    BK_set_font_size(11.0f);
-    BK_set_text_shadow(1);
-    g_applied_text = false;
-  }
+  reset_applied_text(); /* leaving a custom theme that set the text */
   g_active[0] = '\0';
   bk_theme_load_preset(t);
   bk_theme_changed();

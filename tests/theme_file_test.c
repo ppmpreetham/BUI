@@ -116,9 +116,17 @@ int main(void)
   CHECK(BK_theme_load_file("no/such/file.json") == -1 && strstr(BK_theme_error(), "cannot open"));
   CHECK(BK_set_theme("Nope") == 0);
 
+  /* leaving a theme only undoes what that theme set: an application's own shadow setting stays */
+  CHECK(BK_theme_load_json("{\"themes\":[{\"name\":\"SizeOnly\",\"font.size\":14}]}") == 1);
+  BK_set_text_shadow(0);
+  CHECK(BK_set_theme("SizeOnly") == 1 && fabsf(BK_font_size_points() - 14.0f) < 1e-6f);
+  CHECK(BK_set_theme("dark") == 1);
+  CHECK(fabsf(BK_font_size_points() - 11.0f) < 1e-6f && BK_text_shadow() == 0);
+  BK_set_text_shadow(1);
+
   /* the same name replaces an older theme */
   CHECK(BK_theme_load_json("{\"name\":\"s\",\"themes\":[{\"name\":\"PLUM\",\"colors\":{\"text\":\"#010203\"}}]}") == 1);
-  CHECK(BK_theme_count() == 2);
+  CHECK(BK_theme_count() == 3);
   CHECK(BK_set_theme("Plum") == 1 && color_is("text", 0x010203));
   CHECK(BK_set_theme("dark") == 1);
 
@@ -130,6 +138,16 @@ int main(void)
   CHECK(!BK_theme_set_color("button.border.width", red)); /* a number, not a color */
   CHECK(BK_theme_set_num("button.roundness", 0.25) && BK_theme_num("button.roundness", &v) && fabs(v - 0.25) < 1e-6);
   CHECK(BK_theme_set_num("button.border.width", 0) && BK_theme_num("button.border.width", &v) && v == 0.0);
+
+  /* numbers are bounded before they are stored: Blender keeps these in 0..1, and a shadow can't be
+   * wider than the redraw rectangle it grows */
+  CHECK(BK_theme_set_num("button.roundness", 7) && BK_theme_num("button.roundness", &v) && v == 1.0);
+  CHECK(BK_theme_set_num("button.roundness", -2) && BK_theme_num("button.roundness", &v) && v == 0.0);
+  CHECK(BK_theme_set_num("menu.shadow.strength", 9) && BK_theme_num("menu.shadow.strength", &v) && v == 1.0);
+  CHECK(BK_theme_set_num("menu.shadow.size", -5) && BK_theme_num("menu.shadow.size", &v) && v == 0.0);
+  CHECK(BK_theme_set_num("menu.shadow.size", 1e300) && BK_theme_num("menu.shadow.size", &v) && v == 200.0);
+  CHECK(!BK_theme_set_num("menu.shadow.size", INFINITY)); /* not a number: refused, the value stays */
+  CHECK(BK_theme_num("menu.shadow.size", &v) && v == 200.0);
   CHECK(!BK_theme_set_num("button.background", 1));
   CHECK(BK_set_theme("dark") == 1 && color_is("button.background", 0x545454)); /* reset */
 
