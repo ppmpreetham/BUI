@@ -97,8 +97,9 @@ All notable changes to **blenderui** (BUI). The format follows
 - **C API:** `bui_version_string()` and `BUI_VERSION_*` were stuck at 0.1.0; they follow the kit version now (a test keeps them equal, and so do the Python and Lua tests).
 - `BK_context_free` leaked every undo entry (about 60 KB per context with text history).
 - **Vector fields:** Ctrl+Alt+C on a vector with many wide components overflowed a 512-byte stack buffer.
-- **Lua:** a window's `on_close` callback was given a copy of the window userdata; when the copy was collected it freed the live window. It gets the window itself now, errors in it are reported instead of unwinding through the loop, and a window keeps its Context alive. New `window:on_frame(fn)`.
-- **Lua:** the loadable module (`_bui.dll`/`.so`) could not be loaded: it exported `luaopen_bui` but Lua looks for `luaopen__bui`; also fixed the MinGW file name.
+- **Lua:** a window's `on_close` callback was given a copy of the window userdata; when the copy was collected it freed the live window. It gets the window itself now, errors in it are reported instead of unwinding through the loop, and a window keeps its Context alive. New `window:on_frame(fn)`; freeing a window from inside its own callback closes it and frees it once the callback is done.
+- **Windows:** a frame callback that closed its window crashed the host: the Win32 backend rendered the closed window (X11, Wayland and Cocoa already returned).
+- **Lua:** the loadable module (`_bui.dll`/`.so`) could not be loaded: it exported `luaopen_bui` but Lua looks for `luaopen__bui`; also fixed the MinGW file name, and Lua built from source (Linux, macOS) now has `package.loadlib`, so `require` can load C modules.
 - **CI:** the crates.io dry run always failed (`[ ... ] && sleep` under `bash -e`); the PyPI wheels workflow now checks the tag against the versions in the repo before building or publishing.
 
 ## [0.5.0] - 2026-11-08
