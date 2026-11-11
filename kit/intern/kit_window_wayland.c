@@ -1040,6 +1040,9 @@ static int open_display(void)
   }
   while (g_registry_sync && wl_display_dispatch(g.display) != -1) { /* the globals */
   }
+  if (g_registry_sync) {
+    return 0;
+  }
   wl_display_roundtrip(g.display); /* their first events: outputs, seat capabilities */
   if (!g.compositor || !g.shm || !g.wm_base) {
     return 0;
