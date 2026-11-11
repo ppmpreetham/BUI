@@ -1,7 +1,7 @@
 """Run the blenderui vs gpui / gpui-fast benchmark and print a Markdown table.
 
     cd bindings/rust/bench
-    cargo build --release
+    cargo build --release -p bui-bench -p gpui-bench -p gpui-fast-bench
     py run.py [--reps 3] [--seconds 10]
 
 Each app measures its own process (CPU time, working set, private bytes,
@@ -20,9 +20,9 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-EXE = {"blenderui": HERE / "target/release/bui-bench.exe", "gpui": HERE / "target/release/gpui-bench.exe",
-       "gpui-fast": HERE / "target/release/gpui-fast-bench.exe",
-       "blenderui-gpu": HERE / "target/release/bui-bench.exe"}
+EXE = {"blenderui": HERE.parent / "target/release/bui-bench.exe", "gpui": HERE.parent / "target/release/gpui-bench.exe",
+       "gpui-fast": HERE.parent / "target/release/gpui-fast-bench.exe",
+       "blenderui-gpu": HERE.parent / "target/release/bui-bench.exe"}
 # per-app environment: blenderui-gpu is blenderui with the GPU renderer
 ENV = {"blenderui": {"BUI_GPU": "0"}, "blenderui-gpu": {"BUI_GPU": "1"}}
 

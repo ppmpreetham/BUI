@@ -16,7 +16,7 @@ A release is two steps, so CI runs on the commit before anything is published:
 Where the version lives (one source of truth per registry, all moved together):
 
 * Python: `bindings/python/bui/_version.py` (the wheel reads it).
-* Rust: `[workspace.package]` in `bindings/rust/Cargo.toml`, and the `version = "..."` of every
+* Rust: `[workspace.package]` in `Cargo.toml`, and the `version = "..."` of every
   sibling path dependency (`blenderui-sys = { path = "...", version = "..." }`).
 * npm (only with `--npm`): every already-published package in `bindings/package.json`'s workspaces
   moves to the same version; a package not on npm yet keeps its own first version. All of them
@@ -111,11 +111,11 @@ def plan_edits(new: str, npm: str | None) -> dict[Path, str]:
     htext = re.sub(r'(#define BUI_KIT_VERSION_STRING\s+")[^"]+(")', rf"\g<1>{new}\g<2>", htext)
     put(header, htext)
 
-    ws = RUST / "Cargo.toml"
+    ws = ROOT / "Cargo.toml"
     text = read(ws)
     m = re.search(r"\[workspace\.package\](.*?)(?=^\[|\Z)", text, re.S | re.M)
     if not m:
-        sys.exit("no [workspace.package] in bindings/rust/Cargo.toml")
+        sys.exit("no [workspace.package] in Cargo.toml")
     section = re.sub(r'(^version\s*=\s*")[^"]+(")', rf"\g<1>{new}\g<2>", m.group(1), count=1, flags=re.M)
     put(ws, text[: m.start(1)] + section + text[m.end(1):])
 
@@ -161,7 +161,7 @@ def refresh_locks(npm: bool) -> list[Path]:
     if r.returncode != 0:
         r = run(["cargo", "update", "--workspace"], cwd=RUST, check=False)
     if r.returncode == 0:
-        touched.append(RUST / "Cargo.lock")
+        touched.append(ROOT / "Cargo.lock")
     else:
         print("warning: Cargo.lock was not refreshed (run `cargo update --workspace` in bindings/rust)")
     if npm:

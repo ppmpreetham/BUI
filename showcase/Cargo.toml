@@ -13,6 +13,3 @@ blenderui = { path = "../bindings/rust/blenderui" }
 chrono = "0.4"
 chrono-english = "0.1"
 png = "0.17"
-
-# standalone: not a member of bindings/rust's workspace
-[workspace]

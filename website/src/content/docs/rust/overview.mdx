@@ -5,7 +5,7 @@ description: The blenderui crate gives Rust HTML, CSS, Tailwind, rsx! markup or 
 section: Rust
 order: 5
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/README.md", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/Cargo.toml", "bindings/rust/Cargo.toml", "bindings/rust/blenderui/examples/showcase.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/README.md", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/Cargo.toml", "Cargo.toml", ".cargo/config.toml", "bindings/rust/blenderui/examples/showcase.rs"]
 ---
 
 You already know how to build a UI: HTML for structure, CSS for looks, a little state to make it move. **The `blenderui` crate lets you do exactly that in Rust**, and draws the result with Blender's widget code in a native window. No browser, no webview, no JavaScript engine.
@@ -119,10 +119,10 @@ cargo add blenderui
 
 The [installation page](../../start/installation/) has the details: you need Rust 1.88 or newer, CMake and a C compiler, because the first build compiles BUI's C kit. To build against another checkout of the C sources, set `BUI_SOURCE_DIR`.
 
-The examples are the fastest way to see what's possible. From a clone of the repository:
+The examples are the fastest way to see what's possible. From the root of a cloned repository (these commands also work from `bindings/rust`):
 
 ```sh
-cd bindings/rust
+cargo build                                         # build the Rust workspace
 cargo run --release --example hello                 # an rsx! counter, with Tailwind and a slider
 cargo run --example showcase                        # the window in the screenshot
 cargo run --example showcase -- --screenshot a.png  # render it off-screen to a PNG
@@ -130,6 +130,12 @@ cargo run --example forms                           # the three looks side by si
 cargo run --example counter                         # the gpui-syntax counter
 cargo test                                          # unit, coverage and headless tests
 ```
+
+Root-level `cargo test` selects every Rust workspace member, including the
+showcase, GPUI adapters and benchmark binaries. GPUI adds its native platform
+dependencies to the first build; on Windows it also needs the Windows SDK
+shader compiler (`fxc.exe`, or set `GPUI_FXC_PATH`). Packages with no tests
+still print `running 0 tests`; each test binary reports its own result.
 
 ## Find your way around
 

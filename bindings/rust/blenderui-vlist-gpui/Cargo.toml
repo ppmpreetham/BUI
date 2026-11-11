@@ -13,15 +13,12 @@ keywords = ["gpui", "list", "virtualization", "chat", "blender"]
 categories = ["gui"]
 readme = "README.md"
 include = ["src/**", "examples/**", "README.md", "Cargo.toml"]
-# not published; also kept out of the main workspace (gpui is a huge build)
 publish = false
 
-# its own workspace: like `blenderui-table-gpui`, it never enters the normal CI builds
-[workspace]
 
 [dependencies]
 blenderui-vlist = { path = "../blenderui-vlist", version = "0.5.0" }
-blenderui-paint-gpui = { path = "../blenderui-paint-gpui", version = "0.5.0" }
+blenderui-paint-gpui = { path = "../blenderui-paint-gpui" }
 gpui = { package = "gpui-pre", version = "=0.3.11" }
 
 [dev-dependencies]

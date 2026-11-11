@@ -23,7 +23,7 @@ div().size_full().child(chat_list(&chat))
 chat.update(cx, |s, _| s.push(message));   // follows while at the bottom
 ```
 
-Kept out of the main workspace (gpui is a huge build). To build it on
+Included in the root Cargo workspace. To build it on
 Windows, point `GPUI_FXC_PATH` at the SDK's `fxc.exe`:
 `set GPUI_FXC_PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\fxc.exe`.
 

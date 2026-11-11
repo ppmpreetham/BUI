@@ -33,7 +33,7 @@ with a centred number), built with the same element tree in both
 ```sh
 cd bindings/rust/bench
 set GPUI_FXC_PATH=C:\Program Files (x86)\Windows Kits\10\bin\10.0.19041.0\x64\fxc.exe   # gpui needs fxc.exe
-cargo build --release
+cargo build --release -p bui-bench -p gpui-bench -p gpui-fast-bench
 py run.py --reps 3          # ~12 minutes; prints a Markdown table, writes results.json
 ```
 

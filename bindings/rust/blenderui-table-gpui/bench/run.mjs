@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const exe = join(here, "..", "target", "release", "examples", process.platform === "win32" ? "bench_gpui.exe" : "bench_gpui");
+const exe = join(here, "..", "..", "target", "release", "examples", process.platform === "win32" ? "bench_gpui.exe" : "bench_gpui");
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const reps = Number(arg("--reps", 3));
 const seconds = arg("--seconds", "8");

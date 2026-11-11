@@ -35,8 +35,8 @@ def main() -> int:
 
     found["bindings/python/bui/_version.py"] = re.search(
         r'__version__\s*=\s*"([^"]+)"', read(ROOT / "bindings/python/bui/_version.py")).group(1)
-    found["bindings/rust/Cargo.toml [workspace.package]"] = re.search(
-        r'^version\s*=\s*"([^"]+)"', read(RUST / "Cargo.toml"), re.M).group(1)
+    found["Cargo.toml [workspace.package]"] = re.search(
+        r'^version\s*=\s*"([^"]+)"', read(ROOT / "Cargo.toml"), re.M).group(1)
 
     header = read(ROOT / "kit" / "include" / "BUI_kit.h")
     parts = [re.search(rf"#define BUI_KIT_VERSION_{p}\s+(\d+)", header) for p in ("MAJOR", "MINOR", "PATCH")]

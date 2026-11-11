@@ -1,0 +1,3 @@
+# Preserve the output paths used by the binding build scripts.
+[build]
+target-dir = "bindings/rust/target"
