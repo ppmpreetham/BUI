@@ -77,7 +77,7 @@ jobs:
         shell: bash
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUI_BUILD_LUA_BINDINGS=ON -DBUI_BUILD_PYTHON_BINDINGS=OFF -DBUI_BUILD_IMGUI=OFF
       - name: Build
-        run: cmake --build build --config Release --parallel 4 --target bui-lua
+        run: cmake --build build --config Release --parallel 4 --target bui-lua _bui
       - name: Test (Linux, under Xvfb)
         if: runner.os == 'Linux'
         run: xvfb-run -a ctest --test-dir build -C Release -R bui_lua --output-on-failure

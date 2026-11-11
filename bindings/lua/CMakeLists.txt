@@ -61,6 +61,12 @@ else()
 
   add_library(bui_lua STATIC ${LUA_SRC})
   target_include_directories(bui_lua PUBLIC ${LUA_SRC_DIR})
+  if(NOT WIN32)
+    # lua.org's makefile defines these (LUA_USE_LINUX / LUA_USE_MACOSX): without LUA_USE_DLOPEN
+    # package.loadlib, and so `require` of any C module, is disabled
+    target_compile_definitions(bui_lua PRIVATE LUA_USE_POSIX LUA_USE_DLOPEN)
+    target_link_libraries(bui_lua PUBLIC ${CMAKE_DL_LIBS})
+  endif()
   if(MSVC)
     target_compile_options(bui_lua PRIVATE /W0)
   else()
