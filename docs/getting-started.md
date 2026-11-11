@@ -24,7 +24,7 @@ cmake --build build
 
 ### Build with Make
 
-With GNU Make installed alongside the requirements above, run these commands
+With GNU Make 4.2 or newer installed alongside the requirements above, run these commands
 from the repository root:
 
 ```sh
@@ -42,6 +42,9 @@ make BUILD_DIR=build-debug BUILD_TYPE=Debug JOBS=4
 make CMAKE_ARGS="-DBUI_BUILD_EXAMPLES=ON"
 make test CTEST_ARGS="-R bui_version_test"
 ```
+
+GNU Make 4.2+ is required to read the existing CMake cache with `$(file <...)`.
+Older versions can use the direct CMake commands above instead.
 
 `BUILD_TYPE` defaults to the type in the build directory's CMake cache, or
 `Release` for a new directory. For example, `make configure BUILD_TYPE=Debug`

@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Keep build rules and dependency discovery in CMake.
+# GNU Make 4.2 introduced the $(file <...) cache read used below.
+ifneq ($(filter 0.% 1.% 2.% 3.% 4.0 4.0.% 4.1 4.1.%,$(MAKE_VERSION)),)
+$(error GNU Make 4.2 or newer is required; found $(MAKE_VERSION))
+endif
+
 .DEFAULT_GOAL := build
 
 CMAKE ?= cmake
@@ -29,6 +34,7 @@ clean:
 	"$(CMAKE)" --build "$(BUILD_DIR)" --config "$(BUILD_TYPE)" --target clean
 
 help:
+	@echo "Requires GNU Make 4.2 or newer"
 	@echo "make           Configure and build BUI (cached type, otherwise Release)"
 	@echo "make configure Configure without building"
 	@echo "make test      Build and run the CTest suites"

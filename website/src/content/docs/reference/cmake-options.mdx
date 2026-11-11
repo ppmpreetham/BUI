@@ -61,7 +61,9 @@ See [Text and fonts](../../concepts/text-and-fonts/) for what these change on sc
 
 ## Compiler
 
-The repository's Makefile preserves the build directory's cached build type.
+The repository's Makefile requires GNU Make 4.2 or newer to read the CMake
+cache. With older Make versions, use the direct CMake commands below.
+The Makefile preserves the build directory's cached build type.
 After `make configure BUILD_TYPE=Debug`, both `make build` and `make test`
 use Debug. Set `BUILD_TYPE=Release` to switch it explicitly; a new directory
 defaults to Release.
