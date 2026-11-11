@@ -17,8 +17,10 @@ UI that uses no CPU lets the processor sleep).
 Needs: the buipy extension built for this Python (cmake --build <dir> --target
 buipy), the Node addon (cd bindings/node && npm run build), and the Rust
 example built with `cargo build --release --example bench_app` in
-bindings/rust, and the gpui comparison with `cargo build --release --bins` in
-bindings/rust/bench. Every BUI app runs twice, with BUI_GPU=0 (CPU renderer)
+bindings/rust, and the gpui comparison with
+`cargo build --release -p bui-bench -p gpui-bench -p gpui-fast-bench` from the
+repository root. All Rust executables use bindings/rust/target/release.
+Every BUI app runs twice, with BUI_GPU=0 (CPU renderer)
 and BUI_GPU=1 (GPU renderer). Windows only (process times come from the Win32
 API).
 """
@@ -93,8 +95,8 @@ def variants():
     py_env = dict(os.environ, PYTHONPATH=os.pathsep.join(filter(None, [os.path.join(ROOT, "bindings", "python"),
                                                                        find_pyd()])))
     js_env = dict(os.environ, NODE_PATH=os.path.join(ROOT, "bindings", "node_modules"), NODE_ENV="production")
-    rust_exe = os.path.join(ROOT, "bindings", "rust", "target", "release", "examples", "bench_app.exe")
-    bench_bin = os.path.join(ROOT, "bindings", "rust", "bench", "target", "release")
+    bench_bin = os.path.join(ROOT, "bindings", "rust", "target", "release")
+    rust_exe = os.path.join(bench_bin, "examples", "bench_app.exe")
     py = [sys.executable, "-X", "frozen_modules=on"]
     ours = [
         ("tkinter syntax (Python)", py + [os.path.join(APPS, "tk_app.py")], py_env),
