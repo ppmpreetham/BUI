@@ -59,6 +59,7 @@ Every HTML `on*` event has a listener, named the same in snake case (`onPointerD
 | `on_pointer_enter`, `on_pointer_leave` | `PointerEvent` | No |
 | `on_pointer_over`, `on_pointer_out`, `on_pointer_cancel` | `PointerEvent` | Yes |
 | `on_got_pointer_capture`, `on_lost_pointer_capture` | `PointerEvent` | No |
+| `on_press_drag` | `PressDragEvent { button, start, position, modifiers, direction }`: Blender's press-drag, once per press, from the first move more than 3 pixels from where the button went down | Yes |
 | `on_scroll_wheel` (or `on_wheel`) | `ScrollWheelEvent { position, delta, modifiers }` | Yes |
 | `on_scroll` | `ScrollEvent { offset }`: a scroll container moved | No |
 | `on_key_down`, `on_key_up` | `KeyDownEvent` / `KeyUpEvent { keystroke }` | Yes, from the focused element |
@@ -75,7 +76,8 @@ The details:
 - **`Modifiers`** has `shift`, `control` and `alt`.
 - **`PointerEvent`** has `pointer_id` (the mouse is 1), `pointer_type`, `is_primary`, `button`, `buttons` (bits: 1 left, 2 right, 4 middle), `position`, `modifiers`, `pressure` and `click_count`. A press fires `pointerdown` and then `mousedown`; a move fires `pointermove` and then `mousemove`.
 - **`on_context_menu` and `on_aux_click`** run when the secondary or middle button is released (a window reports the secondary button's click that way).
-- **`ClickEvent::click_count()`** tells a double-click from a single one.
+- **`ClickEvent::click_count()`** tells a double-click from a single one. A double click is Blender's rule: the same button pressed again within 350 ms without moving past the drag threshold.
+- **`PressDragEvent::direction`** is one of eight (`DragDirection::East` … `SouthEast`), rounded to the nearest as Blender's `WM_event_drag_direction` does. The threshold is `DRAG_THRESHOLD` (3 logical pixels, Blender's `U.drag_threshold_mouse`).
 - **`ScrollWheelEvent::delta`** is in lines; positive scrolls the content up (the wheel turned away from you).
 - **`Keystroke`** has `key` (the key's name: `"a"`, `"Return"`, `"Left"` …), `key_char` (the typed text, if any) and `modifiers`.
 - **`ChangeEvent`** carries `value` (the text), `checked` (checkboxes and radios) and `number` (numbers, ranges, and a select's index). `on_input` and `on_change` both fire when the value changes. [The three looks](../styled-and-blender-components/#form-controls) lists what each control sends.
@@ -137,6 +139,15 @@ div().on_mouse_event(|e: &MouseMoveEvent, phase, _, _| {
 ```
 
 It works for `MouseDownEvent`, `MouseUpEvent`, `MouseMoveEvent`, `ScrollWheelEvent` (`on_mouse_event`) and `KeyDownEvent`, `KeyUpEvent` (`on_key_event`). `on_window_event(kind, f)` is the general form, with an `EventKind`, for the pointer events.
+
+## What an event costs
+
+Events are cheap by design, and a window doesn't render again for pointer events unless something is styled by them.
+
+- **No render for hover, press or focus** unless the frame has something that depends on it: a `:hover`, `:active` or `:focus` rule in your CSS, a `.hover(..)` / `.active(..)` / `.focus(..)` style, a `whileHover` / `whileTap` / `whileFocus` gesture, or a link. Otherwise the listeners run and nothing is built again. With 3000 boxes, a pointer move is about 10 µs instead of about 9 ms.
+- **A hit test skips what the pointer can't be in.** Each frame builds, on the first hit test, the end of every box's subtree and the rectangle holding it, so a pointer move doesn't visit every box.
+- **A frame skips the kinds nothing listens to**, and window-wide listeners are kept in a list of their own, so they cost nothing to the elements that don't have one.
+- **A move that ends over the same elements as the last one** stops after the hit test: no allocation, no events.
 
 ## The Window API
 

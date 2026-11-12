@@ -7,6 +7,9 @@ All notable changes to **blenderui** (BUI). The format follows
 ## [Unreleased]
 
 ### Added
+- **Rust: Blender's press-drag.** `on_press_drag` (`PressDragEvent`, `DragDirection`, `DRAG_THRESHOLD`): once per press, from the first
+  move more than 3 pixels from where the button went down, with the direction to the nearest of eight, as Blender's
+  `KM_PRESS_DRAG` and `WM_event_drag_direction` (`wm_event_system.cc`, `wm_event_query.cc`).
 - **Rust: every HTML event, with capture and bubbling.** A listener for each `on*` event: `on_double_click`,
   `on_aux_click`, `on_context_menu`, `on_mouse_enter` / `leave` / `over` / `out`, the pointer events
   (`on_pointer_down` / `up` / `move` / `enter` / `leave` / `over` / `out` / `cancel` and the pointer capture pair, with a
@@ -129,6 +132,17 @@ All notable changes to **blenderui** (BUI). The format follows
 - **Rust: `whileInView`** counts what a scroller clips as out of view, so a row below a scroller's edge animates when
   it is scrolled in, not at mount.
 - **Rust: widgets and Motion.** A frame of moving values (no layout) freed every form widget; it keeps them now.
+- **Rust: pointer events are fast and don't render.** A hover, press or focus change rendered the whole view again, whatever
+  it was styled by: with 3000 boxes a pointer move cost about 9 ms and a click about 60 ms, listeners or none. A frame now
+  records which interaction states its styles depend on (`:hover` / `:active` / `:focus` in the author sheet, `.hover(..)` styles,
+  Motion gestures, links) and the window renders again only for those. The hit test builds an index of subtree ranges and their
+  bounds and skips the subtrees a point is not in, window-wide listeners have a list of their own, and a move that ends over
+  the same elements stops after the hit test. 3000 boxes with listeners: a move 10,900 µs to 12 µs and a click 25,600 µs to
+  35 µs; 21,000 boxes: a move 46,000 µs to 14 µs (`examples/events_bench.rs`, headless, release, against the commit before).
+- **Rust: `cx.notify()` in a listener didn't render the window it ran in** (that window is out of the list while it runs); the
+  always-dirty click hid it.
+- **Rust: a box that clips (`overflow`) and moves took the wrong clip for what is inside it** when its parent's clip was
+  the same rectangle (Motion's `x` / `y` on a clipping element): the clip a box makes is kept and its children's clip recomputed from it.
 - **Windows: a window that animates for ever ignored the mouse, the keyboard and its title bar.** The frames of an animation are
   posted messages (`WM_BK_RENDER`, one after another), and Windows hands a thread its posted messages before hardware input and
   timers, so with an endless animation (a loop, a spinner, a marquee) none of them got through: no hover, no drag, no maximize,

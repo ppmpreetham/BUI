@@ -519,6 +519,8 @@ impl Div {
         on_focus_in, on_focus_in_capture => FocusIn, FocusEvent;
         /// `focusout`
         on_focus_out, on_focus_out_capture => FocusOut, FocusEvent;
+        /// Blender's press-drag: a button is held and the pointer moved past the drag threshold (once per press).
+        on_press_drag, on_press_drag_capture => PressDrag, PressDragEvent;
         /// `scroll`: this element's scroll position changed (no bubbling).
         on_scroll, on_scroll_capture => Scroll, ScrollEvent;
         /// Form controls: the committed value changed (`change` in HTML).

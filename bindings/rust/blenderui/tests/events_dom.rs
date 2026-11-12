@@ -37,6 +37,7 @@ impl Render for Page {
                             .on_aux_click(|_, _, _| log("inner auxclick"))
                             .on_context_menu(|e, _, _| log(&format!("inner contextmenu {}", e.position.x.0 as i32)))
                             .on_pointer_down(|_, _, _| log("inner pointerdown"))
+                            .on_press_drag(|e, _, _| log(&format!("inner pressdrag {:?}", e.direction)))
                             .on_any_mouse_down(|_, _, _| log("inner mousedown"))
                             .on_mouse_enter(|_, _, _| log("inner enter"))
                             .on_mouse_leave(|_, _, _| log("inner leave"))
@@ -285,5 +286,94 @@ fn rsx_spellings() {
         assert!(l.contains(&"rsx pointerdown".to_owned()) && l.contains(&"rsx enter".to_owned()), "{l:?}");
         let at = |s: &str| l.iter().position(|x| x == s).unwrap_or(usize::MAX);
         assert!(at("rsx capture") < at("rsx bubble"), "{l:?}");
+    });
+}
+
+#[test]
+fn press_drag_comes_once_past_the_threshold() {
+    Application::headless().run(|cx| {
+        let w = open(cx);
+        cx.simulate_mouse_move(w, 100.0, 100.0);
+        take();
+        cx.simulate_press(w, 100.0, 100.0);
+        cx.simulate_mouse_move(w, 102.0, 100.0); // 2 px: not a drag (Blender's threshold is 3)
+        assert!(!take().iter().any(|x| x.starts_with("inner pressdrag")));
+        cx.simulate_mouse_move(w, 110.0, 100.0);
+        cx.simulate_mouse_move(w, 130.0, 100.0);
+        let l = take();
+        assert_eq!(l.iter().filter(|x| x.starts_with("inner pressdrag")).count(), 1, "once per press: {l:?}");
+        assert!(l.contains(&"inner pressdrag East".to_owned()), "to the right: {l:?}");
+        cx.simulate_release(w, 130.0, 100.0);
+    });
+}
+
+/// A frame renders again for a hover only when something is styled by it. The built-in sheets style nothing
+/// by interaction but links (`a:hover`), which the frame knows by the tag: another rule there needs the
+/// frame to learn about it (`layout::div_states`).
+#[test]
+fn the_built_in_sheets_only_style_links_by_hover() {
+    for css in [blenderui::html::UA_CSS, blenderui::html::UA_STYLED_CSS] {
+        assert_eq!(css.matches(":hover").count(), css.matches("a:hover").count(), "a hover rule that isn't a link's");
+        assert_eq!(css.matches(":active").count(), 0, ":active in a built-in sheet");
+        assert_eq!(css.matches(":focus").count(), 0, ":focus in a built-in sheet");
+    }
+}
+
+struct Hover;
+
+impl Render for Hover {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // the first renders count: they are what a hover would make again
+        RENDERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        div().size_full()
+            .child(div().id("plain").absolute().left(px(0.0)).top(px(0.0)).w(px(100.0)).h(px(100.0)))
+            .child(div().id("styled").absolute().left(px(200.0)).top(px(0.0)).w(px(100.0)).h(px(100.0))
+                .hover(|s| s.bg(rgb(0xff0000))))
+    }
+}
+
+static RENDERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+#[test]
+fn hover_renders_again_only_when_styled_by_it() {
+    use std::sync::atomic::Ordering::Relaxed;
+    Application::headless().run(|cx| {
+        let w = cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Hover)).unwrap().id;
+        cx.draw(w);
+        // with a hover style somewhere, the pointer entering an element renders again
+        let before = RENDERS.load(Relaxed);
+        cx.simulate_mouse_move(w, 250.0, 50.0);
+        assert!(RENDERS.load(Relaxed) > before, "styled by hover: rendered again");
+    });
+}
+
+struct Plain;
+
+static PLAIN_RENDERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+impl Render for Plain {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        PLAIN_RENDERS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        div().size_full()
+            .child(div().id("a").absolute().left(px(0.0)).top(px(0.0)).w(px(100.0)).h(px(100.0))
+                .on_mouse_enter(|_, _, _| log("a enter")))
+            .child(div().id("b").absolute().left(px(200.0)).top(px(0.0)).w(px(100.0)).h(px(100.0)))
+    }
+}
+
+#[test]
+fn nothing_styled_by_hover_means_no_render() {
+    use std::sync::atomic::Ordering::Relaxed;
+    Application::headless().run(|cx| {
+        let w = cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Plain)).unwrap().id;
+        cx.draw(w);
+        take();
+        let before = PLAIN_RENDERS.load(Relaxed);
+        for x in [50.0, 250.0, 50.0, 250.0] {
+            cx.simulate_mouse_move(w, x, 50.0);
+        }
+        cx.simulate_click(w, 50.0, 50.0);
+        assert_eq!(PLAIN_RENDERS.load(Relaxed), before, "moving and clicking over unstyled elements doesn't render the view");
+        assert!(take().contains(&"a enter".to_owned()), "and the listeners still hear them");
     });
 }

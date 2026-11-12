@@ -573,7 +573,12 @@ impl App {
 
     fn with_window<R>(&mut self, id: usize, f: impl FnOnce(&mut Window, &mut App) -> R) -> Option<R> {
         let mut w = self.windows.get_mut(id)?.take()?;
+        let notified = self.notified;
         let r = f(&mut w, self);
+        // the window is out of the list while it runs: a `notify` in what it called missed it
+        if self.notified != notified {
+            w.refresh();
+        }
         self.windows[id] = Some(w);
         Some(r)
     }
@@ -1034,6 +1039,12 @@ pub struct Window {
     current: Option<Key>,
     /// The elements under the pointer, outermost first: the order of what it enters and leaves.
     hover_path: Vec<Key>,
+    /// Where the button went down, and whether its press-drag has come (Blender's `KM_PRESS_DRAG`, once per press).
+    press_start: (f32, f32),
+    press_drag_sent: bool,
+    /// Scratch for the hit test of a pointer move (kept so a move allocates nothing).
+    hit_buf: Vec<usize>,
+    path_buf: Vec<Key>,
     /// Capture events raised by a listener: fired when the event it is in has gone through (the frame is
     /// lent to that one meanwhile).
     later: Vec<(EventKind, Key, PointerEvent)>,
@@ -1101,6 +1112,10 @@ impl Window {
                 current: None,
                 hover_path: Vec::new(),
                 later: Vec::new(),
+                press_start: (0.0, 0.0),
+                press_drag_sent: false,
+                hit_buf: Vec::new(),
+                path_buf: Vec::new(),
             };
             if headless {
                 win.scale = sys::BK_scale().max(1.0);
@@ -1450,7 +1465,8 @@ impl Window {
         let any = e as &dyn std::any::Any;
         // every element of the window, for the listeners that hear all of it
         let wide = |this: &mut Self, app: &mut App, phase: DispatchPhase| {
-            for i in 0..frame.nodes.len() {
+            for &i in &frame.wide {
+                let i = i as usize;
                 for en in entries(i).into_iter().flatten().filter(|en| en.wide && en.kind == kind) {
                     this.current = Some(frame.nodes[i].key);
                     (en.call)(any, phase, this, app);
@@ -1541,23 +1557,34 @@ impl Window {
     /// Where the pointer's events go: the element that holds it, else the one under it (else the root,
     /// which the window-wide listeners hear through).
     fn pointer_target(&self) -> Key {
-        self.capture.or_else(|| self.state_deepest()).unwrap_or(crate::layout::ROOT_KEY)
+        self.capture.or_else(|| self.hover_path.last().copied()).unwrap_or(crate::layout::ROOT_KEY)
     }
 
     fn update_hover(&mut self, app: &mut App, fire: bool) {
-        let path = self.path_at(self.pointer.0, self.pointer.1);
-        let now: std::collections::HashSet<Key> = path.iter().copied().collect();
-        if now == self.state.hovered {
+        // the elements under the pointer, into buffers that stay: most moves end where this returns
+        let mut path = std::mem::take(&mut self.path_buf);
+        let mut hits = std::mem::take(&mut self.hit_buf);
+        path.clear();
+        if let Some(f) = &self.frame {
+            f.hit_path_into(self.pointer.0, self.pointer.1, &self.caches.styles, &mut hits);
+            path.extend(hits.iter().map(|&i| f.nodes[i].key));
+        }
+        self.hit_buf = hits;
+        if path == self.hover_path {
+            self.path_buf = path;
             return;
         }
+        let now: std::collections::HashSet<Key> = path.iter().copied().collect();
         let entered: Vec<Key> = path.iter().copied().filter(|k| !self.state.hovered.contains(k)).collect();
         let left: Vec<Key> = self.hover_path.iter().rev().copied().filter(|k| !now.contains(k)).collect();
         let (old_deepest, new_deepest) = (self.hover_path.last().copied(), path.last().copied());
-        let restyle = self.frame.as_ref().is_some_and(|f| {
-            entered.iter().chain(&left).any(|k| f.by_key().get(k).is_some())
-        });
+        // a style that depends on hover is the only reason to render again for one
+        let restyle = self.styled_by(crate::layout::interaction::HOVER)
+            && self.frame.as_ref().is_some_and(|f| entered.iter().chain(&left).any(|k| f.by_key().get(k).is_some()));
         self.state.hovered = now;
-        self.hover_path = path.clone();
+        // the path becomes the hover path; the old one's buffer is the next scratch
+        self.path_buf = std::mem::replace(&mut self.hover_path, path);
+        let path = &self.hover_path;
         // cursor of the deepest element that sets one
         if let Some(f) = &self.frame {
             let cursor = path.iter().rev()
@@ -1660,6 +1687,16 @@ impl Window {
                 self.fire(app, EventKind::PointerMove, target, &pe);
                 let e = MouseMoveEvent { position: point(px(x), px(y)), pressed_button: held, modifiers };
                 self.fire(app, EventKind::MouseMove, target, &e);
+                // Blender's press-drag: the first move past the drag threshold of a held button
+                if let Some(button) = held.filter(|_| !self.press_drag_sent) {
+                    let (sx, sy) = self.press_start;
+                    if (x - sx).abs() > DRAG_THRESHOLD || (y - sy).abs() > DRAG_THRESHOLD {
+                        self.press_drag_sent = true;
+                        let (start, at) = (point(px(sx), px(sy)), point(px(x), px(y)));
+                        let e = PressDragEvent { button, start, position: at, modifiers, direction: DragDirection::of(start, at) };
+                        self.fire(app, EventKind::PressDrag, target, &e);
+                    }
+                }
             }
             sys::BK_EV_LEAVE => {
                 self.pointer = (-1.0, -1.0);
@@ -1671,12 +1708,14 @@ impl Window {
                 let path = self.path_at(x, y);
                 self.press_button = button;
                 self.press_count = if ev.kind == sys::BK_EV_DOUBLE { 2 } else { 1 };
+                self.press_start = (x, y);
+                self.press_drag_sent = false;
                 self.state.active = path.iter().copied().collect();
                 self.set_focus(app, &path);
                 self.pressed = path.clone();
-                self.dirty = true;
+                self.dirty |= self.styled_by(crate::layout::interaction::ACTIVE | crate::layout::interaction::FOCUS);
                 self.caches.anim.pointer_down(&path, x, y);
-                let target = self.pointer_target();
+                let target = self.capture.or(path.last().copied()).unwrap_or(crate::layout::ROOT_KEY);
                 let mut pe = self.pointer_event(Some(button), Some(button), self.press_count);
                 pe.modifiers = modifiers;
                 self.fire(app, EventKind::PointerDown, target, &pe);
@@ -1701,7 +1740,7 @@ impl Window {
                 };
                 self.pressed.clear();
                 self.state.active.clear();
-                self.dirty = true;
+                self.dirty |= self.styled_by(crate::layout::interaction::ACTIVE | crate::layout::interaction::FOCUS);
                 self.caches.anim.pointer_up();
                 if let Some(target) = common {
                     let down = MouseDownEvent { button, position: point(px(x), px(y)), modifiers, click_count: self.press_count };
@@ -1751,6 +1790,12 @@ impl Window {
             }
             _ => {}
         }
+    }
+
+    /// Whether anything in the last frame is styled by one of the interaction states `bits` (all of them
+    /// when there is no frame to ask).
+    fn styled_by(&self, bits: u8) -> bool {
+        self.frame.as_ref().is_none_or(|f| f.stateful & bits != 0)
     }
 
     /// Element keys from the root to the element `key` (empty when it isn't in this frame).

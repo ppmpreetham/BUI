@@ -58,6 +58,21 @@ fn child_key(parent: Key, tag: &str, n: usize) -> Key {
 /// The key of the `<html>` element.
 pub(crate) const ROOT_KEY: Key = 0x68746d6c; // "html"
 
+/// The interaction states (bits) something in a frame is styled by: when the pointer moves onto another
+/// element, or a press lands, the window renders again only if the styles can change.
+pub(crate) mod interaction {
+    pub const HOVER: u8 = 1;
+    pub const ACTIVE: u8 = 2;
+    pub const FOCUS: u8 = 4;
+
+    /// The bits CSS text asks for (`:hover`, `:active`, `:focus`, `:focus-within`, `:focus-visible`).
+    pub fn of_css(css: &str) -> u8 {
+        (u8::from(css.contains(":hover")) * HOVER)
+            | (u8::from(css.contains(":active")) * ACTIVE)
+            | (u8::from(css.contains(":focus")) * FOCUS)
+    }
+}
+
 /// Interaction state the cascade reads (`:hover`, `:active`, `:focus`, `details[open]`).
 #[derive(Default)]
 pub(crate) struct UiState {
@@ -218,6 +233,29 @@ impl TwJit {
 pub(crate) struct AuthorSheet {
     hash: u64,
     sheet: Stylesheet,
+    /// The interaction states its rules mention (`interaction::*`).
+    state: u8,
+}
+
+/// The interaction states element `div` is styled by: its own `.hover(..)` styles, its Motion gestures, and
+/// the user-agent sheet's `a:hover` (a link). The author sheet's are in [`AuthorSheet::state`].
+fn div_states(div: &Div) -> u8 {
+    let mut bits = 0;
+    if let Some(st) = &div.states {
+        bits |= (u8::from(!st.hover.is_empty()) * interaction::HOVER)
+            | (u8::from(!st.active.is_empty()) * interaction::ACTIVE)
+            | (u8::from(!st.focus.is_empty()) * interaction::FOCUS);
+    }
+    if let Some(m) = div.motion() {
+        use crate::motion::When;
+        bits |= (u8::from(m.target(When::WhileHover).is_some()) * interaction::HOVER)
+            | (u8::from(m.target(When::WhileTap).is_some()) * interaction::ACTIVE)
+            | (u8::from(m.target(When::WhileFocus).is_some()) * interaction::FOCUS);
+    }
+    if div.tag == "a" {
+        bits |= interaction::HOVER;
+    }
+    bits
 }
 
 // ==========================================================================
@@ -290,6 +328,10 @@ pub(crate) struct BoxNode {
     // filled after layout
     pub bounds: Bounds<f32>,
     pub clip: Option<Bounds<f32>>,
+    /// The rectangle this element clips with (`overflow`, or `clip` on an absolute box), where it is now.
+    pub clip_rect: Option<Bounds<f32>>,
+    /// That clip applies to the element itself too (`clip`), not only to what is inside it (`overflow`).
+    pub clips_self: bool,
     pub opacity: f32,
     pub visible: bool,
     pub scroll_range: (f32, f32),
@@ -307,8 +349,47 @@ pub(crate) struct Frame {
     els: Vec<ElData>,
     /// The kinds of event something in this frame listens for (bits of `EventKind::bit`).
     pub listen: u64,
+    /// The interaction states its styles depend on (`interaction::*`).
+    pub stateful: u8,
+    /// The boxes with a listener that hears the whole window, in document order (usually none).
+    pub wide: Vec<u32>,
     pub title: Option<String>,
     by_key: std::cell::OnceCell<HashMap<Key, usize>>,
+    /// Where each box's subtree is, for the pointer's hit test (built on the first one; dropped when
+    /// boxes move).
+    pub(crate) hit_index: std::cell::OnceCell<HitIndex>,
+}
+
+/// For every box: the end of its subtree in the arena (boxes come parents first, a subtree is the run
+/// after its root), and the rectangle holding the boxes in it. A hit test skips a whole subtree its point
+/// is not in. `None` when the arena is not laid out that way (the hit test scans every box then).
+pub(crate) struct HitIndex(Option<(Vec<u32>, Vec<Bounds<f32>>)>);
+
+impl HitIndex {
+    fn build(nodes: &[BoxNode]) -> Self {
+        let n = nodes.len();
+        let mut end: Vec<u32> = (1..=n as u32).collect();
+        let mut descendants = vec![0u32; n];
+        let mut area: Vec<Bounds<f32>> = nodes.iter().map(|b| b.bounds).collect();
+        for j in (0..n).rev() {
+            let Some(p) = nodes[j].parent else { continue };
+            if p >= j {
+                return Self(None);
+            }
+            end[p] = end[p].max(end[j]);
+            descendants[p] += 1 + descendants[j];
+            let (a, b) = (area[p], area[j]);
+            let (x0, y0) = (a.origin.x.min(b.origin.x), a.origin.y.min(b.origin.y));
+            let (x1, y1) = ((a.origin.x + a.size.width).max(b.origin.x + b.size.width),
+                            (a.origin.y + a.size.height).max(b.origin.y + b.size.height));
+            area[p] = rect(x0, y0, x1 - x0, y1 - y0);
+        }
+        // a subtree is the run after its root: nothing else in it
+        if (0..n).any(|i| end[i] - i as u32 - 1 != descendants[i]) {
+            return Self(None);
+        }
+        Self(Some((end, area)))
+    }
 }
 
 /// Measure contexts of taffy leaves. Compared across frames: an unchanged
@@ -470,6 +551,8 @@ struct Builder<'a> {
     text_box: &'a mut KeyMap<Key, usize>,
     /// Set when a node changed while building the current subtree.
     changed: bool,
+    /// The interaction states the elements built so far are styled by.
+    stateful: u8,
     /// `tpos` for the element about to be built.
     next_tpos: (u32, u32),
     author: &'a Stylesheet,
@@ -1112,6 +1195,8 @@ impl<'a> Builder<'a> {
             styled: false,
             bounds: rect(0.0, 0.0, 0.0, 0.0),
             clip: None,
+            clip_rect: None,
+            clips_self: false,
             opacity: 1.0,
             visible: true,
             scroll_range: (0.0, 0.0),
@@ -1156,6 +1241,7 @@ impl<'a> Builder<'a> {
         self.nodes[i].pos = pos;
         self.nodes[i].tpos = std::mem::replace(&mut self.next_tpos, (1, 1));
         self.nodes[i].el = self.els.len() as u32;
+        self.stateful |= div_states(&div);
         self.els.push(ElData {
             tag: div.tag,
             id: div.id.take(),
@@ -2234,7 +2320,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     }
     let css_hash = hash_parts(&[css.as_bytes()]);
     if css_hash != caches.author.hash {
-        caches.author = AuthorSheet { hash: css_hash, sheet: Stylesheet::parse(&css) };
+        caches.author = AuthorSheet { hash: css_hash, sheet: Stylesheet::parse(&css), state: interaction::of_css(&css) };
         load_font_faces(&caches.author.sheet);
     }
     caches.styles.begin_frame();
@@ -2256,6 +2342,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     let LayoutCaches { styles, text, images, author, taffy, box_of, acc, matched, recon, text_box, containers,
                        wrap_widths, anim, .. } = caches;
     let mut b = Builder {
+        stateful: author.state,
         nodes,
         els,
         taffy,
@@ -2315,7 +2402,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     });
     let avail = Size { width: AvailableSpace::Definite(viewport.0),
                        height: AvailableSpace::Definite(viewport.1) };
-    let Builder { nodes, els, taffy, styles, text: tc, title, text_box, .. } = b;
+    let Builder { nodes, els, taffy, styles, text: tc, title, text_box, stateful, .. } = b;
     taffy.compute(root_id, avail, |known, available, ctx| {
             match ctx {
                 Measure::Text { key, size, flags, line, nowrap, brk, .. } => {
@@ -2344,7 +2431,15 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     drop(s);
     let _s = span(Phase::Place);
     let listen = els.iter().filter_map(|e| e.listeners.as_deref()).fold(0, |m, l| m | l.kinds);
-    let mut frame = Frame { nodes, els, listen, title, by_key: Default::default() };
+    let wide = if els.iter().any(|e| e.listeners.as_deref().is_some_and(|l| l.entries.iter().any(|en| en.wide))) {
+        (0..nodes.len() as u32).filter(|&i| {
+            let e = nodes[i as usize].el;
+            e != NONE && els[e as usize].listeners.as_deref().is_some_and(|l| l.entries.iter().any(|en| en.wide))
+        }).collect()
+    } else {
+        Vec::new()
+    };
+    let mut frame = Frame { nodes, els, listen, stateful, wide, title, by_key: Default::default(), hit_index: Default::default() };
     box_of.clear();
     for (i, n) in frame.nodes.iter().enumerate() {
         if let Some(t) = n.taffy {
@@ -2359,6 +2454,16 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     walk.place(&mut frame.nodes, root_id, 0.0, 0.0, None, (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
     frame
+}
+
+/// The clip box `p` gives its children: its own, narrowed by the rectangle it clips with (when that clip
+/// only applies inside it: `overflow`).
+pub(crate) fn child_clip(nodes: &[BoxNode], p: usize) -> Option<Bounds<f32>> {
+    let n = &nodes[p];
+    match (n.clip, n.clip_rect) {
+        (c, Some(r)) if !n.clips_self => Some(c.map_or(r, |c| c.intersect(&r))),
+        (c, _) => c,
+    }
 }
 
 /// Positions follow the taffy tree (words live in line containers, which may
@@ -2411,6 +2516,8 @@ impl Walk<'_> {
                     None => r,
                 };
                 nodes[i].clip = Some(r);
+                nodes[i].clip_rect = Some(rect(x + left, y + top, (right - left).max(0.0), (bottom - top).max(0.0)));
+                nodes[i].clips_self = true;
                 child_clip = Some(r);
             }
             let ov = st.layout.overflow;
@@ -2422,6 +2529,9 @@ impl Walk<'_> {
                     Some(c) => c.intersect(&pad),
                     None => pad,
                 });
+                if !nodes[i].clips_self {
+                    nodes[i].clip_rect = Some(pad);
+                }
                 if ov.x == Overflow::Scroll || ov.y == Overflow::Scroll {
                     let axis = |o: Overflow, content: f32, view: f32| {
                         if o == Overflow::Scroll { (content - view).max(0.0) } else { 0.0 }
@@ -2619,8 +2729,29 @@ impl Frame {
 
     /// Element boxes from the root down to the topmost box under (x, y).
     pub(crate) fn hit_path(&self, x: f32, y: f32, styles: &StyleStore) -> Vec<usize> {
+        let mut path = Vec::new();
+        self.hit_path_into(x, y, styles, &mut path);
+        path
+    }
+
+    /// [`hit_path`](Self::hit_path) into `path` (cleared first): no allocation when it has room.
+    pub(crate) fn hit_path_into(&self, x: f32, y: f32, styles: &StyleStore, path: &mut Vec<usize>) {
+        path.clear();
         let mut best: Option<(i32, usize)> = None;
-        for (i, n) in self.nodes.iter().enumerate() {
+        let nodes = &self.nodes;
+        let index = self.hit_index.get_or_init(|| HitIndex::build(nodes)).0.as_ref();
+        let mut i = 0;
+        while i < nodes.len() {
+            let n = &nodes[i];
+            // a box that is hidden, clipped away or has the point outside everything under it: its whole
+            // subtree is out (a clip only narrows what is under a box; visibility is inherited)
+            if let Some((end, area)) = index {
+                if !n.visible || n.clip.is_some_and(|c| !c.contains(x, y)) || !area[i].contains(x, y) {
+                    i = end[i] as usize;
+                    continue;
+                }
+            }
+            i += 1;
             if !n.visible || n.taffy.is_none() || !styles[n.style].pointer_events {
                 continue;
             }
@@ -2628,21 +2759,19 @@ impl Frame {
                 continue;
             }
             // later boxes paint over earlier ones; z-index lifts a subtree
-            let z = self.z_of(i, styles);
+            let z = self.z_of(i - 1, styles);
             if best.is_none_or(|(bz, _)| z >= bz) {
-                best = Some((z, i));
+                best = Some((z, i - 1));
             }
         }
-        let mut path = Vec::new();
-        let mut cur = best.map(|(_, b)| self.nodes[b].owner);
+        let mut cur = best.map(|(_, b)| nodes[b].owner);
         while let Some(i) = cur {
-            if self.nodes[i].el != NONE {
+            if nodes[i].el != NONE {
                 path.push(i);
             }
-            cur = self.nodes[i].parent;
+            cur = nodes[i].parent;
         }
         path.reverse();
-        path
     }
 
     /// The effective stacking level of a box (its nearest z-index).

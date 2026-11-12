@@ -616,24 +616,32 @@ impl Elements {
             }
         }
         if moved {
-            // a box moves with every box under it (parents come before children)
+            frame.hit_index = std::cell::OnceCell::new(); // where the boxes are changed
+            // a box moves with every box under it (parents come before children), and so does the clip it
+            // makes for them; what they are clipped by is then the parent's clip again
             for j in 0..nodes.len() {
                 let own = self.shift[j];
                 let up = nodes[j].parent.map_or((0.0, 0.0), |p| self.shift[p]);
                 let d = (own.0 + up.0, own.1 + up.1);
                 self.shift[j] = d;
                 if d != (0.0, 0.0) {
-                    let b = &mut nodes[j].bounds;
-                    b.origin.x += d.0;
-                    b.origin.y += d.1;
-                    // a clip made inside the moved subtree moves with it
-                    let inner = nodes[j].parent.is_some_and(|p| self.shift[p] == d && own == (0.0, 0.0));
-                    let parent_clip = nodes[j].parent.and_then(|p| nodes[p].clip);
-                    if let (true, Some(c)) = (inner, &mut nodes[j].clip)
-                        && parent_clip != Some(*c) {
-                            c.origin.x += d.0;
-                            c.origin.y += d.1;
-                        }
+                    let n = &mut nodes[j];
+                    n.bounds.origin.x += d.0;
+                    n.bounds.origin.y += d.1;
+                    if let Some(r) = &mut n.clip_rect {
+                        r.origin.x += d.0;
+                        r.origin.y += d.1;
+                    }
+                }
+                if let Some(p) = nodes[j].parent.filter(|&p| self.shift[p] != (0.0, 0.0) || nodes[p].clip_rect.is_some()) {
+                    // inside a box that moved, or that clips: its clip again (a box that clips itself narrows it)
+                    let base = crate::layout::child_clip(nodes, p);
+                    let n = &nodes[j];
+                    let clip = match (base, n.clip_rect, n.clips_self) {
+                        (b, Some(r), true) => Some(b.map_or(r, |b| b.intersect(&r))),
+                        (b, _, _) => b,
+                    };
+                    nodes[j].clip = clip;
                 }
             }
             self.shift.clear();

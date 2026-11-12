@@ -151,6 +151,8 @@ pub enum EventKind {
     Blur,
     FocusIn,
     FocusOut,
+    // Blender's press-drag (`KM_PRESS_DRAG`)
+    PressDrag,
     // the rest
     Scroll,
     Hover,
@@ -239,3 +241,51 @@ pub struct ScrollEvent {
     /// Where its content is scrolled to (from the top left).
     pub offset: Point<Pixels>,
 }
+
+/// The eight directions of a drag (Blender's `KM_DIRECTION_*`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragDirection {
+    East,
+    NorthEast,
+    North,
+    NorthWest,
+    West,
+    SouthWest,
+    South,
+    SouthEast,
+}
+
+impl DragDirection {
+    /// The direction of the move from `from` to `to` (y grows downward), as `WM_event_drag_direction` rounds it:
+    /// to the nearest of eight.
+    #[must_use]
+    pub fn of(from: Point<Pixels>, to: Point<Pixels>) -> Self {
+        let (dx, dy) = (to.x.0 - from.x.0, from.y.0 - to.y.0); // up is positive, as in Blender
+        match (4.0 * dy.atan2(dx) / std::f32::consts::PI).round() as i32 {
+            0 => Self::East,
+            1 => Self::NorthEast,
+            2 => Self::North,
+            3 => Self::NorthWest,
+            -1 => Self::SouthEast,
+            -2 => Self::South,
+            -3 => Self::SouthWest,
+            _ => Self::West,
+        }
+    }
+}
+
+/// Blender's press-drag (`KM_PRESS_DRAG`, "click-drag"): a button is held and the pointer has moved past the
+/// drag threshold ([`DRAG_THRESHOLD`] pixels). It comes once per press, from the first move past it.
+#[derive(Clone, Debug)]
+pub struct PressDragEvent {
+    pub button: MouseButton,
+    /// Where the button was pressed.
+    pub start: Point<Pixels>,
+    pub position: Point<Pixels>,
+    pub modifiers: Modifiers,
+    pub direction: DragDirection,
+}
+
+/// How far (logical pixels, either way) a held pointer moves before it is a drag: Blender's
+/// `U.drag_threshold_mouse` (3).
+pub const DRAG_THRESHOLD: f32 = 3.0;
