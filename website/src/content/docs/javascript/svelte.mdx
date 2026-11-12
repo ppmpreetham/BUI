@@ -84,7 +84,7 @@ To mount into a window you opened yourself, use `createRoot(window)`, then `root
 Elements are HTML elements, as in the browser:
 
 - **`class`** takes Tailwind classes, and `class={{ on: active }}` objects and arrays work. **`style`** takes a string; `style:color={c}` directives work.
-- **Mouse, keyboard and form events** work: `onclick`, `onmousedown`, `onmouseup`, `onmousemove`, `onmouseenter`, `onmouseleave`, `onwheel`, `onkeydown`, `onkeyup`, `oninput` and `onchange`. They bubble, and `stopPropagation` works. Svelte delegates most of them to the window's body, as on the web.
+- **Mouse, keyboard and form events** work: `onclick`, `onmousedown`, `onmouseup`, `onmousemove`, `onmouseenter`, `onmouseleave`, `ondblclick`, `oncontextmenu`, `onpointerdown`, `onpointerup`, `onpointermove`, `onfocus`, `onblur`, `onscroll`, `onwheel`, `onkeydown`, `onkeyup`, `oninput` and `onchange`. They bubble, and `stopPropagation` works. Svelte delegates most of them to the window's body, as on the web.
 - **Bindings:** `bind:value`, `bind:checked`, `bind:group` and `bind:this` work.
 - **Blocks:** `{#if}`, `{#each}` (keyed too), `{#await}`, `{#key}` and snippets with `{@render}` work, and so do context, `onMount` and `onDestroy`.
 - **Transitions** (`transition:`, `in:`, `out:`) run their start and end, without animating in between, for now: an outro removes its element at once.

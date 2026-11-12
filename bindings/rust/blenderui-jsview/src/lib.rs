@@ -31,6 +31,13 @@ pub struct Event {
     /// 0 left, 1 middle, 2 right (DOM numbering).
     pub button: u32,
     pub click_count: u32,
+    /// The DOM `buttons` bits held (1 left, 2 right, 4 middle).
+    pub buttons: u32,
+    /// `pressdrag`: the compass direction; `pointer*`: the pointer type.
+    pub direction: Option<String>,
+    /// `pressdrag`: where the press started; `scroll`: the scroll offsets.
+    pub dx: f64,
+    pub dy: f64,
     pub delta: f64,
     pub key: Option<String>,
     pub key_char: Option<String>,
@@ -43,6 +50,9 @@ pub struct Event {
     /// `motion`: a plain object's values, for `onUpdate`
     pub values: Option<Vec<f64>>,
 }
+
+/// `Event::target` of the window own `focus` and `blur` (an element gets its node).
+pub const WINDOW: u32 = u32::MAX;
 
 /// Where a window's events go (called on the UI thread).
 pub type Sink = Arc<dyn Fn(Event)>;
@@ -128,23 +138,46 @@ pub mod op {
     pub const INSERT: i32 = 5; // parent, child, before
     pub const REMOVE: i32 = 6; // parent, child
     pub const SET_TEXT: i32 = 7; // id, s(text)
-    pub const LISTEN: i32 = 8; // id, event bits (replaces)
+    pub const LISTEN: i32 = 8; // id, event bits low 31, high bits (replaces)
     pub const FREE: i32 = 9; // id
-    pub const MOTION: i32 = 10; // id, which (motion::MotionProp::parse), index into the commit's motion props
+    pub const MOTION: i32 = 10; // id, which (motion::MotionProp::parse), index into the commit motion props
+    pub const CAPTURE: i32 = 11; // id, 1 hold the pointer for it / 0 let go
 }
 
 /// Event bits (`LISTEN`), matching `bindings/node/index.js`.
 pub mod ev {
-    pub const CLICK: u32 = 1;
-    pub const MOUSE_DOWN: u32 = 2;
-    pub const MOUSE_UP: u32 = 4;
-    pub const MOUSE_MOVE: u32 = 8;
-    pub const HOVER: u32 = 16;
-    pub const WHEEL: u32 = 32;
-    pub const KEY_DOWN: u32 = 64;
-    pub const KEY_UP: u32 = 128;
-    pub const CHANGE: u32 = 256;
-    pub const INPUT: u32 = 512;
+    pub const CLICK: u64 = 1 << 0;
+    pub const MOUSE_DOWN: u64 = 1 << 1;
+    pub const MOUSE_UP: u64 = 1 << 2;
+    pub const MOUSE_MOVE: u64 = 1 << 3;
+    pub const HOVER: u64 = 1 << 4;
+    pub const WHEEL: u64 = 1 << 5;
+    pub const KEY_DOWN: u64 = 1 << 6;
+    pub const KEY_UP: u64 = 1 << 7;
+    pub const CHANGE: u64 = 1 << 8;
+    pub const INPUT: u64 = 1 << 9;
+    pub const DOUBLE_CLICK: u64 = 1 << 10;
+    pub const AUX_CLICK: u64 = 1 << 11;
+    pub const CONTEXT_MENU: u64 = 1 << 12;
+    pub const MOUSE_OVER: u64 = 1 << 13;
+    pub const MOUSE_OUT: u64 = 1 << 14;
+    pub const POINTER_DOWN: u64 = 1 << 15;
+    pub const POINTER_UP: u64 = 1 << 16;
+    pub const POINTER_MOVE: u64 = 1 << 17;
+    pub const POINTER_ENTER: u64 = 1 << 18;
+    pub const POINTER_LEAVE: u64 = 1 << 19;
+    pub const POINTER_OVER: u64 = 1 << 20;
+    pub const POINTER_OUT: u64 = 1 << 21;
+    pub const POINTER_CANCEL: u64 = 1 << 22;
+    pub const GOT_CAPTURE: u64 = 1 << 23;
+    pub const LOST_CAPTURE: u64 = 1 << 24;
+    pub const KEY_PRESS: u64 = 1 << 25;
+    pub const FOCUS: u64 = 1 << 26;
+    pub const BLUR: u64 = 1 << 27;
+    pub const FOCUS_IN: u64 = 1 << 28;
+    pub const FOCUS_OUT: u64 = 1 << 29;
+    pub const PRESS_DRAG: u64 = 1 << 30;
+    pub const SCROLL: u64 = 1 << 31;
 }
 
 // ==========================================================================
@@ -158,7 +191,7 @@ struct JsNode {
     /// The `style` attribute, parsed once when set (renders reuse it).
     style: Option<Box<[blenderui::css::Decl]>>,
     children: Vec<u32>,
-    events: u32,
+    events: u64,
     /// Motion's props (`initial`, `animate` ...), when it has any.
     motion: Option<Box<motion::NodeMotion>>,
     /// JavaScript removed it, and its `exit` animation runs first: the presence it goes with (0: none).
@@ -229,7 +262,7 @@ impl JsView {
     }
 
     fn apply(&mut self, ops: &[i32], strings: &[String], motion: &mut [Option<motion::MotionProp>],
-             tags: &mut HashMap<String, &'static str>) {
+             tags: &mut HashMap<String, &'static str>, capture: &mut Vec<(i32, bool)>) {
         let s = |k: i32| strings.get(k as usize).map(String::as_str).unwrap_or("");
         let mut i = 0;
         while i < ops.len() {
@@ -311,10 +344,14 @@ impl JsView {
                     i += 3;
                 }
                 op::LISTEN => {
-                    let bits = a(2) as u32;
+                    let bits = u64::from(a(2) as u32) | (u64::from(a(3) as u32) << 31);
                     if let Some(n) = self.node(a(1)) {
                         n.events = bits;
                     }
+                    i += 4;
+                }
+                op::CAPTURE => {
+                    capture.push((a(1), a(2) != 0));
                     i += 3;
                 }
                 op::MOTION => {
@@ -415,7 +452,7 @@ impl JsView {
         d.into_any_element()
     }
 
-    fn listeners(&self, mut d: Div, id: u32, bits: u32) -> Div {
+    fn listeners(&self, mut d: Div, id: u32, bits: u64) -> Div {
         let base = Event { window: self.window, target: id, ..Default::default() };
         let send = {
             let t = self.sink.clone();
@@ -508,6 +545,96 @@ impl JsView {
             e.kind = "input".into();
             (e.value, e.checked, e.number) = (Some(c.value.clone()), c.checked, c.number);
         });
+        // the rest of HTML events, as tables: the Rust method, the DOM name
+        macro_rules! pointer {
+            ($($bit:ident, $method:ident, $name:expr;)*) => {$(
+                on!(ev::$bit, $method, |e, p| {
+                    e.kind = $name.into();
+                    (e.x, e.y) = (p.position.x.0 as f64, p.position.y.0 as f64);
+                    e.button = p.button.as_ref().map_or(0, button);
+                    e.buttons = u32::from(p.buttons);
+                    e.click_count = p.click_count as u32;
+                    e.direction = Some("mouse".into());
+                    mods(&mut e, &p.modifiers);
+                });
+            )*};
+        }
+        pointer! {
+            POINTER_DOWN, on_pointer_down, "pointerdown";
+            POINTER_UP, on_pointer_up, "pointerup";
+            POINTER_MOVE, on_pointer_move, "pointermove";
+            POINTER_OVER, on_pointer_over, "pointerover";
+            POINTER_OUT, on_pointer_out, "pointerout";
+            POINTER_CANCEL, on_pointer_cancel, "pointercancel";
+            GOT_CAPTURE, on_got_pointer_capture, "gotpointercapture";
+            LOST_CAPTURE, on_lost_pointer_capture, "lostpointercapture";
+        }
+        on!(@ false, ev::POINTER_ENTER, on_pointer_enter, |e, p| {
+            e.kind = "pointerenter".into();
+            (e.x, e.y) = (p.position.x.0 as f64, p.position.y.0 as f64);
+            e.direction = Some("mouse".into());
+        });
+        on!(@ false, ev::POINTER_LEAVE, on_pointer_leave, |e, p| {
+            e.kind = "pointerleave".into();
+            (e.x, e.y) = (p.position.x.0 as f64, p.position.y.0 as f64);
+            e.direction = Some("mouse".into());
+        });
+        macro_rules! hover {
+            ($($bit:ident, $method:ident, $name:expr;)*) => {$(
+                on!(ev::$bit, $method, |e, m| {
+                    e.kind = $name.into();
+                    (e.x, e.y) = (m.position.x.0 as f64, m.position.y.0 as f64);
+                    mods(&mut e, &m.modifiers);
+                });
+            )*};
+        }
+        hover! {
+            MOUSE_OVER, on_mouse_over, "mouseover";
+            MOUSE_OUT, on_mouse_out, "mouseout";
+        }
+        macro_rules! click {
+            ($($bit:ident, $method:ident, $name:expr;)*) => {$(
+                on!(ev::$bit, $method, |e, c| {
+                    e.kind = $name.into();
+                    (e.x, e.y) = (c.up.position.x.0 as f64, c.up.position.y.0 as f64);
+                    e.button = button(&c.up.button);
+                    e.click_count = c.down.click_count as u32;
+                    mods(&mut e, &c.up.modifiers);
+                });
+            )*};
+        }
+        click! {
+            DOUBLE_CLICK, on_double_click, "dblclick";
+            AUX_CLICK, on_aux_click, "auxclick";
+        }
+        on!(ev::CONTEXT_MENU, on_context_menu, |e, c| {
+            e.kind = "contextmenu".into();
+            (e.x, e.y) = (c.position.x.0 as f64, c.position.y.0 as f64);
+            e.button = 2;
+            mods(&mut e, &c.modifiers);
+        });
+        on!(ev::KEY_PRESS, on_key_press, |e, k| {
+            e.kind = "keypress".into();
+            e.key = Some(k.keystroke.key.clone());
+            e.key_char = k.keystroke.key_char.clone();
+            mods(&mut e, &k.keystroke.modifiers);
+        });
+        on!(@ false, ev::FOCUS, on_focus, |e, _f| { e.kind = "focus".into(); });
+        on!(@ false, ev::BLUR, on_blur, |e, _f| { e.kind = "blur".into(); });
+        on!(ev::FOCUS_IN, on_focus_in, |e, _f| { e.kind = "focusin".into(); });
+        on!(ev::FOCUS_OUT, on_focus_out, |e, _f| { e.kind = "focusout".into(); });
+        on!(ev::PRESS_DRAG, on_press_drag, |e, p| {
+            e.kind = "pressdrag".into();
+            (e.x, e.y) = (p.position.x.0 as f64, p.position.y.0 as f64);
+            (e.dx, e.dy) = (p.start.x.0 as f64, p.start.y.0 as f64);
+            e.button = button(&p.button);
+            e.direction = Some(format!("{:?}", p.direction).to_lowercase());
+            mods(&mut e, &p.modifiers);
+        });
+        on!(@ false, ev::SCROLL, on_scroll, |e, sc| {
+            e.kind = "scroll".into();
+            (e.dx, e.dy) = (sc.offset.x.0 as f64, sc.offset.y.0 as f64);
+        });
         d
     }
 }
@@ -557,7 +684,7 @@ pub fn init(cx: &mut App, sink: Sink) {
     cx.on_window_activation(|id, active, cx| {
         let Some(w) = cx.global::<UiState>().by_native.get(&id.0).copied() else { return };
         let kind = if active { "focus" } else { "blur" };
-        cx.global::<WindowSink>().0(Event { kind: kind.into(), window: w, ..Default::default() });
+        cx.global::<WindowSink>().0(Event { kind: kind.into(), window: w, target: WINDOW, ..Default::default() });
     });
     cx.on_window_closed(|id, cx| {
         let Some(w) = cx.global::<UiState>().by_native.get(&id.0).copied() else { return };
@@ -625,8 +752,15 @@ pub fn commit(cx: &mut App, window: u32, ops: &[i32], strings: &[String], mut pr
         }
     }
     let mut tags = std::mem::take(&mut cx.global_mut::<UiState>().tags);
-    handle.update(cx, |v, w, _| {
-        v.apply(ops, strings, &mut props, &mut tags);
+    handle.update(cx, |v, w, app| {
+        let mut capture = Vec::new();
+        v.apply(ops, strings, &mut props, &mut tags, &mut capture);
+        for (id, on) in capture {
+            let Some(n) = v.nodes.get(&(id as u32)) else { continue };
+            // its key: an `id` attribute value, else "n<node>" (as `build` gives it)
+            let key = n.attrs.iter().find(|(k, _)| k == "id").map_or_else(|| n.key.clone(), |(_, v)| v.clone());
+            if on { w.capture_pointer_for(app, &key) } else { w.release_pointer_capture(app) }
+        }
         if !animated {
             w.refresh(); // this window only
         } else if !v.frame_scheduled {

@@ -11,6 +11,11 @@ All notable changes to **blenderui** (BUI). The format follows
   types. `scroll` fires for every scroll container that moved (also `set_scroll_offset` or a layout change), not only the wheel.
   When the element that holds the pointer is removed, `pointercancel` and `lostpointercapture` go out and the capture ends;
   a removed focused element no longer keeps the focus.
+- **JavaScript: the whole set of HTML events.** `addEventListener` now takes `dblclick`, `auxclick`, `contextmenu`, `mouseover`/`mouseout`,
+  every `pointer*` event, `keypress`, `focus`/`blur`/`focusin`/`focusout`, `scroll` and Blender's `pressdrag`, with the capture
+  phase (`{ capture: true }`, `once`, `event.eventPhase`), `buttons`, `pointerId` / `pointerType`, and `el.setPointerCapture()` /
+  `releasePointerCapture()` / `hasPointerCapture()`. The native listener mask is now two words (`LISTEN` carries 62 bits), and the
+  window's own `focus` / `blur` are told from an element's by the target.
 - **Rust: Blender's press-drag.** `on_press_drag` (`PressDragEvent`, `DragDirection`, `DRAG_THRESHOLD`): once per press, from the first
   move more than 3 pixels from where the button went down, with the direction to the nearest of eight, as Blender's
   `KM_PRESS_DRAG` and `WM_event_drag_direction` (`wm_event_system.cc`, `wm_event_query.cc`).

@@ -43,8 +43,20 @@ export interface LayerShellOptions {
   keyboard?: 'none' | 'exclusive' | 'on-demand'
 }
 
-export type EventType = 'click' | 'mousedown' | 'mouseup' | 'mousemove' | 'mouseenter' | 'mouseleave' |
-  'wheel' | 'keydown' | 'keyup' | 'change' | 'input'
+export type EventType = 'click' | 'dblclick' | 'auxclick' | 'contextmenu' |
+  'mousedown' | 'mouseup' | 'mousemove' | 'mouseenter' | 'mouseleave' | 'mouseover' | 'mouseout' |
+  'pointerdown' | 'pointerup' | 'pointermove' | 'pointerenter' | 'pointerleave' | 'pointerover' | 'pointerout' |
+  'pointercancel' | 'gotpointercapture' | 'lostpointercapture' |
+  'wheel' | 'keydown' | 'keypress' | 'keyup' | 'focus' | 'blur' | 'focusin' | 'focusout' |
+  /** Blender's press-drag: a button held and the pointer moved past 3 pixels (once per press). */
+  'pressdrag' | 'scroll' | 'change' | 'input'
+
+export interface ListenerOptions {
+  /** Listen while the event travels down to the target (ancestors first). */
+  capture?: boolean
+  /** Remove the listener after its first call. */
+  once?: boolean
+}
 
 export class BuiEvent {
   type: EventType
@@ -55,6 +67,22 @@ export class BuiEvent {
   x: number
   y: number
   button: number
+  /** The buttons held (1 left, 2 right, 4 middle). */
+  buttons: number
+  pointerId: number
+  pointerType: 'mouse'
+  isPrimary: boolean
+  pressure: number
+  /** 1 capturing, 2 at the target, 3 bubbling. */
+  eventPhase: number
+  /** `pressdrag`: `'east'`, `'northeast'`, ... `'southeast'`. */
+  direction?: string
+  /** `pressdrag`: where the press started. */
+  startX: number
+  startY: number
+  /** `scroll`: the new offsets. */
+  scrollLeft: number
+  scrollTop: number
   detail: number
   deltaY: number
   key?: string
@@ -199,8 +227,12 @@ export class Element extends Node {
   toggleAttribute (name: string, force?: boolean): boolean
   getAttributeNames (): string[]
   /** Any type; BUI's own (`EventType`) arrive from the UI thread. */
-  addEventListener (type: EventType | (string & {}), listener: (event: BuiEvent) => void, options?: unknown): void
-  removeEventListener (type: EventType | (string & {}), listener: (event: BuiEvent) => void, options?: unknown): void
+  addEventListener (type: EventType | (string & {}), listener: (event: BuiEvent) => void, options?: boolean | ListenerOptions): void
+  removeEventListener (type: EventType | (string & {}), listener: (event: BuiEvent) => void, options?: boolean | ListenerOptions): void
+  /** Keep the pointer events (also out of the element) until the button is released; call it in `pointerdown`. */
+  setPointerCapture (pointerId?: number): void
+  releasePointerCapture (pointerId?: number): void
+  hasPointerCapture (pointerId?: number): boolean
   /** Run the listeners for `event.type` here (and up, if it bubbles). */
   dispatchEvent (event: { type: string, bubbles?: boolean }): boolean
   /** Web Animations, run by the engine: `animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' })`.

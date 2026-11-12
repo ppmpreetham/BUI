@@ -44,6 +44,10 @@ pub struct BuiEvent {
     /// 0 left, 1 middle, 2 right (DOM numbering).
     pub button: u32,
     pub click_count: u32,
+    pub buttons: u32,
+    pub direction: Option<String>,
+    pub dx: f64,
+    pub dy: f64,
     pub delta: f64,
     pub key: Option<String>,
     pub key_char: Option<String>,
@@ -62,7 +66,7 @@ impl From<view::Event> for BuiEvent {
     fn from(e: view::Event) -> BuiEvent {
         BuiEvent {
             kind: e.kind, window: e.window, target: e.target, x: e.x, y: e.y, button: e.button,
-            click_count: e.click_count, delta: e.delta, key: e.key, key_char: e.key_char, value: e.value,
+            click_count: e.click_count, buttons: e.buttons, direction: e.direction, dx: e.dx, dy: e.dy, delta: e.delta, key: e.key, key_char: e.key_char, value: e.value,
             checked: e.checked, number: e.number, shift: e.shift, ctrl: e.ctrl, alt: e.alt, values: e.values,
         }
     }

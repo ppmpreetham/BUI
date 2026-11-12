@@ -1534,7 +1534,18 @@ impl Window {
     /// pointer and mouse events go to that element, also after the pointer left it or the window, until the
     /// button is released or [`release_pointer_capture`](Self::release_pointer_capture). A drag starts here.
     pub fn set_pointer_capture(&mut self, app: &mut App) {
-        let Some(key) = self.current else { return };
+        if let Some(key) = self.current {
+            self.capture_key(app, key);
+        }
+    }
+
+    /// [`set_pointer_capture`](Self::set_pointer_capture) for the element `key`, from outside its listener
+    /// (a binding that learns of the request after the event); `id` is the element `.id(..)`.
+    pub fn capture_pointer_for(&mut self, app: &mut App, id: &str) {
+        self.capture_key(app, id_key(id));
+    }
+
+    fn capture_key(&mut self, app: &mut App, key: Key) {
         if self.capture != Some(key) {
             self.release_pointer_capture(app);
             self.capture = Some(key);

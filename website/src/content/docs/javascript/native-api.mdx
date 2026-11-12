@@ -109,9 +109,10 @@ button.addEventListener('click', (event) => {
 })
 ```
 
-The events are `click`, `mousedown`, `mouseup`, `mousemove`, `mouseenter`, `mouseleave`, `wheel`, `keydown`, `keyup`, `input` and `change`. The event object carries `target`, `currentTarget`, `clientX`/`clientY`, `button`, `deltaY`, `key`, the modifier flags (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`) and `timeStamp`.
+The events are `click`, `dblclick`, `auxclick`, `contextmenu`, `mousedown`, `mouseup`, `mousemove`, `mouseenter`, `mouseleave`, `mouseover`, `mouseout`, `pointerdown`, `pointerup`, `pointermove`, `pointerenter`, `pointerleave`, `pointerover`, `pointerout`, `pointercancel`, `gotpointercapture`, `lostpointercapture`, `wheel`, `keydown`, `keypress`, `keyup`, `focus`, `blur`, `focusin`, `focusout`, `scroll`, `pressdrag`, `input` and `change`. The event object carries `target`, `currentTarget`, `eventPhase`, `clientX`/`clientY`, `button`, `buttons`, `pointerId`, `pointerType`, `deltaY`, `key`, the modifier flags (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`) and `timeStamp`. `pressdrag` (Blender's press-drag: a button held and the pointer moved more than 3 pixels, once per press) adds `direction` (`'east'` … `'southeast'`) and `startX`/`startY`; `scroll` adds `scrollLeft`/`scrollTop`.
 
-- **They bubble**, except `mouseenter` and `mouseleave`, as in the DOM. `stopPropagation()` and `stopImmediatePropagation()` work.
+- **They capture and bubble**, as in the DOM: `addEventListener(type, fn, { capture: true })` hears an event on its way down, ancestors first, and `{ once: true }` removes the listener after one call. `mouseenter`, `mouseleave`, `pointerenter`, `pointerleave`, `focus`, `blur` and `scroll` don't bubble. `stopPropagation()` and `stopImmediatePropagation()` work.
+- **`el.setPointerCapture()`** keeps the pointer for an element, also when it leaves it or the window, until the button is released (`releasePointerCapture()`, `hasPointerCapture()`). Call it in a `pointerdown` handler, as in the DOM: a drag that follows the pointer out of its element is built on it.
 - **`event.target`** is the deepest element listening for that event type.
 - **`preventDefault()` only marks the event.** Events reach JavaScript after BUI has already handled them, so it can't cancel what BUI did.
 - **Form controls** keep their latest value: read `el.value` or `el.checked` after an `input` or `change` event.

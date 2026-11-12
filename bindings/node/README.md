@@ -55,11 +55,15 @@ win.body.appendChild(button)
   `@blender-ui/native/globals` (`document`, `window` and the node classes as
   globals, for DOM-based frameworks), and `bui build` bundling with the Bun
   plugin a `@blender-ui/*` package declares (`"bui": { "bunPlugin" }`).
-- **Events:** `addEventListener` for `click`, `mousedown`, `mouseup`,
-  `mousemove`, `mouseenter`, `mouseleave`, `wheel`, `keydown`, `keyup`, `input`
-  and `change` arrive from the UI thread; other types fire through
-  `dispatchEvent`.
-  - They bubble through the tree, and `stopPropagation()` works.
+- **Events:** `addEventListener` for `click`, `dblclick`, `auxclick`,
+  `contextmenu`, the `mouse*` and `pointer*` events (`pointerdown`, `pointerup`,
+  `pointermove`, `pointerenter`, `pointerleave`, `pointerover`, `pointerout`,
+  `pointercancel`, `gotpointercapture`, `lostpointercapture`), `wheel`,
+  `keydown`, `keypress`, `keyup`, `focus`, `blur`, `focusin`, `focusout`,
+  `scroll`, `pressdrag` (Blender's press-drag), `input` and `change` arrive from
+  the UI thread; other types fire through `dispatchEvent`.
+  - They capture and bubble through the tree (`addEventListener(type, fn, { capture: true, once: true })`),
+    and `stopPropagation()` works. `el.setPointerCapture()` keeps the pointer for an element.
   - They arrive after BUI has handled them, so `preventDefault()` only marks
     the event.
 - **Frames and measurement:** `win.requestAnimationFrame(cb)` is paced by the

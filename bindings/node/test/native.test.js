@@ -187,3 +187,46 @@ test('window kinds: layer-shell names are checked', (t) => {
   assert.throws(() => app.window({ layerShell: { keyboard: 'all' } }), /layerShell.keyboard/)
   app.window({ alwaysOnTop: true, frame: false, layerShell: { layer: 'top', anchor: ['top', 'left'], exclusiveZone: 24 } })
 })
+
+test('HTML events: capture phase, pointer events, capture of the pointer, dblclick (headless)', async (t) => {
+  const app = new App({ headless: true })
+  t.after(() => app.quit())
+  const win = app.window({ width: 300, height: 200 })
+  win.body.style = 'margin: 0'
+  const outer = win.createElement('div')
+  outer.style = { width: 200, height: 100, padding: 10 }
+  const inner = win.createElement('div')
+  inner.style = { width: 100, height: 50, backgroundColor: '#00f' }
+  outer.appendChild(inner)
+  win.body.appendChild(outer)
+  await inner.getBoundingClientRect()
+
+  const log = []
+  const tick = () => new Promise(resolve => setTimeout(resolve, 30))
+  outer.addEventListener('pointerdown', e => log.push(`outer capture ${e.eventPhase} ${e.target === inner}`), true)
+  outer.addEventListener('pointerdown', e => log.push(`outer bubble ${e.eventPhase}`))
+  inner.addEventListener('pointerdown', e => {
+    log.push(`inner ${e.eventPhase} ${e.pointerType}`)
+    inner.setPointerCapture(e.pointerId)
+  })
+  inner.addEventListener('pointermove', e => log.push(`inner move ${Math.round(e.x)}`))
+  inner.addEventListener('pointerup', () => log.push('inner up'))
+  inner.addEventListener('dblclick', e => log.push(`dblclick ${e.detail}`))
+  let once = 0
+  inner.addEventListener('click', () => once++, { once: true })
+  inner.addEventListener('pressdrag', e => log.push(`pressdrag ${e.direction}`))
+
+  win.mouseMove(30, 30)
+  win.mouseDown(30, 30)
+  await tick()
+  assert.deepStrictEqual(log.filter(x => !x.startsWith('inner move')).slice(0, 3), ['outer capture 1 true', 'inner 2 mouse', 'outer bubble 3'], 'capture first, then the target, then bubbling')
+  assert.ok(inner.hasPointerCapture(1), 'captured')
+  win.mouseMove(250, 150) // far outside the element
+  await tick()
+  assert.ok(log.includes('inner move 250'), 'a captured pointer is heard outside the element: ' + log)
+  assert.ok(log.includes('pressdrag east') || log.some(x => x.startsWith('pressdrag')), 'press-drag: ' + log)
+  win.mouseUp(250, 150)
+  await tick()
+  assert.ok(log.includes('inner up'), 'the release goes to the element that holds the pointer')
+  assert.ok(!inner.hasPointerCapture(1), 'released with the button')
+})

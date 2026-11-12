@@ -381,7 +381,7 @@ class App {
       win._frame()
       return
     }
-    if (raw.kind === 'focus' || raw.kind === 'blur') {
+    if ((raw.kind === 'focus' || raw.kind === 'blur') && raw.target === 0xffffffff) { // the window's own
       win._emit(raw.kind)
       return
     }

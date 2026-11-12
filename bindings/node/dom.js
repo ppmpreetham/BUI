@@ -13,20 +13,26 @@
 const { isSignal, effect, unowned, memo } = require('./signals')
 
 // Keep in sync with bindings/rust/blenderui-node/src/lib.rs.
-const OP = { CREATE: 0, TEXT: 1, SET_ATTR: 2, REMOVE_ATTR: 3, APPEND: 4, INSERT: 5, REMOVE: 6, SET_TEXT: 7, LISTEN: 8, FREE: 9, MOTION: 10 }
+const OP = { CREATE: 0, TEXT: 1, SET_ATTR: 2, REMOVE_ATTR: 3, APPEND: 4, INSERT: 5, REMOVE: 6, SET_TEXT: 7, LISTEN: 8, FREE: 9, MOTION: 10, CAPTURE: 11 }
 // Motion's props (keep in sync with MotionProp::parse, bindings/rust/blenderui-jsview/src/motion.rs)
 const MOTION_PROPS = {
   initial: 0, animate: 1, exit: 2, whileHover: 3, whileTap: 4, whileFocus: 5, transition: 6, style: 7, variants: 8,
   whileInView: 9, whileDrag: 10, viewport: 11, drag: 12, dragConstraints: 13, dragElastic: 14, dragMomentum: 15,
   dragSnapToOrigin: 16, layout: 17
 }
+// one bit per native listener (`ev` in blenderui-jsview); more than 31, so they travel as two words
 const EVENT_BITS = {
-  click: 1, mousedown: 2, mouseup: 4, mousemove: 8, mouseenter: 16, mouseleave: 16,
-  wheel: 32, keydown: 64, keyup: 128, change: 256, input: 512,
+  click: 2 ** 0, mousedown: 2 ** 1, mouseup: 2 ** 2, mousemove: 2 ** 3, mouseenter: 2 ** 4, mouseleave: 2 ** 4,
+  wheel: 2 ** 5, keydown: 2 ** 6, keyup: 2 ** 7, change: 2 ** 8, input: 2 ** 9,
+  dblclick: 2 ** 10, auxclick: 2 ** 11, contextmenu: 2 ** 12, mouseover: 2 ** 13, mouseout: 2 ** 14,
+  pointerdown: 2 ** 15, pointerup: 2 ** 16, pointermove: 2 ** 17, pointerenter: 2 ** 18, pointerleave: 2 ** 19,
+  pointerover: 2 ** 20, pointerout: 2 ** 21, pointercancel: 2 ** 22, gotpointercapture: 2 ** 23, lostpointercapture: 2 ** 24,
+  keypress: 2 ** 25, focus: 2 ** 26, blur: 2 ** 27, focusin: 2 ** 28, focusout: 2 ** 29, pressdrag: 2 ** 30, scroll: 2 ** 31,
 }
+const WORD = 2 ** 31
 const BUTTONS = ['left', 'middle', 'right']
 // DOM: these don't bubble
-const NO_BUBBLE = new Set(['mouseenter', 'mouseleave'])
+const NO_BUBBLE = new Set(['mouseenter', 'mouseleave', 'pointerenter', 'pointerleave', 'focus', 'blur', 'scroll'])
 const ELEMENT_NODE = 1, TEXT_NODE = 3, COMMENT_NODE = 8, FRAGMENT_NODE = 11
 const XHTML = 'http://www.w3.org/1999/xhtml'
 
@@ -55,6 +61,17 @@ class BuiEvent {
     this.clientX = this.x = raw.x
     this.clientY = this.y = raw.y
     this.button = raw.button
+    this.buttons = raw.buttons
+    this.pointerId = 1
+    this.pointerType = 'mouse'
+    this.isPrimary = true
+    this.pressure = raw.buttons ? 0.5 : 0
+    this.eventPhase = 0 // 1 capturing, 2 at the target, 3 bubbling
+    this.direction = raw.direction ?? undefined // `pressdrag`: 'east' ... 'southeast'
+    this.startX = raw.dx // `pressdrag`: where the press started
+    this.startY = raw.dy
+    this.scrollLeft = raw.dx // `scroll`: the new offsets
+    this.scrollTop = raw.dy
     this.detail = raw.clickCount
     this.deltaY = -raw.delta * 100 // DOM: positive scrolls down
     this.key = raw.key ?? undefined
@@ -616,27 +633,50 @@ class Element extends Node {
     if (t !== '' && t != null) this.appendChild(this._createText(isSignal(t) ? t : String(t)))
   }
 
-  /** Any event type; those BUI reports (`EVENT_BITS`) arrive from the UI thread. */
-  addEventListener (type, fn) {
-    const listeners = (this._listeners ??= new Map())
+  /** Any event type; those BUI reports (`EVENT_BITS`) arrive from the UI thread. `options`: `true` / `{ capture: true }`
+   *  listens in the capture phase (ancestors first), `{ once: true }` removes the listener after its first call. */
+  addEventListener (type, fn, options) {
+    const capture = options === true || (options != null && typeof options === 'object' && options.capture === true)
+    const once = options != null && typeof options === 'object' && options.once === true
+    const listeners = (capture ? (this._capture ??= new Map()) : (this._listeners ??= new Map()))
     let set = listeners.get(type)
-    if (!set) listeners.set(type, (set = new Set()))
-    set.add(fn)
+    if (!set) listeners.set(type, (set = new Map()))
+    if (!set.has(fn)) set.set(fn, once)
     this._listen()
   }
 
-  removeEventListener (type, fn) {
-    this._listeners?.get(type)?.delete(fn)
+  removeEventListener (type, fn, options) {
+    const capture = options === true || (options != null && typeof options === 'object' && options.capture === true)
+    ;(capture ? this._capture : this._listeners)?.get(type)?.delete(fn)
     this._listen()
+  }
+
+  /** HTML `setPointerCapture`: the element keeps the pointer events (also out of it) until the button is released.
+   *  Call it from a `pointerdown` / `mousedown` handler. */
+  setPointerCapture (_pointerId) { this._pointerCapture(true) }
+
+  releasePointerCapture (_pointerId) { this._pointerCapture(false) }
+
+  hasPointerCapture (_pointerId) { return (this._x?.captured ?? false) === true }
+
+  _pointerCapture (on) {
+    const w = this.ownerWindow
+    if (w === null || (this._x?.captured ?? false) === on) return
+    ;(this._x ??= {}).captured = on
+    this._listen() // it needs `lostpointercapture` to know when the host lets go
+    w._op(OP.CAPTURE, this.id, on ? 1 : 0)
   }
 
   _listen () {
     let bits = 0
-    if (this._listeners !== null) for (const [type, set] of this._listeners) if (set.size) bits |= EVENT_BITS[type] ?? 0
+    for (const map of [this._listeners, this._capture]) {
+      if (map != null) for (const [type, set] of map) if (set.size) bits = orBits(bits, EVENT_BITS[type] ?? 0)
+    }
+    if (this._x?.captured) bits = orBits(bits, EVENT_BITS.lostpointercapture)
     if (bits !== this._bits) {
       this._bits = bits
       const w = this.ownerWindow
-      if (w !== null) w._op(OP.LISTEN, this.id, bits)
+      if (w !== null) w._op(OP.LISTEN, this.id, bits % WORD, Math.floor(bits / WORD))
     }
   }
 
@@ -644,7 +684,7 @@ class Element extends Node {
     win._op(OP.CREATE, this.id, win._s(this.localName))
     const a = this._attrs
     if (a !== null) for (let i = 0; i < a.length; i += 2) win._op(OP.SET_ATTR, this.id, win._s(a[i]), win._s(a[i + 1]))
-    if (this._bits !== 0) win._op(OP.LISTEN, this.id, this._bits)
+    if (this._bits !== 0) win._op(OP.LISTEN, this.id, this._bits % WORD, Math.floor(this._bits / WORD))
     const m = this._x?.motion
     if (m) for (const k in m) win._motionOp(this.id, MOTION_PROPS[k], m[k])
   }
@@ -662,6 +702,7 @@ class Element extends Node {
       x.checked = raw.checked
       x.number = raw.number
     }
+    if (raw.kind === 'lostpointercapture' && this._x !== null) this._x.captured = false
     this._propagate(new BuiEvent(raw, this))
   }
 
@@ -675,18 +716,30 @@ class Element extends Node {
   }
 
   _propagate (e) {
-    for (let n = this; n !== null; n = n.parentNode) {
-      const set = n._listeners?.get(e.type)
-      if (set && set.size) {
-        e.currentTarget = n
-        for (const fn of [...set]) {
-          try { fn.call(n, e) } catch (err) { queueMicrotask(() => { throw err }) }
-          if (e.immediatePropagationStopped) break
-        }
+    // the target's ancestors, innermost first
+    const up = []
+    for (let n = this.parentNode; n !== null; n = n.parentNode) up.push(n)
+    const stopped = () => e.cancelBubble === true
+    const own = e instanceof BuiEvent // a DOM Event keeps its own phase
+    const run = (n, map, phase) => {
+      const set = map?.get(e.type)
+      if (!set || set.size === 0) return
+      e.currentTarget = n
+      if (own) e.eventPhase = phase
+      for (const [fn, once] of [...set]) {
+        if (once) set.delete(fn)
+        try { fn.call(n, e) } catch (err) { queueMicrotask(() => { throw err }) }
+        if (e.immediatePropagationStopped) break
       }
-      if (e.cancelBubble || !e.bubbles) break
     }
+    // capture: from the root down to the target's parent, then at the target
+    for (let i = up.length - 1; i >= 0 && !stopped(); i--) run(up[i], up[i]._capture, 1)
+    if (!stopped()) run(this, this._capture, 2)
+    if (!stopped() && !e.immediatePropagationStopped) run(this, this._listeners, 2)
+    // bubble
+    if (e.bubbles) for (let i = 0; i < up.length && !stopped(); i++) run(up[i], up[i]._listeners, 3)
     e.currentTarget = null
+    if (own) e.eventPhase = 0
   }
 
   /** Web Animations: `animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: 'ease-out' })`,
@@ -704,9 +757,16 @@ class Element extends Node {
   }
 }
 
+function orBits (a, b) {
+  // a | b for bits above 31
+  const [al, ah, bl, bh] = [a % WORD, Math.floor(a / WORD), b % WORD, Math.floor(b / WORD)]
+  return ((al | bl) >>> 0) + ((ah | bh) >>> 0) * WORD
+}
+
 // listeners (a Map), their native bits, and the rarely used extras (form
 // state from events, the style object): on the prototype until an element has them
 Element.prototype._listeners = null
+Element.prototype._capture = null
 Element.prototype._bits = 0
 Element.prototype._x = null
 
