@@ -7,6 +7,17 @@ All notable changes to **blenderui** (BUI). The format follows
 ## [Unreleased]
 
 ### Added
+- **Rust: every HTML event, with capture and bubbling.** A listener for each `on*` event: `on_double_click`,
+  `on_aux_click`, `on_context_menu`, `on_mouse_enter` / `leave` / `over` / `out`, the pointer events
+  (`on_pointer_down` / `up` / `move` / `enter` / `leave` / `over` / `out` / `cancel` and the pointer capture pair, with a
+  `PointerEvent`), `on_focus` / `blur` / `focus_in` / `focus_out`, `on_scroll` and `on_wheel`, and a `_capture` twin of
+  each (`onClickCapture` in `rsx!`) for the pass from the root down to the target. `cx.stop_propagation()` ends the pass it
+  is in. `window.set_pointer_capture(cx)` holds the pointer for an element, so a drag keeps hearing the moves and the
+  release outside it; `on_mouse_event` / `on_key_event` / `on_window_event` hear every event of a kind in the window, in
+  both passes, as gpui's `on_mouse_event` does (`DispatchPhase::Capture` / `Bubble`). A press fires `pointerdown` before
+  `mousedown`, and a move `pointermove` before `mousemove`. One listener list per element holds them all (a frame
+  skips the walk for kinds nothing listens for). Not there yet: touch, drag-and-drop, clipboard, media and CSS animation
+  events, and the JavaScript side of the new ones. `App::simulate_button` clicks with the middle or secondary button in tests.
 - **Animation: GSAP and Motion on one engine** (feature `anim`, on by default; `BUI_ANIM` in CMake). One C engine
   in the kit (`kit/intern/anim`, `BUI_anim.h`) runs every animation, so Rust, JavaScript, Python, Lua and C animate
   the same way and none carries its own. Eases: every name of GSAP, Motion, CSS and Blender, `cubic-bezier()`,

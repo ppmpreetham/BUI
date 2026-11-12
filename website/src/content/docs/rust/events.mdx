@@ -1,10 +1,10 @@
 ---
 title: Events
-description: Respond to clicks, keys, the wheel and form changes, update your view with cx.listener, and paint your own content on a canvas.
+description: Respond to every HTML event (mouse, pointer, keys, focus, wheel, scroll, form changes), with capture and bubbling, pointer capture and window-wide listeners, update your view with cx.listener, and paint your own content on a canvas.
 section: Rust
 order: 70
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/events.rs", "bindings/rust/blenderui/src/element.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/src/paint.rs", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui/tests/headless.rs", "bindings/rust/blenderui/examples/showcase.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/events.rs", "bindings/rust/blenderui/src/element.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/src/paint.rs", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui/tests/headless.rs", "bindings/rust/blenderui/tests/events_dom.rs", "bindings/rust/blenderui/examples/showcase.rs"]
 ---
 
 A UI that doesn't answer back is just a picture. **Events are how your code hears the user**: a click, a key, a dragged slider. Attach a listener to any element, change your state, and BUI redraws what changed.
@@ -41,22 +41,40 @@ If you use [hooks](../hooks/) instead, you don't need either: writing a signal r
 
 ## Every listener
 
+Every HTML `on*` event has a listener, named the same in snake case (`onPointerDown` is `.on_pointer_down`). A listener gets the event, the `Window` and the `App`.
+
 | Listener | Event | Bubbles |
 | --- | --- | --- |
 | `on_click` | `ClickEvent { down, up }`: a press and release on the element | Yes |
+| `on_double_click` | `ClickEvent` (`click_count()` is 2) | Yes |
+| `on_aux_click` | `ClickEvent`: a click with the middle or secondary button | Yes |
+| `on_context_menu` | `ContextMenuEvent { position, modifiers }` | Yes |
 | `on_mouse_down(button, f)`, `on_any_mouse_down(f)` | `MouseDownEvent { button, position, modifiers, click_count }` | Yes |
 | `on_mouse_up(button, f)` | `MouseUpEvent { button, position, modifiers }` | Yes |
 | `on_mouse_move` | `MouseMoveEvent { position, pressed_button, modifiers }` | Yes |
+| `on_mouse_enter`, `on_mouse_leave` | `MouseMoveEvent`: this element only; moving into a child doesn't leave it | No |
+| `on_mouse_over`, `on_mouse_out` | `MouseMoveEvent`: also from the children | Yes |
 | `on_hover` | `bool`: `true` when the pointer enters, `false` when it leaves | No |
-| `on_scroll_wheel` | `ScrollWheelEvent { position, delta, modifiers }` | Yes |
+| `on_pointer_down`, `on_pointer_up`, `on_pointer_move` | `PointerEvent` | Yes |
+| `on_pointer_enter`, `on_pointer_leave` | `PointerEvent` | No |
+| `on_pointer_over`, `on_pointer_out`, `on_pointer_cancel` | `PointerEvent` | Yes |
+| `on_got_pointer_capture`, `on_lost_pointer_capture` | `PointerEvent` | No |
+| `on_scroll_wheel` (or `on_wheel`) | `ScrollWheelEvent { position, delta, modifiers }` | Yes |
+| `on_scroll` | `ScrollEvent { offset }`: a scroll container moved | No |
 | `on_key_down`, `on_key_up` | `KeyDownEvent` / `KeyUpEvent { keystroke }` | Yes, from the focused element |
+| `on_focus`, `on_blur` | `FocusEvent` | No |
+| `on_focus_in`, `on_focus_out` | `FocusEvent` | Yes |
 | `on_change`, `on_input` | `ChangeEvent { value, checked, number }` | Yes |
+
+Each has a `_capture` twin (`on_click_capture` …) that hears the event on the way down, before the target (see [the two passes](#the-two-passes)). Touch, drag-and-drop, clipboard, media and CSS animation events (`touchstart`, `dragstart`, `paste`, `ended`, `transitionend` …) are not there yet.
 
 The details:
 
 - **Positions** are in logical pixels (they don't change with display scaling).
 - **`MouseButton`** is `Left`, `Right` or `Middle`.
 - **`Modifiers`** has `shift`, `control` and `alt`.
+- **`PointerEvent`** has `pointer_id` (the mouse is 1), `pointer_type`, `is_primary`, `button`, `buttons` (bits: 1 left, 2 right, 4 middle), `position`, `modifiers`, `pressure` and `click_count`. A press fires `pointerdown` and then `mousedown`; a move fires `pointermove` and then `mousemove`.
+- **`on_context_menu` and `on_aux_click`** run when the secondary or middle button is released (a window reports the secondary button's click that way).
 - **`ClickEvent::click_count()`** tells a double-click from a single one.
 - **`ScrollWheelEvent::delta`** is in lines; positive scrolls the content up (the wheel turned away from you).
 - **`Keystroke`** has `key` (the key's name: `"a"`, `"Return"`, `"Left"` …), `key_char` (the typed text, if any) and `modifiers`.
@@ -74,11 +92,19 @@ rsx! {
 }
 ```
 
-## Focus and bubbling
+## The two passes
 
-- **Clicking an element focuses it.** Key events go to the focused element, then bubble up through its ancestors.
-- **Most events bubble**: a click on a `<span>` inside a `<button>` reaches the button's `on_click` too. `on_hover` doesn't bubble.
-- **`cx.stop_propagation()`** stops an event from reaching ancestors.
+An event goes through the elements twice, as in a browser. First down from the root to the target (the **capture** pass, the `_capture` listeners), then back up (the **bubbling** pass, the ordinary listeners). `cx.stop_propagation()` ends the pass it is called in, so a capture listener can keep an event from reaching its target.
+
+```rust
+div()
+    .on_click_capture(|_, _, cx| { println!("first"); cx.stop_propagation(); })  // nothing below hears the click
+    .child(button().on_click(|_, _, _| println!("never")))
+```
+
+- **Clicking an element focuses it.** Key events go to the focused element, then bubble up through its ancestors. Moving focus fires `blur` and `focusout` on the old element and `focus` and `focusin` on the new one.
+- **Most events bubble**: a click on a `<span>` inside a `<button>` reaches the button's `on_click` too. `on_hover`, `on_mouse_enter`, `on_mouse_leave`, `on_focus`, `on_blur` and `on_scroll` don't.
+- **Enter and leave** go to each element on its own, outermost first when entering, innermost first when leaving. The order on a move is `out`, `leave`, `over`, `enter`.
 - **Focus from code:** `window.focus_id("name")` focuses the element with that `.id(...)`, and `window.focused_id()` tells you which one has focus.
 
 ```rust
@@ -87,6 +113,30 @@ div().id("canvas-area")
         if e.keystroke.key == "Delete" { println!("delete selection"); }
     })
 ```
+
+## Dragging: pointer capture and window-wide listeners
+
+A drag has to keep hearing the pointer after it leaves the element it started on. There are two ways.
+
+**Pointer capture** (HTML's `setPointerCapture`): call `window.set_pointer_capture(cx)` from a listener, and the pointer and mouse events go to that element, wherever the pointer is, until the button is released (or `window.release_pointer_capture(cx)`).
+
+```rust
+div()
+    .on_pointer_down(|_, window, cx| window.set_pointer_capture(cx))
+    .on_pointer_move(|e: &PointerEvent, _, _| println!("at {:?}", e.position))  // also far outside it
+    .on_pointer_up(|_, _, _| println!("done"))
+    .on_lost_pointer_capture(|_, _, _| println!("let go"))
+```
+
+**Window-wide listeners** (gpui's `on_mouse_event`): hear every event of a kind in the window, whatever it happens on, in both passes. The listener also gets the pass:
+
+```rust
+div().on_mouse_event(|e: &MouseMoveEvent, phase, _, _| {
+    if phase == DispatchPhase::Bubble { println!("the pointer is at {:?}", e.position); }
+})
+```
+
+It works for `MouseDownEvent`, `MouseUpEvent`, `MouseMoveEvent`, `ScrollWheelEvent` (`on_mouse_event`) and `KeyDownEvent`, `KeyUpEvent` (`on_key_event`). `on_window_event(kind, f)` is the general form, with an `EventKind`, for the pointer events.
 
 ## The Window API
 

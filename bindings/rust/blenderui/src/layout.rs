@@ -305,6 +305,8 @@ pub(crate) struct BoxNode {
 pub(crate) struct Frame {
     pub nodes: Vec<BoxNode>,
     els: Vec<ElData>,
+    /// The kinds of event something in this frame listens for (bits of `EventKind::bit`).
+    pub listen: u64,
     pub title: Option<String>,
     by_key: std::cell::OnceCell<HashMap<Key, usize>>,
 }
@@ -2341,7 +2343,8 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         });
     drop(s);
     let _s = span(Phase::Place);
-    let mut frame = Frame { nodes, els, title, by_key: Default::default() };
+    let listen = els.iter().filter_map(|e| e.listeners.as_deref()).fold(0, |m, l| m | l.kinds);
+    let mut frame = Frame { nodes, els, listen, title, by_key: Default::default() };
     box_of.clear();
     for (i, n) in frame.nodes.iter().enumerate() {
         if let Some(t) = n.taffy {
@@ -2567,6 +2570,20 @@ impl Frame {
     pub(crate) fn el(&self, i: usize) -> Option<&ElData> {
         let e = self.nodes[i].el;
         (e != NONE).then(|| &self.els[e as usize])
+    }
+
+    /// The boxes from the root down to box `i` (itself last).
+    pub(crate) fn path_to(&self, mut i: usize) -> smallvec::SmallVec<[usize; 16]> {
+        let mut path = smallvec::SmallVec::new();
+        loop {
+            path.push(i);
+            match self.nodes[i].parent {
+                Some(p) => i = p,
+                None => break,
+            }
+        }
+        path.reverse();
+        path
     }
 
     pub(crate) fn attr(&self, i: usize, name: &str) -> Option<&str> {

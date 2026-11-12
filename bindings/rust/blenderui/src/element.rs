@@ -15,8 +15,28 @@ pub type SharedString = Cow<'static, str>;
 /// state across renders.
 pub type ElementId = SharedString;
 
-/// An event listener, owned by its element (moved into the frame, never shared).
-pub(crate) type Listener<E> = Box<dyn Fn(&E, &mut Window, &mut App)>;
+/// One listener: the event it hears, in which pass, and whether it hears the whole window. Owned by its
+/// element (moved into the frame, never shared); the closure takes any event type and does nothing
+/// with the others, so one list holds every kind of listener.
+pub(crate) struct Entry {
+    pub kind: EventKind,
+    /// Heard on the way down (the capture pass) rather than on the way up.
+    pub capture: bool,
+    /// Hears every event of its kind in the window, wherever it happens (gpui's `on_mouse_event`).
+    pub wide: bool,
+    pub call: EntryFn,
+}
+
+/// What an [`Entry`] calls: the event (of any type: the closure picks its own), the pass, the window and the app.
+pub(crate) type EntryFn = Box<dyn Fn(&dyn std::any::Any, DispatchPhase, &mut Window, &mut App)>;
+
+/// The listeners of an element, in the order they were added.
+#[derive(Default)]
+pub(crate) struct Listeners {
+    pub entries: Vec<Entry>,
+    /// The kinds among `entries` (bits of `EventKind::bit`): a window skips the walk for the rest.
+    pub kinds: u64,
+}
 
 /// Work an element postpones until the window can lend itself: it receives
 /// the window and app and finishes the element (children, styles) in place.
@@ -49,18 +69,42 @@ pub(crate) fn resolve_deferred(el: &mut AnyElement, window: &mut Window, app: &m
 /// Custom painting (gpui's `canvas()` element).
 pub(crate) type PaintFn = Box<dyn Fn(crate::geometry::Bounds<f32>, &mut crate::paint::Painter, &App)>;
 
-#[derive(Default)]
-pub(crate) struct Listeners {
-    pub click: Vec<Listener<ClickEvent>>,
-    pub mouse_down: Vec<(Option<MouseButton>, Listener<MouseDownEvent>)>,
-    pub mouse_up: Vec<(Option<MouseButton>, Listener<MouseUpEvent>)>,
-    pub mouse_move: Vec<Listener<MouseMoveEvent>>,
-    pub hover: Vec<Listener<bool>>,
-    pub scroll: Vec<Listener<ScrollWheelEvent>>,
-    pub key_down: Vec<Listener<KeyDownEvent>>,
-    pub key_up: Vec<Listener<KeyUpEvent>>,
-    pub change: Vec<Listener<ChangeEvent>>,
-    pub input: Vec<Listener<ChangeEvent>>,
+/// The window-wide listeners' event types: which kind each one is.
+pub trait WindowEvent: 'static {
+    const KIND: EventKind;
+}
+impl WindowEvent for MouseDownEvent {
+    const KIND: EventKind = EventKind::MouseDown;
+}
+impl WindowEvent for MouseUpEvent {
+    const KIND: EventKind = EventKind::MouseUp;
+}
+impl WindowEvent for MouseMoveEvent {
+    const KIND: EventKind = EventKind::MouseMove;
+}
+impl WindowEvent for ScrollWheelEvent {
+    const KIND: EventKind = EventKind::Wheel;
+}
+impl WindowEvent for KeyDownEvent {
+    const KIND: EventKind = EventKind::KeyDown;
+}
+impl WindowEvent for KeyUpEvent {
+    const KIND: EventKind = EventKind::KeyUp;
+}
+
+/// `on_x` and `on_x_capture` for each `name, capture_name => Kind, EventType` line.
+macro_rules! listeners {
+    ($( $(#[$doc:meta])* $name:ident, $capture:ident => $kind:ident, $event:ty; )*) => {$(
+        $(#[$doc])*
+        pub fn $name(self, f: impl Fn(&$event, &mut Window, &mut App) + 'static) -> Self {
+            self.listen(EventKind::$kind, false, f)
+        }
+        $(#[$doc])*
+        /// (The capture pass: from the root down to the target.)
+        pub fn $capture(self, f: impl Fn(&$event, &mut Window, &mut App) + 'static) -> Self {
+            self.listen(EventKind::$kind, true, f)
+        }
+    )*};
 }
 
 /// An element: a tag, its attributes, styles, children and listeners.
@@ -322,58 +366,165 @@ impl Div {
     }
 
     // -- events ----------------------------------------------------------------------------
-    /// Click (press and release on this element); bubbles to ancestors.
-    pub fn on_click(mut self, f: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().click.push(Box::new(f));
+    //
+    // HTML's `on*` events, one method each (`onClick` is `.on_click`, in `rsx!` too), and `_capture` for
+    // the pass that runs from the root down to the target before the usual one back up (`onClickCapture`).
+    // A listener gets the event, the window and the app; `window.stop_propagation()` ends the pass.
+
+    fn listen<E: 'static>(mut self, kind: EventKind, capture: bool,
+                          f: impl Fn(&E, &mut Window, &mut App) + 'static) -> Self {
+        self.push_entry(Entry {
+            kind,
+            capture,
+            wide: false,
+            call: Box::new(move |e, _, w, a| {
+                if let Some(e) = e.downcast_ref::<E>() {
+                    f(e, w, a);
+                }
+            }),
+        });
         self
     }
-    pub fn on_mouse_down(mut self, button: MouseButton,
+
+    fn push_entry(&mut self, entry: Entry) {
+        let ls = self.listeners_mut();
+        ls.kinds |= entry.kind.bit();
+        ls.entries.push(entry);
+    }
+
+    /// Hears every event of its kind in the window, whatever element it happens on, in both passes: a
+    /// drag that leaves its element keeps hearing the moves and the release (gpui's `on_mouse_event`).
+    /// `E` is the event the listener takes: `MouseMoveEvent`, `MouseDownEvent`, `MouseUpEvent`,
+    /// `ScrollWheelEvent`, `KeyDownEvent` or `KeyUpEvent`.
+    pub fn on_mouse_event<E: WindowEvent>(self, f: impl Fn(&E, DispatchPhase, &mut Window, &mut App) + 'static) -> Self {
+        self.on_window_event(E::KIND, f)
+    }
+
+    /// [`on_mouse_event`](Self::on_mouse_event) for the keyboard.
+    pub fn on_key_event<E: WindowEvent>(self, f: impl Fn(&E, DispatchPhase, &mut Window, &mut App) + 'static) -> Self {
+        self.on_window_event(E::KIND, f)
+    }
+
+    /// The window-wide listener of any event kind and type (the pointer events take this form).
+    pub fn on_window_event<E: 'static>(mut self, kind: EventKind,
+                                       f: impl Fn(&E, DispatchPhase, &mut Window, &mut App) + 'static) -> Self {
+        self.push_entry(Entry {
+            kind,
+            capture: false,
+            wide: true,
+            call: Box::new(move |e, phase, w, a| {
+                if let Some(e) = e.downcast_ref::<E>() {
+                    f(e, phase, w, a);
+                }
+            }),
+        });
+        self
+    }
+
+    /// Press with `button` (and the capture pass of it).
+    pub fn on_mouse_down(self, button: MouseButton,
                          f: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().mouse_down.push((Some(button), Box::new(f)));
-        self
+        self.listen(EventKind::MouseDown, false, move |e: &MouseDownEvent, w, a| {
+            if e.button == button {
+                f(e, w, a);
+            }
+        })
     }
-    pub fn on_any_mouse_down(mut self,
-                             f: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().mouse_down.push((None, Box::new(f)));
-        self
+    pub fn on_mouse_down_capture(self, button: MouseButton,
+                                 f: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.listen(EventKind::MouseDown, true, move |e: &MouseDownEvent, w, a| {
+            if e.button == button {
+                f(e, w, a);
+            }
+        })
     }
-    pub fn on_mouse_up(mut self, button: MouseButton,
+    pub fn on_mouse_up(self, button: MouseButton,
                        f: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().mouse_up.push((Some(button), Box::new(f)));
-        self
+        self.listen(EventKind::MouseUp, false, move |e: &MouseUpEvent, w, a| {
+            if e.button == button {
+                f(e, w, a);
+            }
+        })
     }
-    pub fn on_mouse_move(mut self,
-                         f: impl Fn(&MouseMoveEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().mouse_move.push(Box::new(f));
-        self
+    pub fn on_mouse_up_capture(self, button: MouseButton,
+                               f: impl Fn(&MouseUpEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.listen(EventKind::MouseUp, true, move |e: &MouseUpEvent, w, a| {
+            if e.button == button {
+                f(e, w, a);
+            }
+        })
     }
-    /// Called with `true` when the pointer enters, `false` when it leaves.
-    pub fn on_hover(mut self, f: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().hover.push(Box::new(f));
-        self
+    /// Press with any button (`mousedown`).
+    pub fn on_any_mouse_down(self, f: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.listen(EventKind::MouseDown, false, f)
     }
-    pub fn on_scroll_wheel(mut self,
-                           f: impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().scroll.push(Box::new(f));
-        self
+
+    /// Called with `true` when the pointer enters, `false` when it leaves (does not bubble).
+    pub fn on_hover(self, f: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+        self.listen(EventKind::Hover, false, f)
     }
-    pub fn on_key_down(mut self, f: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().key_down.push(Box::new(f));
-        self
-    }
-    pub fn on_key_up(mut self, f: impl Fn(&KeyUpEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().key_up.push(Box::new(f));
-        self
-    }
-    /// Form controls: the committed value changed (`change` in HTML).
-    pub fn on_change(mut self, f: impl Fn(&ChangeEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().change.push(Box::new(f));
-        self
-    }
-    /// Form controls: every edit (`input` in HTML).
-    pub fn on_input(mut self, f: impl Fn(&ChangeEvent, &mut Window, &mut App) + 'static) -> Self {
-        self.listeners_mut().input.push(Box::new(f));
-        self
+
+    listeners! {
+        /// `click`: press and release on this element; bubbles.
+        on_click, on_click_capture => Click, ClickEvent;
+        /// `dblclick`
+        on_double_click, on_double_click_capture => DoubleClick, ClickEvent;
+        /// `auxclick`: a click with a button other than the main one.
+        on_aux_click, on_aux_click_capture => AuxClick, ClickEvent;
+        /// `contextmenu`
+        on_context_menu, on_context_menu_capture => ContextMenu, ContextMenuEvent;
+        /// `mousemove`
+        on_mouse_move, on_mouse_move_capture => MouseMove, MouseMoveEvent;
+        /// `mouseenter`: this element only (no bubbling, and its children don't count as leaving).
+        on_mouse_enter, on_mouse_enter_capture => MouseEnter, MouseMoveEvent;
+        /// `mouseleave`
+        on_mouse_leave, on_mouse_leave_capture => MouseLeave, MouseMoveEvent;
+        /// `mouseover`: bubbles, also from the children.
+        on_mouse_over, on_mouse_over_capture => MouseOver, MouseMoveEvent;
+        /// `mouseout`
+        on_mouse_out, on_mouse_out_capture => MouseOut, MouseMoveEvent;
+        /// `wheel`
+        on_scroll_wheel, on_scroll_wheel_capture => Wheel, ScrollWheelEvent;
+        /// `wheel` (HTML's name for `on_scroll_wheel`)
+        on_wheel, on_wheel_capture => Wheel, ScrollWheelEvent;
+        /// `pointerdown`
+        on_pointer_down, on_pointer_down_capture => PointerDown, PointerEvent;
+        /// `pointerup`
+        on_pointer_up, on_pointer_up_capture => PointerUp, PointerEvent;
+        /// `pointermove`
+        on_pointer_move, on_pointer_move_capture => PointerMove, PointerEvent;
+        /// `pointerenter` (no bubbling)
+        on_pointer_enter, on_pointer_enter_capture => PointerEnter, PointerEvent;
+        /// `pointerleave`
+        on_pointer_leave, on_pointer_leave_capture => PointerLeave, PointerEvent;
+        /// `pointerover`
+        on_pointer_over, on_pointer_over_capture => PointerOver, PointerEvent;
+        /// `pointerout`
+        on_pointer_out, on_pointer_out_capture => PointerOut, PointerEvent;
+        /// `pointercancel`
+        on_pointer_cancel, on_pointer_cancel_capture => PointerCancel, PointerEvent;
+        /// `gotpointercapture`: `Window::set_pointer_capture` took the pointer for this element.
+        on_got_pointer_capture, on_got_pointer_capture_capture => GotPointerCapture, PointerEvent;
+        /// `lostpointercapture`
+        on_lost_pointer_capture, on_lost_pointer_capture_capture => LostPointerCapture, PointerEvent;
+        /// `keydown`: goes to the focused element.
+        on_key_down, on_key_down_capture => KeyDown, KeyDownEvent;
+        /// `keyup`
+        on_key_up, on_key_up_capture => KeyUp, KeyUpEvent;
+        /// `focus` (no bubbling)
+        on_focus, on_focus_capture => Focus, FocusEvent;
+        /// `blur` (no bubbling)
+        on_blur, on_blur_capture => Blur, FocusEvent;
+        /// `focusin`: like `focus`, and it bubbles.
+        on_focus_in, on_focus_in_capture => FocusIn, FocusEvent;
+        /// `focusout`
+        on_focus_out, on_focus_out_capture => FocusOut, FocusEvent;
+        /// `scroll`: this element's scroll position changed (no bubbling).
+        on_scroll, on_scroll_capture => Scroll, ScrollEvent;
+        /// Form controls: the committed value changed (`change` in HTML).
+        on_change, on_change_capture => Change, ChangeEvent;
+        /// Form controls: every edit (`input` in HTML).
+        on_input, on_input_capture => Input, ChangeEvent;
     }
 
     // -- state styles (gpui's .hover(|s| ...), CSS :hover / :active / :focus) ----------------
