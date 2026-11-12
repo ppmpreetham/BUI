@@ -377,3 +377,42 @@ fn nothing_styled_by_hover_means_no_render() {
         assert!(take().contains(&"a enter".to_owned()), "and the listeners still hear them");
     });
 }
+
+struct Moves {
+    moved: bool,
+}
+
+impl Render for Moves {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let left = if self.moved { 0.0 } else { 300.0 };
+        div().size_full()
+            .child(div().id("mover").absolute().left(px(left)).top(px(0.0)).w(px(100.0)).h(px(100.0))
+                .on_mouse_enter(|_, _, _| log("mover enter"))
+                .on_mouse_leave(|_, _, _| log("mover leave")))
+    }
+}
+
+/// The layout moves an element under a pointer that stays still (a page opening under the mouse): the
+/// element is entered, as in a browser, which does it on the next frame.
+#[test]
+fn an_element_that_arrives_under_the_pointer_is_entered() {
+    Application::headless().run(|cx| {
+        let h = cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Moves { moved: false })).unwrap();
+        let w = h.id;
+        cx.draw(w);
+        cx.simulate_mouse_move(w, 50.0, 50.0);
+        take();
+        h.update(cx, |v, _, cx| {
+            v.moved = true;
+            cx.notify();
+        });
+        cx.draw(w);
+        assert_eq!(take(), ["mover enter"], "arrived under the pointer");
+        h.update(cx, |v, _, cx| {
+            v.moved = false;
+            cx.notify();
+        });
+        cx.draw(w);
+        assert_eq!(take(), ["mover leave"], "and left when it went");
+    });
+}

@@ -1414,7 +1414,7 @@ impl Window {
             self.set_window_title(&t);
         }
         self.frame = Some(frame);
-        self.update_hover(app, false);
+        self.update_hover(app, true); // what the layout moved under a pointer that stayed still is entered or left
         drop(_rest);
         prof::frame_done();
     }

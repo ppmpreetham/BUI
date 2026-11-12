@@ -139,6 +139,8 @@ All notable changes to **blenderui** (BUI). The format follows
   bounds and skips the subtrees a point is not in, window-wide listeners have a list of their own, and a move that ends over
   the same elements stops after the hit test. 3000 boxes with listeners: a move 10,900 µs to 12 µs and a click 25,600 µs to
   35 µs; 21,000 boxes: a move 46,000 µs to 14 µs (`examples/events_bench.rs`, headless, release, against the commit before).
+- **Rust: an element the layout moved under a pointer that stayed still was never entered** (`mouseenter`, `mouseover`,
+  `pointerenter`, `on_hover` and their leave twins didn't fire; only `:hover` followed): the hover update after each render fires events now.
 - **Rust: `cx.notify()` in a listener didn't render the window it ran in** (that window is out of the list while it runs); the
   always-dirty click hid it.
 - **Rust: a box that clips (`overflow`) and moves took the wrong clip for what is inside it** when its parent's clip was
