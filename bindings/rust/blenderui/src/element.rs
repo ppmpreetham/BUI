@@ -509,6 +509,8 @@ impl Div {
         on_lost_pointer_capture, on_lost_pointer_capture_capture => LostPointerCapture, PointerEvent;
         /// `keydown`: goes to the focused element.
         on_key_down, on_key_down_capture => KeyDown, KeyDownEvent;
+        /// `keypress`: after `keydown`, for a key that types a character.
+        on_key_press, on_key_press_capture => KeyPress, KeyPressEvent;
         /// `keyup`
         on_key_up, on_key_up_capture => KeyUp, KeyUpEvent;
         /// `focus` (no bubbling)

@@ -57,12 +57,13 @@ Every HTML `on*` event has a listener, named the same in snake case (`onPointerD
 | `on_hover` | `bool`: `true` when the pointer enters, `false` when it leaves | No |
 | `on_pointer_down`, `on_pointer_up`, `on_pointer_move` | `PointerEvent` | Yes |
 | `on_pointer_enter`, `on_pointer_leave` | `PointerEvent` | No |
-| `on_pointer_over`, `on_pointer_out`, `on_pointer_cancel` | `PointerEvent` | Yes |
+| `on_pointer_over`, `on_pointer_out`, `on_pointer_cancel` | `PointerEvent` (`pointercancel`: the element that held the pointer left the tree) | Yes |
 | `on_got_pointer_capture`, `on_lost_pointer_capture` | `PointerEvent` | No |
 | `on_press_drag` | `PressDragEvent { button, start, position, modifiers, direction }`: Blender's press-drag, once per press, from the first move more than 3 pixels from where the button went down | Yes |
 | `on_scroll_wheel` (or `on_wheel`) | `ScrollWheelEvent { position, delta, modifiers }` | Yes |
-| `on_scroll` | `ScrollEvent { offset }`: a scroll container moved | No |
+| `on_scroll` | `ScrollEvent { offset }`: a scroll container moved, whatever moved it (the wheel, `set_scroll_offset`) | No |
 | `on_key_down`, `on_key_up` | `KeyDownEvent` / `KeyUpEvent { keystroke }` | Yes, from the focused element |
+| `on_key_press` | `KeyPressEvent` (a `KeyDownEvent`): after `keydown`, for a key that types a character (not with ctrl or alt) | Yes |
 | `on_focus`, `on_blur` | `FocusEvent` | No |
 | `on_focus_in`, `on_focus_out` | `FocusEvent` | Yes |
 | `on_change`, `on_input` | `ChangeEvent { value, checked, number }` | Yes |

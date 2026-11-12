@@ -416,3 +416,72 @@ fn an_element_that_arrives_under_the_pointer_is_entered() {
         assert_eq!(take(), ["mover leave"], "and left when it went");
     });
 }
+
+struct Gone {
+    show: bool,
+    offset: bool,
+}
+
+impl Render for Gone {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let mut page = div().id("page").w(px(800.0)).h(px(600.0))
+            .on_window_event(EventKind::PointerCancel, |_: &PointerEvent, _, _, _| log("cancel"))
+            .on_window_event(EventKind::LostPointerCapture, |_: &PointerEvent, _, _, _| log("lost"))
+            .on_key_press(|e, _, _| log(&format!("keypress {}", e.keystroke.key_char.clone().unwrap_or_default())))
+            .on_key_down(|_, _, _| log("keydown"))
+            .child(
+                div().id("scroller").absolute().left(px(300.0)).top(px(0.0)).w(px(100.0)).h(px(100.0))
+                    .overflow_y_scroll()
+                    .on_scroll(|e, _, _| log(&format!("scroll {}", e.offset.y.0 as i32)))
+                    .child(div().h(px(500.0)).w(px(50.0))),
+            );
+        if self.show {
+            page = page.child(
+                div().id("handle").absolute().left(px(0.0)).top(px(0.0)).w(px(100.0)).h(px(100.0))
+                    .on_pointer_down(|_, window, app| window.set_pointer_capture(app))
+                    .on_focus(|_, _, _| log("focus")),
+            );
+        }
+        let _ = self.offset;
+        page
+    }
+}
+
+#[test]
+fn removed_elements_let_go_and_other_scrolls_and_keypress() {
+    Application::headless().run(|cx| {
+        let h = cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Gone { show: true, offset: false })).unwrap();
+        let w = h.id;
+        cx.draw(w);
+        take();
+
+        // a scroll from code (not the wheel) is a scroll event too
+        h.update(cx, |_, window, cx| {
+            window.set_scroll_offset("scroller", 0.0, 40.0);
+            cx.notify();
+        });
+        cx.draw(w);
+        assert!(take().contains(&"scroll 40".to_owned()), "set_scroll_offset");
+
+        // the element that holds the pointer and the focus goes away: both are let go
+        cx.simulate_press(w, 50.0, 50.0);
+        take();
+        h.update(cx, |v, _, cx| {
+            v.show = false;
+            cx.notify();
+        });
+        cx.draw(w);
+        let l = take();
+        assert!(l.contains(&"cancel".to_owned()) && l.contains(&"lost".to_owned()), "pointer cancelled: {l:?}");
+        assert_eq!(h.update(cx, |_, window, _| window.focused_id().is_none()), Some(true), "no focus on what is gone");
+        cx.simulate_release(w, 50.0, 50.0);
+
+        // keypress follows keydown for a key that types, and not for a shortcut
+        cx.simulate_click(w, 200.0, 200.0); // focus goes to the page's area
+        take();
+        cx.simulate_key(w, "a", "a");
+        assert_eq!(take(), ["keydown", "keypress a"]);
+        cx.simulate_key_with(w, "a", "a", true, false);
+        assert_eq!(take(), ["keydown"], "ctrl+a isn't typing");
+    });
+}

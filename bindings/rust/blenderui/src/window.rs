@@ -1045,6 +1045,8 @@ pub struct Window {
     /// The interaction states the view read while it rendered (`is_hovered`, `focused_id`): it renders again
     /// when they change, as it does for a style that depends on them.
     read_state: std::cell::Cell<u8>,
+    /// Where each scroll container was when its `scroll` event last went out (a scroll from any source).
+    scroll_seen: HashMap<Key, (f32, f32)>,
     /// Scratch for the hit test of a pointer move (kept so a move allocates nothing).
     hit_buf: Vec<usize>,
     path_buf: Vec<Key>,
@@ -1118,6 +1120,7 @@ impl Window {
                 press_start: (0.0, 0.0),
                 press_drag_sent: false,
                 read_state: std::cell::Cell::new(0),
+                scroll_seen: HashMap::new(),
                 hit_buf: Vec::new(),
                 path_buf: Vec::new(),
             };
@@ -1422,6 +1425,8 @@ impl Window {
         }
         self.frame = Some(frame);
         self.update_hover(app, true); // what the layout moved under a pointer that stayed still is entered or left
+        self.forget_removed(app);
+        self.fire_scrolls(app);
         drop(_rest);
         prof::frame_done();
     }
@@ -1776,10 +1781,7 @@ impl Window {
                 let path = self.path_at(px_, py_);
                 let target = path.last().copied().unwrap_or(crate::layout::ROOT_KEY);
                 self.fire(app, EventKind::Wheel, target, &e);
-                if let Some((key, at)) = self.scroll_by(&path, -(ev.a as f32) * 40.0, modifiers.shift) {
-                    let e = ScrollEvent { offset: point(px(at.0), px(at.1)) };
-                    self.fire(app, EventKind::Scroll, key, &e);
-                }
+                self.scroll_by(&path, -(ev.a as f32) * 40.0, modifiers.shift); // `scroll` follows the next render
             }
             sys::BK_EV_KEY | sys::BK_EV_KEYRELEASE => {
                 let mut parts = ev.text.splitn(2, '\t');
@@ -1790,12 +1792,59 @@ impl Window {
                 let target = self.state.focused.or_else(|| self.state_deepest())
                     .unwrap_or(crate::layout::ROOT_KEY);
                 if ev.kind == sys::BK_EV_KEY {
-                    self.fire(app, EventKind::KeyDown, target, &KeyDownEvent { keystroke: ks });
+                    let types = ks.key_char.is_some() && !ks.modifiers.control && !ks.modifiers.alt;
+                    let down = KeyDownEvent { keystroke: ks };
+                    self.fire(app, EventKind::KeyDown, target, &down);
+                    if types {
+                        self.fire(app, EventKind::KeyPress, target, &down);
+                    }
                 } else {
                     self.fire(app, EventKind::KeyUp, target, &KeyUpEvent { keystroke: ks });
                 }
             }
             _ => {}
+        }
+    }
+
+    /// What left the tree no longer holds the pointer or the focus: the pointer is cancelled (`pointercancel`
+    /// and `lostpointercapture` go to the root), and key events go back to where the pointer is.
+    fn forget_removed(&mut self, app: &mut App) {
+        let Some(frame) = &self.frame else { return };
+        let (capture_gone, focus_gone) = (
+            self.capture.is_some_and(|k| frame.by_key().get(&k).is_none()),
+            self.state.focused.is_some_and(|k| frame.by_key().get(&k).is_none()),
+        );
+        if capture_gone {
+            self.capture = None;
+            let held = (!self.pressed.is_empty()).then_some(self.press_button);
+            let e = self.pointer_event(None, held, 0);
+            self.fire(app, EventKind::PointerCancel, crate::layout::ROOT_KEY, &e);
+            self.fire(app, EventKind::LostPointerCapture, crate::layout::ROOT_KEY, &e);
+        }
+        if focus_gone {
+            self.state.focused = None;
+            self.state.focus_path.clear();
+            self.state.focused_id = None;
+        }
+    }
+
+    /// `scroll` for every scroll container that moved since its last one, whatever moved it (the wheel,
+    /// `set_scroll_offset`, a layout that changed its range). Costs nothing unless something listens.
+    fn fire_scrolls(&mut self, app: &mut App) {
+        let Some(frame) = &self.frame else { return };
+        if frame.listen & EventKind::Scroll.bit() == 0 {
+            return;
+        }
+        let mut moved: Vec<(Key, (f32, f32))> = Vec::new();
+        for n in frame.nodes.iter().filter(|n| n.scroll_range != (0.0, 0.0)) {
+            match self.scroll_seen.insert(n.key, n.scroll_pos) {
+                Some(was) if was != n.scroll_pos => moved.push((n.key, n.scroll_pos)),
+                _ => {}
+            }
+        }
+        for (key, at) in moved {
+            let e = ScrollEvent { offset: point(px(at.0), px(at.1)) };
+            self.fire(app, EventKind::Scroll, key, &e);
         }
     }
 

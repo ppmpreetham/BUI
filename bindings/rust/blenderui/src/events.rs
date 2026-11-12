@@ -84,6 +84,9 @@ pub struct KeyUpEvent {
     pub keystroke: Keystroke,
 }
 
+/// `keypress`: a key that types a character (the event is a [`KeyDownEvent`] too: HTML's `KeyboardEvent`).
+pub type KeyPressEvent = KeyDownEvent;
+
 /// A form control's value (`input`, `select`, `textarea` ...).
 #[derive(Clone, Debug, Default)]
 pub struct ChangeEvent {
@@ -145,6 +148,7 @@ pub enum EventKind {
     LostPointerCapture,
     // keyboard
     KeyDown,
+    KeyPress,
     KeyUp,
     // focus
     Focus,
