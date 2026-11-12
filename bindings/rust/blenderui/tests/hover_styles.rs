@@ -46,3 +46,30 @@ fn hover_styles_all_work() {
         assert_eq!(height(cx, w, "kid"), 36.0, "the child of a hovered group");
     });
 }
+
+struct Tip;
+
+impl Render for Tip {
+    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // a view that reads the hover state while it renders: it renders again when that changes
+        let hovered = window.is_hovered("target");
+        div().size_full()
+            .child(div().id("target").absolute().left(px(0.0)).top(px(0.0)).w(px(100.0)).h(px(100.0)))
+            .children(hovered.then(|| div().id("tip").absolute().left(px(200.0)).top(px(0.0)).w(px(30.0)).h(px(30.0))))
+    }
+}
+
+#[test]
+fn a_view_that_reads_hover_in_render_follows_it() {
+    Application::headless().run(|cx| {
+        let w = cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Tip)).unwrap().id;
+        cx.draw(w);
+        assert!(cx.element_bounds(w, "tip").is_none());
+        cx.simulate_mouse_move(w, 50.0, 50.0);
+        cx.draw(w);
+        assert!(cx.element_bounds(w, "tip").is_some(), "shown while hovered");
+        cx.simulate_mouse_move(w, 400.0, 250.0);
+        cx.draw(w);
+        assert!(cx.element_bounds(w, "tip").is_none(), "gone when it isn't");
+    });
+}

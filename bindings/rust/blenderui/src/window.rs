@@ -1042,6 +1042,9 @@ pub struct Window {
     /// Where the button went down, and whether its press-drag has come (Blender's `KM_PRESS_DRAG`, once per press).
     press_start: (f32, f32),
     press_drag_sent: bool,
+    /// The interaction states the view read while it rendered (`is_hovered`, `focused_id`): it renders again
+    /// when they change, as it does for a style that depends on them.
+    read_state: std::cell::Cell<u8>,
     /// Scratch for the hit test of a pointer move (kept so a move allocates nothing).
     hit_buf: Vec<usize>,
     path_buf: Vec<Key>,
@@ -1114,6 +1117,7 @@ impl Window {
                 later: Vec::new(),
                 press_start: (0.0, 0.0),
                 press_drag_sent: false,
+                read_state: std::cell::Cell::new(0),
                 hit_buf: Vec::new(),
                 path_buf: Vec::new(),
             };
@@ -1230,6 +1234,7 @@ impl Window {
 
     /// The `.id()` of the focused element, if any.
     pub fn focused_id(&self) -> Option<&str> {
+        self.read_state.set(self.read_state.get() | crate::layout::interaction::FOCUS);
         self.state.focused_id.as_deref()
     }
 
@@ -1244,6 +1249,7 @@ impl Window {
 
     /// Is the element with `.id(id)` hovered?
     pub fn is_hovered(&self, id: &str) -> bool {
+        self.read_state.set(self.read_state.get() | crate::layout::interaction::HOVER);
         self.state.hovered.contains(&id_key(id))
     }
 
@@ -1292,6 +1298,7 @@ impl Window {
         let root = {
             let _s = span(Phase::Render);
             crate::hooks::begin(self.id);
+            self.read_state.set(0);
             let mut root = view(self, app);
             crate::element::resolve_deferred(&mut root, self, app);
             root
@@ -1795,7 +1802,7 @@ impl Window {
     /// Whether anything in the last frame is styled by one of the interaction states `bits` (all of them
     /// when there is no frame to ask).
     fn styled_by(&self, bits: u8) -> bool {
-        self.frame.as_ref().is_none_or(|f| f.stateful & bits != 0)
+        self.read_state.get() & bits != 0 || self.frame.as_ref().is_none_or(|f| f.stateful & bits != 0)
     }
 
     /// Element keys from the root to the element `key` (empty when it isn't in this frame).

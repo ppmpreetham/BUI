@@ -144,7 +144,7 @@ It works for `MouseDownEvent`, `MouseUpEvent`, `MouseMoveEvent`, `ScrollWheelEve
 
 Events are cheap by design, and a window doesn't render again for pointer events unless something is styled by them.
 
-- **No render for hover, press or focus** unless the frame has something that depends on it: a `:hover`, `:active` or `:focus` rule in your CSS, a `.hover(..)` / `.active(..)` / `.focus(..)` style, a `whileHover` / `whileTap` / `whileFocus` gesture, or a link. Otherwise the listeners run and nothing is built again. With 3000 boxes, a pointer move is about 10 µs instead of about 9 ms.
+- **No render for hover, press or focus** unless the frame has something that depends on it: a `:hover`, `:active` or `:focus` rule in your CSS, a `.hover(..)` / `.active(..)` / `.focus(..)` style, a `whileHover` / `whileTap` / `whileFocus` gesture, a link, or your own `render` reading `window.is_hovered(..)` or `window.focused_id()`. Otherwise the listeners run and nothing is built again. With 3000 boxes, a pointer move is about 10 µs instead of about 9 ms.
 - **A hit test skips what the pointer can't be in.** Each frame builds, on the first hit test, the end of every box's subtree and the rectangle holding it, so a pointer move doesn't visit every box.
 - **A frame skips the kinds nothing listens to**, and window-wide listeners are kept in a list of their own, so they cost nothing to the elements that don't have one.
 - **A move that ends over the same elements as the last one** stops after the hit test: no allocation, no events.

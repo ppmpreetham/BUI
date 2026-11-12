@@ -135,7 +135,7 @@ All notable changes to **blenderui** (BUI). The format follows
 - **Rust: pointer events are fast and don't render.** A hover, press or focus change rendered the whole view again, whatever
   it was styled by: with 3000 boxes a pointer move cost about 9 ms and a click about 60 ms, listeners or none. A frame now
   records which interaction states its styles depend on (`:hover` / `:active` / `:focus` in the author sheet, `.hover(..)` styles,
-  Motion gestures, links) and the window renders again only for those. The hit test builds an index of subtree ranges and their
+  Motion gestures, links, and a `render` that reads `window.is_hovered(..)` / `focused_id()`) and the window renders again only for those. The hit test builds an index of subtree ranges and their
   bounds and skips the subtrees a point is not in, window-wide listeners have a list of their own, and a move that ends over
   the same elements stops after the hit test. 3000 boxes with listeners: a move 10,900 µs to 12 µs and a click 25,600 µs to
   35 µs; 21,000 boxes: a move 46,000 µs to 14 µs (`examples/events_bench.rs`, headless, release, against the commit before).
