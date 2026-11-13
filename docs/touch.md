@@ -87,8 +87,9 @@ touches take the normal path, so a tap outside closes the menu.
 
 ## Limits
 
-- A continuous drag (a number field) still moves the system mouse pointer back where the drag
-  began when the finger lifts, as it does for the mouse.
+- A finger's drag never wraps at the window edge and never moves the system mouse pointer (the
+  hidden-pointer drag of number fields is for the mouse); a number field dragged by touch stops
+  changing at the edge.
 - One finger never scrolls; scrolling takes two (as in Blender, where a single drag edits).
 - Each finger's move is its own update, so a pan may wobble the zoom by a rounding error between
   the two fingers' events. Nothing waits for a platform's frame grouping yet.

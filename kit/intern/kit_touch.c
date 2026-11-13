@@ -93,7 +93,9 @@ static int deliver_raw(BKContext *ctx, const BKTouchPoint *p, int phase, int mod
 }
 
 /* The pointer's finger no longer is one: undo what it did, as Escape does to a drag, and end the
- * press away from every widget (buttons are not clicked, number fields do not start editing). */
+ * press away from every widget (buttons are not clicked, number fields do not start editing).
+ * Unlike Escape this also cancels a press that has not moved yet: its release would still act
+ * (an unmoved box-select press in the node editor deselects everything). */
 static void abort_pointer(BKContext *ctx, int mods)
 {
   BKTouch *t = &ctx->touch;
@@ -101,7 +103,7 @@ static void abort_pointer(BKContext *ctx, int mods)
     return;
   }
   t->pointer = -1;
-  if (ctx->grab && ctx->dragging && ctx->grab->cls->cancel) {
+  if (ctx->grab && ctx->grab->cls->cancel) {
     ctx->grab->cls->cancel(ctx->grab);
     ctx->has_ungrab = false;
   }

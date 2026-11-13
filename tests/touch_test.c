@@ -29,10 +29,14 @@ enum { W = 400, H = 300 };
 
 static BuiRaster *g_raster;
 static int g_clicks;
+static int g_warps;
 
 static void host_noop(void *data) {}
 static void host_cursor(void *data, int c) {}
-static void host_warp(void *data, int x, int y) {}
+static void host_warp(void *data, int x, int y)
+{
+  g_warps++;
+}
 static char *host_clip_get(void *data)
 {
   return NULL;
@@ -290,6 +294,103 @@ static void test_node_editor(void)
   BK_node_free(editor);
 }
 
+/* Two nodes, A's output linked into B's input; the view at zoom 1, pan (50, 50). */
+static BKNode *graph(BKNode **r_b)
+{
+  BKNode *editor = BK_node_new("nodeeditor");
+  BKNode *a = BK_node_new("graphnode"), *b = BK_node_new("graphnode");
+  const char *a_items[] = {"o|Value|float"};
+  const char *b_items[] = {"o|Result|float", "i|A|float|0.5"};
+  BK_set_strs(a, "items", a_items, 1);
+  BK_set_strs(b, "items", b_items, 2);
+  BK_set_num(b, "nx", 300.0);
+  BK_node_add(editor, a, -1);
+  BK_node_add(editor, b, -1);
+  const char *links[] = {"0 0 1 0"};
+  BK_set_strs(editor, "items", links, 1);
+  *r_b = b;
+  return editor;
+}
+
+static void place_view(BKContext *ctx, BKNode *editor)
+{
+  BK_set_num(editor, "zoom", 1.0);
+  BK_set_num(editor, "panx", 50.0);
+  BK_set_num(editor, "pany", 50.0);
+  BK_render(ctx, g_raster, W, H, 1);
+}
+
+/* A second finger keeps what the first one's press began from changing the graph. */
+static void test_node_editor_cancel(void)
+{
+  BKNode *b;
+  BKNode *editor = graph(&b);
+  BKContext *ctx = context(editor);
+  place_view(ctx, editor);
+  int r[4];
+  BK_node_rect(editor, r);
+  /* B's input socket: its left edge, below the header and the output row */
+  const float sx = r[0] + 50 + 300, sy = r[1] + 50 + (20 + 5 + 22 + 10);
+
+  /* pressing a linked input picks its link up; a pinch must put it back */
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, sx, sy, 0);
+  CHECK(BK_strs_count(editor, "items") == 0); /* picked up */
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, sx + 60, sy + 60, 0);
+  CHECK(BK_strs_count(editor, "items") == 1);
+  BK_touch(ctx, 1, BK_TOUCH_UP, sx, sy, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, sx + 60, sy + 60, 0);
+  CHECK(BK_strs_count(editor, "items") == 1);
+  /* the same once the link was dragged away */
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, sx, sy, 0);
+  for (int i = 1; i <= 5; i++) {
+    BK_touch(ctx, 1, BK_TOUCH_MOVE, sx - i * 10, sy + i * 6, 0);
+  }
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, sx + 60, sy + 60, 0);
+  CHECK(BK_strs_count(editor, "items") == 1);
+  BK_touch(ctx, 1, BK_TOUCH_UP, sx, sy, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, sx + 60, sy + 60, 0);
+  CHECK(BK_strs_count(editor, "items") == 1);
+
+  /* a pinch that begins on empty canvas keeps the selection (an unmoved box press deselects) */
+  BK_set_num(b, "selected", 1.0);
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, r[0] + 60.0f, r[1] + H - 40.0f, 0);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, r[0] + 160.0f, r[1] + H - 40.0f, 0);
+  BK_touch(ctx, 1, BK_TOUCH_UP, r[0] + 60.0f, r[1] + H - 40.0f, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, r[0] + 160.0f, r[1] + H - 40.0f, 0);
+  CHECK(BK_get_num(b, "selected") == 1.0);
+  BK_context_free(ctx);
+  BK_node_free(editor);
+}
+
+/* A finger at the window edge does not wrap like the hidden mouse pointer does: the host's warp
+ * moves the mouse, not the finger, so the drag would run away. */
+static void test_drag_at_edge(void)
+{
+  BKNode *col = BK_node_new("column");
+  BKNode *num = BK_node_new("number");
+  BK_set_num(num, "value", 0.0);
+  BK_node_add(col, num, -1);
+  BKContext *ctx = context(col);
+  float x, y;
+  centre(num, &x, &y);
+  g_warps = 0;
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, x, y, 0);
+  for (int i = 1; i <= 20; i++) {
+    BK_touch(ctx, 1, BK_TOUCH_MOVE, x + (W - 4 - x) * i / 20.0f, y, 0);
+  }
+  const double at_edge = BK_get_num(num, "value");
+  CHECK(at_edge > 0.0);
+  for (int i = 0; i < 5; i++) { /* the finger rests there */
+    BK_touch(ctx, 1, BK_TOUCH_MOVE, W - 4, y, 0);
+  }
+  CHECK(BK_get_num(num, "value") == at_edge);
+  BK_touch(ctx, 1, BK_TOUCH_UP, W - 4, y, 0);
+  CHECK(BK_get_num(num, "value") == at_edge);
+  CHECK(g_warps == 0); /* the mouse pointer was never moved, not even back on release */
+  BK_context_free(ctx);
+  BK_node_free(col);
+}
+
 /* -- custom nodes -- */
 
 static void test_custom_default(void)
@@ -415,6 +516,8 @@ int main(void)
   test_menu();
   test_pan_scrolls_region();
   test_node_editor();
+  test_node_editor_cancel();
+  test_drag_at_edge();
   test_custom_default();
   test_custom_raw();
   test_capacity();

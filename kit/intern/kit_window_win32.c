@@ -606,30 +606,44 @@ static int mouse_from_touch(void)
 #  define BK_TABLET_DISABLE_PRESSANDHOLD 0x00000001
 #  define BK_TABLET_DISABLE_FLICKS 0x00010000
 
-static void handle_touch(BKWindow *win, HWND hwnd, WPARAM wp, LPARAM lp)
+/* A WM_TOUCH batch: one record per contact. Each BK_touch can run host callbacks that close or
+ * free the window, so the window is looked up again before every record: BK_window_free clears
+ * GWLP_USERDATA first, a closed window's handle is no longer a window, and reopen() leaves the
+ * old handle without one. */
+static void handle_touch(HWND hwnd, WPARAM wp, LPARAM lp)
 {
-  TOUCHINPUT in[16];
-  const UINT n = BK_MIN(LOWORD(wp), (UINT)(sizeof(in) / sizeof(in[0])));
-  if (!GetTouchInputInfo((HTOUCHINPUT)lp, n, in, sizeof(TOUCHINPUT))) {
+  TOUCHINPUT stack[16];
+  const UINT n = LOWORD(wp);
+  TOUCHINPUT *in = n <= 16 ? stack : (TOUCHINPUT *)malloc(sizeof(TOUCHINPUT) * n);
+  if (!in) {
     return;
   }
-  POINT origin = {0, 0};
-  ClientToScreen(hwnd, &origin);
-  for (UINT i = 0; i < n && win->hwnd; i++) {
-    const DWORD f = in[i].dwFlags;
-    const int phase = (f & TOUCHEVENTF_DOWN) ? BK_TOUCH_DOWN :
-                      (f & TOUCHEVENTF_UP)   ? BK_TOUCH_UP :
-                      (f & TOUCHEVENTF_MOVE) ? BK_TOUCH_MOVE :
-                                               -1;
-    if (phase < 0) {
-      continue;
+  if (GetTouchInputInfo((HTOUCHINPUT)lp, n, in, sizeof(TOUCHINPUT))) {
+    POINT origin = {0, 0};
+    ClientToScreen(hwnd, &origin);
+    for (UINT i = 0; i < n; i++) {
+      BKWindow *win = IsWindow(hwnd) ? (BKWindow *)GetWindowLongPtrW(hwnd, GWLP_USERDATA) : NULL;
+      if (!win) {
+        break;
+      }
+      const DWORD f = in[i].dwFlags;
+      const int phase = (f & TOUCHEVENTF_DOWN) ? BK_TOUCH_DOWN :
+                        (f & TOUCHEVENTF_UP)   ? BK_TOUCH_UP :
+                        (f & TOUCHEVENTF_MOVE) ? BK_TOUCH_MOVE :
+                                                 -1;
+      if (phase < 0) {
+        continue;
+      }
+      if (phase == BK_TOUCH_DOWN) {
+        SetFocus(hwnd); /* as WM_LBUTTONDOWN */
+      }
+      /* hundredths of a physical screen pixel */
+      BK_touch(win->ctx, (int)in[i].dwID, phase, in[i].x / 100.0f - origin.x,
+               in[i].y / 100.0f - origin.y, mods_now(0, 0));
     }
-    if (phase == BK_TOUCH_DOWN) {
-      SetFocus(hwnd); /* as WM_LBUTTONDOWN */
-    }
-    /* hundredths of a physical screen pixel */
-    BK_touch(win->ctx, (int)in[i].dwID, phase, in[i].x / 100.0f - origin.x,
-             in[i].y / 100.0f - origin.y, mods_now(0, 0));
+  }
+  if (in != stack) {
+    free(in);
   }
 }
 
@@ -815,7 +829,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       return 0;
     }
     case WM_TOUCH:
-      handle_touch(win, hwnd, wp, lp);
+      handle_touch(hwnd, wp, lp);
       CloseTouchInputHandle((HTOUCHINPUT)lp);
       return 0;
     case WM_TABLET_QUERYSYSTEMGESTURESTATUS:
@@ -1211,6 +1225,7 @@ static int reopen(BKWindow *win, LONG_PTR ex)
   }
   SetWindowLongPtrW(old, GWLP_USERDATA, 0); /* the old window's messages end here */
   SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)win);
+  RegisterTouchWindow(h, 0); /* as BK_window_new: touches keep coming as WM_TOUCH */
   win->hwnd = h;
   timers_rearm(win);
   DestroyWindow(old);

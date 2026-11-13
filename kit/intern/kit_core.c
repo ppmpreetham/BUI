@@ -2422,10 +2422,13 @@ void bk_update_cursor(BKContext *ctx)
   update_cursor(ctx);
 }
 
-static bool continuous(BKContext *ctx)
+/* A drag with the hidden pointer that wraps at the window edge and comes back where it began
+ * (USE_CONT_MOUSE_CORRECT). Not for a finger: warping moves the mouse, not the finger, so its
+ * next position would count the wrap again. */
+static bool continuous(BKContext *ctx, int mods)
 {
   return ctx->host.warp && ctx->grab && ctx->dragging && !BK_HTML(ctx->grab) &&
-         ctx->grab->cls->drag_cursor == BK_CURSOR_NONE;
+         ctx->grab->cls->drag_cursor == BK_CURSOR_NONE && !(mods & BK_FROM_TOUCH);
 }
 
 static void wrap_pointer(BKContext *ctx, int x, int y)
@@ -2517,7 +2520,7 @@ static int in_BK_motion(BKContext *ctx, int x, int y, int mods)
       set_hover(ctx, under);
       changed = 1;
     }
-    if (continuous(ctx)) {
+    if (continuous(ctx, mods)) {
       wrap_pointer(ctx, x, y);
     }
     return changed;
@@ -2647,7 +2650,7 @@ static int in_BK_release(BKContext *ctx, int x, int y, int mods)
     }
     return 1;
   }
-  const bool was_continuous = continuous(ctx);
+  const bool was_continuous = continuous(ctx, mods);
   const int vx = x + ctx->off_x, vy = y + ctx->off_y;
   BKNode *grab = ctx->grab;
   ctx->dt_active = 0;

@@ -186,7 +186,7 @@ The host is a struct of optional callbacks:
 
 A `BKWindow` fills in all of them except `emit`, which you keep. If you host the kit yourself, the [embedding page](../embedding/) shows how.
 
-**Input goes in** through `BK_press`, `BK_release`, `BK_motion`, `BK_wheel`, `BK_scroll` (precise deltas), `BK_key`, `BK_key_release`, `BK_button` and `BK_context_menu`; touch screens through `BK_touch` and trackpad pinches through `BK_magnify` and `BK_rotate` ([Touch and gestures](/docs/concepts/touch)). Each returns non-zero when something changed.
+**Input goes in** through `BK_press`, `BK_release`, `BK_motion`, `BK_wheel`, `BK_scroll` (precise deltas), `BK_key`, `BK_key_release`, `BK_button` and `BK_context_menu`; touch screens through `BK_touch` and trackpad pinches through `BK_magnify` and `BK_rotate` ([Touch and gestures](../../concepts/touch/)). Each returns non-zero when something changed.
 
 **Input methods (IME)** follow Blender's model (`GHOST_ImeWin32`, `wmIMEData`). The IME is off until a text field or text area is being edited, so shortcuts keep working with a CJK keyboard. A window host forwards the platform's composition events with `BK_ime_event(ctx, BK_IME_COMPOSITION_START | BK_IME_COMPOSITION | BK_IME_COMPOSITION_END, &event)`, where `BKImeEvent` carries the committed `result`, the `composite` text still being composed, the IME `cursor_pos` and the `sel_start`/`sel_end` clause being converted. After each render it calls `BK_ime_state(ctx, &state)`, which returns non-zero only when the IME must be started, ended or moved (`state.enabled`, `state.restart`, `state.x`, `state.y` is where the candidate window goes). The kit draws the composition underlined at the caret and inserts the result like typed text. The Windows window host does all of this; an embedder with its own window can use the same two calls. Number fields and password fields take no IME.
 
@@ -247,7 +247,7 @@ BK_custom_set(node, &cls, my_data);
 - **`frame`** runs at the start of `BK_render` when you asked with `BK_custom_request_frame(node, ms)`: the place for immediate-mode UIs to build their frame.
 - **`draw`** gets the raster and the node's rect. It may be called several times per render, once per damaged region, so it must draw the current state without changing it.
 - **`BK_custom_set_cursor(node, cursor)`** sets the pointer shape over the node.
-- **Touch** arrives as the pointer (with `BK_FROM_TOUCH` in `mods`) and two-finger `BK_CUSTOM_WHEEL`, `BK_CUSTOM_MAGNIFY` and `BK_CUSTOM_ROTATE` events. After **`BK_custom_set_touch(node, 1)`** every contact that begins over the node arrives as `BK_CUSTOM_TOUCH` (`touch_id`, `touch_phase`) instead ([Touch and gestures](/docs/concepts/touch#custom-nodes)).
+- **Touch** arrives as the pointer (with `BK_FROM_TOUCH` in `mods`) and two-finger `BK_CUSTOM_WHEEL`, `BK_CUSTOM_MAGNIFY` and `BK_CUSTOM_ROTATE` events. After **`BK_custom_set_touch(node, 1)`** every contact that begins over the node arrives as `BK_CUSTOM_TOUCH` (`touch_id`, `touch_phase`) instead ([Touch and gestures](../../concepts/touch/#custom-nodes)).
 
 ## Everything else
 

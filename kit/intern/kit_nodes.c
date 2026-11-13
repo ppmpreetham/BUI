@@ -57,6 +57,8 @@ typedef struct NodeEdit {
   BKNode *hit;                 /* node pressed */
   int link_node, link_sock;    /* the fixed end of a dragged link */
   bool link_from_output;
+  bool link_picked;            /* the drag took a link off an input: a cancel puts it back */
+  int picked_from, picked_out, picked_to, picked_in;
   int value_node, value_sock;
   double value_start;
   bool shift;
@@ -912,11 +914,17 @@ static int editor_press(BKNode *e, BKEvent *ev)
       d->link_node = old.from;
       d->link_sock = old.out;
       d->link_from_output = true;
+      d->link_picked = true;
+      d->picked_from = old.from;
+      d->picked_out = old.out;
+      d->picked_to = old.to;
+      d->picked_in = old.in;
     }
     else {
       d->link_node = ni;
       d->link_sock = k;
       d->link_from_output = !input;
+      d->link_picked = false;
     }
     d->mode = M_LINK;
     bk_invalidate(e);
@@ -1114,6 +1122,9 @@ static void editor_cancel(BKNode *e)
   }
   else if (d->mode == M_VALUE) {
     set_input_value(e->kids[d->value_node], d->value_sock, d->value_start);
+  }
+  else if (d->mode == M_LINK && d->link_picked) { /* node_link_cancel: the graph is as it was */
+    add_link(e, d->picked_from, d->picked_out, d->picked_to, d->picked_in);
   }
   d->mode = M_NONE;
   bk_invalidate(e);
