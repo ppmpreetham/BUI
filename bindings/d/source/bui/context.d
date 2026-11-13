@@ -248,6 +248,34 @@ final class Context {
         return changed;
     }
 
+    /// A touch screen contact (`BK_TOUCH_DOWN` / `MOVE` / `UP` / `CANCEL`): one finger is the
+    /// pointer, two pan, magnify and rotate.
+    bool touch(int id, int phase, float x, float y, int mods = 0) {
+        auto c = ctx();
+        check();
+        const changed = BK_touch(c, id, phase, x, y, mods) != 0;
+        check();
+        return changed;
+    }
+
+    /// Trackpad pinch: `delta` is the scale change (0.1 = 10% larger), about `x`, `y`.
+    bool magnify(int x, int y, float delta, int mods = 0) {
+        auto c = ctx();
+        check();
+        const changed = BK_magnify(c, x, y, delta, mods) != 0;
+        check();
+        return changed;
+    }
+
+    /// Trackpad turn in degrees, positive counter-clockwise, about `x`, `y`.
+    bool rotate(int x, int y, float degrees, int mods = 0) {
+        auto c = ctx();
+        check();
+        const changed = BK_rotate(c, x, y, degrees, mods) != 0;
+        check();
+        return changed;
+    }
+
     /// Key press with the character `text` and the key name `keysym`.
     bool key(string text, string keysym = null, int mods = 0) {
         auto c = ctx();

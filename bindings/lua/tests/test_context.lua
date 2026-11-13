@@ -84,6 +84,16 @@ ctx:context_menu(100, 100, 0)
 -- Scroll
 ctx:scroll(50, 50, 10.5, -20.3, 0)
 
+-- Touch: one finger is the pointer, a second makes a pinch
+check(ctx:touch(1, bui.TOUCH_DOWN, 50, 50, 0), "touch down not used")
+ctx:touch(2, bui.TOUCH_DOWN, 90, 50, 0)
+ctx:touch(2, bui.TOUCH_MOVE, 120.5, 50, 0)
+ctx:touch(1, bui.TOUCH_UP, 50, 50, 0)
+ctx:touch(2, bui.TOUCH_CANCEL, 120.5, 50, 0)
+check(not ctx:touch(42, bui.TOUCH_MOVE, 1, 1, 0), "unknown contact used")
+ctx:magnify(50, 50, 0.1, 0)
+ctx:rotate(50, 50, -5.0, 0)
+
 -- ── Cursor ───────────────────────────────────────────────────────────
 
 local cursor = ctx:cursor()

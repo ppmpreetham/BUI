@@ -24,6 +24,7 @@ typedef struct BKCustom {
   double wake_at; /* frame due at this bk_time() (0 = none) */
   int framed;     /* frame ran at least once */
   int last_w, last_h;
+  int raw_touch; /* BK_custom_set_touch: contacts arrive as BK_CUSTOM_TOUCH */
   struct BKCustom *next; /* every custom node (any context) */
 } BKCustom;
 
@@ -396,6 +397,38 @@ void BK_custom_set_cursor(BKNode *node, int cursor)
   if (ctx && (ctx->hover == node || ctx->grab == node)) {
     bk_update_cursor(ctx);
   }
+}
+
+void BK_custom_set_touch(BKNode *node, int raw)
+{
+  BKCustom *c = cust(node);
+  if (c) {
+    c->raw_touch = raw != 0;
+  }
+}
+
+bool bk_custom_takes_touch(const BKNode *n)
+{
+  const BKCustom *c = cust(n);
+  return c && c->raw_touch && c->cls.event;
+}
+
+/* A contact of a node that takes raw touches: the first one down gives it keyboard focus, as a
+ * click does (custom_press). */
+int bk_custom_touch(BKNode *n, int id, int phase, int x, int y, int mods)
+{
+  BKContext *ctx = bk_ctx(n);
+  if (phase == BK_TOUCH_DOWN && ctx && ctx->focus != n) {
+    BK_focus_node(ctx, NULL); /* ends another field's edit */
+    take_focus(n);
+  }
+  BKCustomEvent ce;
+  memset(&ce, 0, sizeof(ce));
+  ce.type = BK_CUSTOM_TOUCH;
+  ce.mods = mods;
+  ce.touch_id = id;
+  ce.touch_phase = phase;
+  return bk_custom_event(n, &ce, x, y);
 }
 
 int BK_custom_has_focus(BKNode *node)

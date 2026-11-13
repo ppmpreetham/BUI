@@ -34,6 +34,13 @@ enum BK_ALT = 4;
 enum BK_BUTTON1 = 8;
 enum BK_BUTTON2 = 16;
 enum BK_BUTTON3 = 32;
+enum BK_FROM_TOUCH = 64;
+
+/* ---- touch phases (BK_touch) --------------------------------------------- */
+enum BK_TOUCH_DOWN = 0;
+enum BK_TOUCH_MOVE = 1;
+enum BK_TOUCH_UP = 2;
+enum BK_TOUCH_CANCEL = 3;
 
 /* ---- cursors ------------------------------------------------------------- */
 enum BK_CURSOR_DEFAULT = 0;
@@ -130,6 +137,9 @@ enum BK_CUSTOM_KEY = 6;
 enum BK_CUSTOM_KEYUP = 7;
 enum BK_CUSTOM_FOCUS = 8;
 enum BK_CUSTOM_BLUR = 9;
+enum BK_CUSTOM_TOUCH = 10;
+enum BK_CUSTOM_MAGNIFY = 11;
+enum BK_CUSTOM_ROTATE = 12;
 
 /* ---- IME ----------------------------------------------------------------- */
 enum BK_IME_COMPOSITION_START = 0;
@@ -266,6 +276,10 @@ struct BKCustomEvent {
     float wheel_y;
     const(char)* text;
     const(char)* keysym;
+    int touch_id;
+    int touch_phase;
+    float magnify;
+    float rotate;
 }
 
 alias BKCustomEventFn =
@@ -535,6 +549,7 @@ int BK_custom_set(BKNode* node, const(BKCustomClass)* cls, void* data);
 void* BK_custom_data(BKNode* node);
 void BK_custom_request_frame(BKNode* node, int ms);
 void BK_custom_set_cursor(BKNode* node, int cursor);
+void BK_custom_set_touch(BKNode* node, int raw);
 int BK_custom_has_focus(BKNode* node);
 BKContext* BK_node_context(const(BKNode)* node);
 
@@ -579,6 +594,9 @@ int BK_wheel(BKContext* ctx, int x, int y, int delta, int mods);
 int BK_scroll(BKContext* ctx, int x, int y, float dx, float dy, int mods);
 int BK_key(BKContext* ctx, const(char)* text, const(char)* keysym, int mods);
 int BK_context_menu(BKContext* ctx, int x, int y, int mods);
+int BK_touch(BKContext* ctx, int id, int phase, float x, float y, int mods);
+int BK_magnify(BKContext* ctx, int x, int y, float delta, int mods);
+int BK_rotate(BKContext* ctx, int x, int y, float degrees, int mods);
 
 /* -- input methods --------------------------------------------------------- */
 int BK_ime_event(BKContext* ctx, int type, const(BKImeEvent)* e);

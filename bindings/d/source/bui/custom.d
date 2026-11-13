@@ -31,6 +31,13 @@ struct CustomEvent {
     const(char)[] text;
     /// The key name, for `BK_CUSTOM_KEY` / `BK_CUSTOM_KEYUP`.
     const(char)[] keysym;
+    /// `BK_CUSTOM_TOUCH`: the contact's id and `BK_TOUCH_*` phase.
+    int touchId;
+    int touchPhase;
+    /// `BK_CUSTOM_MAGNIFY`: scale change (0.1 = 10% larger).
+    float magnify;
+    /// `BK_CUSTOM_ROTATE`: degrees, positive counter-clockwise.
+    float rotate;
 }
 
 /// The custom node's implementations.
@@ -107,6 +114,10 @@ final class Custom {
         event.wheelY = raw.wheel_y;
         event.text = cslice(raw.text);
         event.keysym = cslice(raw.keysym);
+        event.touchId = raw.touch_id;
+        event.touchPhase = raw.touch_phase;
+        event.magnify = raw.magnify;
+        event.rotate = raw.rotate;
         try {
             return self.handlers.onEvent(wrapper, event);
         }
@@ -215,6 +226,12 @@ void requestFrame(Node node, int ms = 0) {
 /// Set the pointer shape while it is over the node (`BK_CURSOR_*`).
 void setCursor(Node node, int cursor) {
     BK_custom_set_cursor(need(node, "setCursor"), cursor);
+}
+
+/// `true`: every touch contact that begins over the node arrives as `BK_CUSTOM_TOUCH`, with no
+/// pointer emulation or gestures; `false` (the default): as the pointer and gestures.
+void setTouch(Node node, bool raw) {
+    BK_custom_set_touch(need(node, "setTouch"), raw ? 1 : 0);
 }
 
 /// Non-zero while the custom node has keyboard focus.

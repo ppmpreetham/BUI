@@ -591,6 +591,48 @@ static int mods_now(WPARAM wp, int mouse)
   return m;
 }
 
+/* -- touch screens: WM_TOUCH into BK_touch -- */
+
+/* Mouse messages Windows makes from a touch (GetMessageExtraInfo: MI_WP_SIGNATURE, with the
+ * touch bit; pen ones lack it and stay mouse input). The touches came as WM_TOUCH already. */
+static int mouse_from_touch(void)
+{
+  return ((DWORD)GetMessageExtraInfo() & 0xFFFFFF80u) == 0xFF515780u;
+}
+
+#  ifndef WM_TABLET_QUERYSYSTEMGESTURESTATUS
+#    define WM_TABLET_QUERYSYSTEMGESTURESTATUS 0x02CC
+#  endif
+#  define BK_TABLET_DISABLE_PRESSANDHOLD 0x00000001
+#  define BK_TABLET_DISABLE_FLICKS 0x00010000
+
+static void handle_touch(BKWindow *win, HWND hwnd, WPARAM wp, LPARAM lp)
+{
+  TOUCHINPUT in[16];
+  const UINT n = BK_MIN(LOWORD(wp), (UINT)(sizeof(in) / sizeof(in[0])));
+  if (!GetTouchInputInfo((HTOUCHINPUT)lp, n, in, sizeof(TOUCHINPUT))) {
+    return;
+  }
+  POINT origin = {0, 0};
+  ClientToScreen(hwnd, &origin);
+  for (UINT i = 0; i < n && win->hwnd; i++) {
+    const DWORD f = in[i].dwFlags;
+    const int phase = (f & TOUCHEVENTF_DOWN) ? BK_TOUCH_DOWN :
+                      (f & TOUCHEVENTF_UP)   ? BK_TOUCH_UP :
+                      (f & TOUCHEVENTF_MOVE) ? BK_TOUCH_MOVE :
+                                               -1;
+    if (phase < 0) {
+      continue;
+    }
+    if (phase == BK_TOUCH_DOWN) {
+      SetFocus(hwnd); /* as WM_LBUTTONDOWN */
+    }
+    /* hundredths of a physical screen pixel */
+    BK_touch(win->ctx, (int)in[i].dwID, phase, in[i].x / 100.0f - origin.x,
+             in[i].y / 100.0f - origin.y, mods_now(0, 0));
+  }
+}
+
 static const char *vk_keysym(WPARAM vk, char *buf)
 {
   switch (vk) {
@@ -634,6 +676,9 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProcW(hwnd, msg, wp, lp);
   }
   BKContext *ctx = win->ctx;
+  if (msg >= WM_MOUSEFIRST && msg <= WM_MBUTTONDBLCLK && mouse_from_touch()) {
+    return 0; /* moves and buttons made from a touch (WM_TOUCH has it); wheels are not */
+  }
   switch (msg) {
     case WM_BK_RENDER:
       if (win->want_frame && win->cb.on_frame) {
@@ -769,6 +814,13 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       }
       return 0;
     }
+    case WM_TOUCH:
+      handle_touch(win, hwnd, wp, lp);
+      CloseTouchInputHandle((HTOUCHINPUT)lp);
+      return 0;
+    case WM_TABLET_QUERYSYSTEMGESTURESTATUS:
+      /* no press-and-hold right click ring, no flicks: a held finger is a held press */
+      return BK_TABLET_DISABLE_PRESSANDHOLD | BK_TABLET_DISABLE_FLICKS;
     case WM_MOUSEWHEEL: {
       POINT p = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
       ScreenToClient(hwnd, &p);
@@ -967,6 +1019,7 @@ BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height
     return NULL;
   }
   SetWindowLongPtrW(win->hwnd, GWLP_USERDATA, (LONG_PTR)win);
+  RegisterTouchWindow(win->hwnd, 0); /* touches as WM_TOUCH (BK_touch), not as the mouse */
   g_open++;
   if (BUI_gpu_default()) {
     gpu_attach(win);

@@ -354,13 +354,15 @@ static int Bui_Event(void* data, BKNode* node, const BKCustomEvent* e)
     const ImGuiKey key = (e->type == BK_CUSTOM_KEY || e->type == BK_CUSTOM_KEYUP) ? KeysymToImGuiKey(e->keysym, &pulse) : ImGuiKey_None;
     if (e->type != BK_CUSTOM_FOCUS && e->type != BK_CUSTOM_BLUR)
         UpdateModifiers(bd, io, e, key);
+    // the kit's touch pointer (BK_touch): ImGui then skips hover between taps
+    const ImGuiMouseSource source = (e->mods & BK_FROM_TOUCH) ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse;
     switch (e->type)
     {
     case BK_CUSTOM_PRESS:
     case BK_CUSTOM_RELEASE:
     {
         const int b = MouseButton(e->button);
-        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        io.AddMouseSourceEvent(source);
         io.AddMousePosEvent(e->x, e->y);
         if (b >= 0)
         {
@@ -371,7 +373,7 @@ static int Bui_Event(void* data, BKNode* node, const BKCustomEvent* e)
         break;
     }
     case BK_CUSTOM_MOTION:
-        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        io.AddMouseSourceEvent(source);
         io.AddMousePosEvent(e->x, e->y);
         break;
     case BK_CUSTOM_LEAVE:
@@ -379,7 +381,7 @@ static int Bui_Event(void* data, BKNode* node, const BKCustomEvent* e)
             io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
         break;
     case BK_CUSTOM_WHEEL:
-        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        io.AddMouseSourceEvent(source);
         io.AddMousePosEvent(e->x, e->y);
         io.AddMouseWheelEvent(-e->wheel_x, e->wheel_y); // ImGui: wheel_x > 0 scrolls left
         break;

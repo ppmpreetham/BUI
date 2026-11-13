@@ -1136,6 +1136,25 @@ static int editor_wheel(BKNode *e, BKEvent *ev)
   return 1;
 }
 
+/* Touch and trackpad gestures (view2d_ops.cc): MOUSEPAN moves the view with the fingers
+ * (view_pan_invoke), MOUSEZOOM zooms about them (view_zoomdrag_invoke); no rotation. */
+static int editor_gesture(BKNode *e, BKEvent *ev)
+{
+  NodeEdit *d = ed(e);
+  if (ev->gesture == BK_GESTURE_PAN) {
+    d->panx += ev->pan_x;
+    d->pany += ev->pan_y;
+  }
+  else if (ev->gesture == BK_GESTURE_MAGNIFY) {
+    zoom_at(e, 1.0f + ev->magnify, ev->x, ev->y);
+  }
+  else {
+    return 0;
+  }
+  bk_invalidate(e);
+  return 1;
+}
+
 static int editor_key(BKNode *e, BKEvent *ev)
 {
   const char *k = ev->keysym;
@@ -1258,6 +1277,7 @@ const BKClass bk_cls_nodeeditor = {.name = "nodeeditor",
                                    .release = editor_release,
                                    .cancel = editor_cancel,
                                    .wheel = editor_wheel,
+                                   .gesture = editor_gesture,
                                    .key = editor_key,
                                    .cursor_at = editor_cursor_at,
                                    .set_num = editor_set_num,

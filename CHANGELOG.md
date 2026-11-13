@@ -9,6 +9,21 @@ All notable changes to **blenderui** (BUI). The format follows
 ### Added
 - **D bindings** (`bindings/d`): a DUB package with raw `extern(C)` declarations for the whole kit, GPU and stable C API, plus idiomatic wrappers for nodes, contexts, windows, menus, rasters, images, video, canvases, trees, text areas, custom nodes and themes. The kit is built through CMake from `preBuildCommands`, ownership follows the Python binding's reference-hook model, and `dub run --config=test` covers the wrappers, raw API, events, menus and host errors end to end. Examples: `hello.d` and `headless.d`.
 - **D HTML, CSS and RSX** (`bindings/d`): `bui.html` adds an `Element` tree and tag constructors, `bui.css` a selector cascade with a practical CSS subset, and `bui.rsx` a compile-time `rsx!` mixin that lowers markup and `{expression}` values to `Element` calls. `Document` realises the styled tree as kit nodes with flex, grid and table layout, widgets, dynamic `:hover`/`:active` states through `Element.setState` and `Document.restyle`, and in-place text updates through `Element.setText`. Tag constructors use `body_`, `template_`, `object_` and `select_` where D or the existing API already uses the name; markup keeps the HTML spelling. `dub run --config=rsx` opens the new example, and `--config=test` covers the cascade, realiser and RSX. The D wrappers also follow the kit's current header: focus callbacks, `Context.hitAt`, custom theme files, text shadows, font size and transparent rasters.
+- **Touch screens and trackpad gestures.** One finger is the pointer: it taps, drags number fields and sliders, opens
+  menus and picks rows, and leaves no hover behind. A second finger cancels what the first was doing (as Escape
+  cancels a drag: values go back, nothing is clicked) and the two become a gesture until both lift. Moving them
+  together scrolls the view under them, spreading them zooms (`BK_magnify`), turning them rotates (`BK_rotate`). These
+  are GHOST's trackpad Scroll / Magnify / Rotate events (Blender's MOUSEPAN / MOUSEZOOM / MOUSEROTATE); the node editor
+  pans and zooms on them. New C API: `BK_touch(ctx, id, phase, x, y, mods)` with `BK_TOUCH_DOWN` / `MOVE` / `UP` /
+  `CANCEL`, `BK_magnify`, `BK_rotate`, the `BK_FROM_TOUCH` modifier bit, and for custom nodes `BK_CUSTOM_TOUCH`,
+  `BK_CUSTOM_MAGNIFY`, `BK_CUSTOM_ROTATE` with `BKCustomEvent.touch_id`, `touch_phase`, `magnify`, `rotate`, and
+  `BK_custom_set_touch(node, 1)` to receive every contact raw. Window hosts: `WM_TOUCH` on Windows (touch-made mouse
+  messages and press-and-hold are dropped), XInput 2.2 touch on X11 (libXi loaded at run time; older servers keep
+  emulated mouse input), `wl_touch` and the pointer-gestures pinch on Wayland, `magnifyWithEvent:` /
+  `rotateWithEvent:` on macOS. Dear ImGui reports touch as `ImGuiMouseSource_TouchScreen`. Python
+  `KitContext.touch` / `magnify` / `rotate`, Lua `ctx:touch` / `magnify` / `rotate` with `bui.TOUCH_*`, D
+  `Context.touch` / `magnify` / `rotate` and `setTouch`, and `blenderui-sys` declarations. `tests/touch_test.c`; [docs/touch.md](docs/touch.md) and the website's Touch and
+  gestures page.
 
 ## [0.5.1] - 2026-11-13
 

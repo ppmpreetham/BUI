@@ -26,6 +26,7 @@ add_library(bui_kit STATIC
   intern/kit_regions.c
   intern/kit_nodes.c
   intern/kit_custom.c
+  intern/kit_touch.c
   intern/kit_filebrowser.c # without BUI_FILEBROWSER: BK_file_dialog's stub only
   # images and video (Blender's imbuf design): see intern/image/image.h
   intern/image/imbuf.c
@@ -189,6 +190,12 @@ elseif(UNIX AND NOT APPLE)
       if(EXISTS ${_wl_cursor_shape} AND EXISTS ${_wl_tablet})
         list(APPEND _wl_xml ${_wl_cursor_shape} ${_wl_tablet})
         target_compile_definitions(bui_kit PRIVATE BUI_WL_CURSOR_SHAPE)
+      endif()
+      # pointer-gestures: touchpad pinches become BK_magnify / BK_rotate (GHOST's gesture_pinch)
+      set(_wl_gestures ${BUI_WL_PROTOCOLS}/unstable/pointer-gestures/pointer-gestures-unstable-v1.xml)
+      if(EXISTS ${_wl_gestures})
+        list(APPEND _wl_xml ${_wl_gestures})
+        target_compile_definitions(bui_kit PRIVATE BUI_WL_POINTER_GESTURES)
       endif()
       foreach(_x ${_wl_xml})
         get_filename_component(_n ${_x} NAME_WE)

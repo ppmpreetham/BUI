@@ -69,8 +69,17 @@ typedef struct BKNode BKNode;
 typedef struct BKContext BKContext;
 typedef struct BKTreeItem BKTreeItem;
 
-/* Modifier / button state bits for input calls. */
-enum { BK_SHIFT = 1, BK_CTRL = 2, BK_ALT = 4, BK_BUTTON1 = 8, BK_BUTTON2 = 16, BK_BUTTON3 = 32 };
+/* Modifier / button state bits for input calls. BK_FROM_TOUCH marks the pointer events the kit
+ * makes from a touch screen contact (BK_touch); hosts never pass it. */
+enum {
+  BK_SHIFT = 1,
+  BK_CTRL = 2,
+  BK_ALT = 4,
+  BK_BUTTON1 = 8,
+  BK_BUTTON2 = 16,
+  BK_BUTTON3 = 32,
+  BK_FROM_TOUCH = 64
+};
 
 /* Mouse cursors requested through BKHost.set_cursor. */
 enum {
@@ -535,7 +544,12 @@ void BK_node_set_image_frame(BKNode *node, int frame);
  *  - `draw` with the raster, clipped to the redrawn region inside the node.
  *    It may be called several times per render (one per damaged region) and
  *    for regions other widgets damaged, so it must draw the current state
- *    without changing it.
+ *    without changing it;
+ *  - touch (BK_touch): by default one finger is the pointer (PRESS / MOTION /
+ *    RELEASE with BK_FROM_TOUCH in mods) and two fingers are a gesture: WHEEL
+ *    (pan), MAGNIFY and ROTATE, the events trackpads send too (BK_magnify,
+ *    BK_rotate). After BK_custom_set_touch(node, 1) it gets every contact that
+ *    begins over it as TOUCH events instead, and does its own gestures.
  * Positions are in raster pixels relative to the node's top-left corner. */
 enum {
   BK_CUSTOM_PRESS = 1, /* button: 1 left, 2 middle, 3 right */
@@ -547,6 +561,9 @@ enum {
   BK_CUSTOM_KEYUP,     /* keysym */
   BK_CUSTOM_FOCUS,     /* keyboard focus gained */
   BK_CUSTOM_BLUR,      /* keyboard focus lost */
+  BK_CUSTOM_TOUCH,     /* touch_id, touch_phase (BK_custom_set_touch) */
+  BK_CUSTOM_MAGNIFY,   /* magnify */
+  BK_CUSTOM_ROTATE,    /* rotate */
 };
 
 typedef struct BKCustomEvent {
@@ -559,6 +576,10 @@ typedef struct BKCustomEvent {
   float wheel_y;       /* notches; > 0: scroll up (wheel turned away) */
   const char *text;    /* KEY: UTF-8 text the key typed ("" for none) */
   const char *keysym;  /* KEY / KEYUP: X11 keysym name ("Return", "a", "F1"; "" for none) */
+  int touch_id;        /* TOUCH: the host's contact id */
+  int touch_phase;     /* TOUCH: BK_TOUCH_DOWN / MOVE / UP / CANCEL */
+  float magnify;       /* MAGNIFY: scale change, 0.1 = 10% larger */
+  float rotate;        /* ROTATE: degrees, > 0 counter-clockwise */
 } BKCustomEvent;
 
 typedef struct BKCustomClass {
@@ -582,6 +603,9 @@ void *BK_custom_data(BKNode *node);
 void BK_custom_request_frame(BKNode *node, int ms);
 /* Pointer shape over the node (BK_CURSOR_*), applied right away when hovered. */
 void BK_custom_set_cursor(BKNode *node, int cursor);
+/* 1: contacts that begin over the node arrive as BK_CUSTOM_TOUCH events (every finger, no
+ * pointer emulation, no gestures); 0 (the default): as the pointer and gestures. */
+void BK_custom_set_touch(BKNode *node, int raw);
 int BK_custom_has_focus(BKNode *node);
 /* The context a node is shown in (NULL while detached). */
 BKContext *BK_node_context(const BKNode *node);
@@ -642,6 +666,28 @@ int BK_wheel(BKContext *ctx, int x, int y, int delta, int mods);
 int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods);
 int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods);
 int BK_context_menu(BKContext *ctx, int x, int y, int mods);
+
+/* -- Touch screens and trackpad gestures ----------------------------------------------------
+ * Hosts send every contact of a touch screen (window pixels, any number of fingers; `id` is the
+ * platform's, unique while the finger is down). The kit turns them into what widgets know:
+ *  - one finger is the pointer: moves there, presses, drags, releases (BK_FROM_TOUCH in mods),
+ *    and leaves no hover behind;
+ *  - a second finger cancels what the first one did (as Escape cancels a drag: a dragged value
+ *    goes back, a pressed button is not clicked) and the two become a gesture until both lift:
+ *    moving them together scrolls the region or view under them, spreading them is BK_magnify
+ *    and turning them is BK_rotate, about their centre;
+ *  - custom nodes that asked for raw touches (BK_custom_set_touch) get each contact instead.
+ * CANCEL: the platform took the contact back (a system gesture); nothing it did is kept.
+ *
+ * Magnify and rotate are GHOST's trackpad events (GHOST_kTrackpadEventMagnify / Rotate, which
+ * Blender reads as MOUSEZOOM / MOUSEROTATE); hosts send them for trackpad pinches too.
+ * Each returns non-zero when something changed. */
+enum { BK_TOUCH_DOWN = 0, BK_TOUCH_MOVE, BK_TOUCH_UP, BK_TOUCH_CANCEL };
+int BK_touch(BKContext *ctx, int id, int phase, float x, float y, int mods);
+/* delta: scale change since the last event (0.1 = 10% larger), about x, y */
+int BK_magnify(BKContext *ctx, int x, int y, float delta, int mods);
+/* degrees since the last event, > 0 counter-clockwise, about x, y */
+int BK_rotate(BKContext *ctx, int x, int y, float degrees, int mods);
 
 /* -- Input methods (IME) ------------------------------------------------------
  * Blender's model (GHOST_ImeWin32, wmIMEData, the text button's IME handling), one API for every
