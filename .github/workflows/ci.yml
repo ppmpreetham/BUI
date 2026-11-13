@@ -75,7 +75,13 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev xvfb
       - name: Configure
         shell: bash
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUI_BUILD_LUA_BINDINGS=ON -DBUI_BUILD_PYTHON_BINDINGS=OFF -DBUI_BUILD_IMGUI=OFF
+        # fetches Lua from lua.org when the system has none, and lua.org fails now and then: three tries
+        run: |
+          for i in 1 2 3; do
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUI_BUILD_LUA_BINDINGS=ON -DBUI_BUILD_PYTHON_BINDINGS=OFF -DBUI_BUILD_IMGUI=OFF && exit 0
+            echo "configure failed (try $i of 3)"; sleep 15
+          done
+          exit 1
       - name: Build
         run: cmake --build build --config Release --parallel 4 --target bui-lua _bui
       - name: Test (Linux, under Xvfb)
@@ -100,10 +106,22 @@ jobs:
       - name: X11 headers (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libx11-dev
+      # lua.org and luarocks.org drop connections now and then (ECONNRESET), which failed a release once:
+      # each download is tried twice
       - uses: leafo/gh-actions-lua@v10
+        id: lua
+        continue-on-error: true
+        with:
+          luaVersion: "5.4"
+      - uses: leafo/gh-actions-lua@v10
+        if: steps.lua.outcome == 'failure'
         with:
           luaVersion: "5.4"
       - uses: leafo/gh-actions-luarocks@v4
+        id: luarocks
+        continue-on-error: true
+      - uses: leafo/gh-actions-luarocks@v4
+        if: steps.luarocks.outcome == 'failure'
       - name: Lint the rockspec
         run: luarocks lint bindings/lua/blenderui-*.rockspec
       - name: Build and install the rock

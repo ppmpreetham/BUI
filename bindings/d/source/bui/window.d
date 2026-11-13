@@ -5,6 +5,8 @@
  */
 module bui.window;
 
+import core.memory : GC;
+
 import bui.context : Context;
 import bui.errors : BuiException;
 import bui.internal.util : cstr;
@@ -39,6 +41,9 @@ final class Window {
         if (handle is null) {
             throw new BuiException("Window", "the platform window could not be created");
         }
+        // The native side keeps a raw pointer to this object: root it until `free`.
+        GC.addRoot(cast(void*) this);
+        context.windows += 1;
         callbacks.data = cast(void*) this;
         callbacks.on_timer = &timerCallback;
         callbacks.on_close = &closeCallback;
@@ -59,6 +64,8 @@ final class Window {
         auto h = handle;
         handle = null;
         BK_window_free(h);
+        context.windows -= 1;
+        GC.removeRoot(cast(void*) this);
         context = null;
         timerHandler = null;
         closeHandler = null;

@@ -224,10 +224,22 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # lua.org and luarocks.org drop connections now and then (ECONNRESET), which failed a release once:
+      # each download is tried twice
       - uses: leafo/gh-actions-lua@v10
+        id: lua
+        continue-on-error: true
+        with:
+          luaVersion: "5.4"
+      - uses: leafo/gh-actions-lua@v10
+        if: steps.lua.outcome == 'failure'
         with:
           luaVersion: "5.4"
       - uses: leafo/gh-actions-luarocks@v4
+        id: luarocks
+        continue-on-error: true
+      - uses: leafo/gh-actions-luarocks@v4
+        if: steps.luarocks.outcome == 'failure'
       - name: A JSON library for `luarocks upload` (the action's LuaRocks needs one and installs none)
         run: luarocks install dkjson
       - name: Upload the rockspec (the rock is built from the tag by whoever installs it)

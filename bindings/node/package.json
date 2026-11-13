@@ -82,6 +82,7 @@
     "signals",
     "bun",
     "react",
-    "svelte"
+    "svelte",
+    "vue"
   ]
 }

@@ -18,7 +18,7 @@ import bui.css.style : Style;
 import bui.errors : BuiException;
 import bui.html.text : asciiLower, isHtmlSpace;
 import bui.kit : BK_EV_CHANGE, BK_EV_CLICK, BK_EV_DOUBLE, BK_EV_ENTER, BK_EV_KEY,
-    BK_EV_KEYRELEASE, BK_EV_LEAVE, BK_EV_PRESS, BK_EV_RELEASE, BK_EV_SUBMIT,
+    BK_EV_LEAVE, BK_EV_PRESS, BK_EV_RELEASE, BK_EV_SUBMIT,
     BK_EV_TOGGLE, BK_EV_WHEEL;
 import bui.node : Node, NodeEvent, NodeHandler;
 
@@ -254,6 +254,16 @@ final class Element : CssSubject {
             if (content.element is null) {
                 result ~= content.text;
             }
+        }
+        return result;
+    }
+
+    /// The text of this element and all its descendants, in document order.
+    string descendantText() const {
+        string result;
+        foreach (content; contents_) {
+            result ~= content.element is null ? content.text
+                                              : content.element.descendantText();
         }
         return result;
     }
@@ -671,9 +681,6 @@ package void bindEvents(Element element, Node node, void delegate() restyle) {
     }
     if (element.key_ !is null) {
         node.on(BK_EV_KEY, (NodeEvent event) {
-            element.key_(event.text.idup);
-        });
-        node.on(BK_EV_KEYRELEASE, (NodeEvent event) {
             element.key_(event.text.idup);
         });
     }

@@ -88,6 +88,9 @@ final class Image {
         if (width <= 0 || height <= 0) {
             throw new BuiException("Image.fromRgba", "empty size");
         }
+        if (stride < 0) {
+            throw new BuiException("Image.fromRgba", "negative stride");
+        }
         const row = stride != 0 ? stride : width * 4;
         if (rgba.length < (height - 1) * row + width * 4) {
             throw new BuiException("Image.fromRgba", "rgba is smaller than the image");

@@ -75,6 +75,14 @@ final class TreeItem {
         if (child is null || child.handle is null) {
             throw new BuiException("TreeItem.add", "no child");
         }
+        if (child.parent_ !is null) {
+            throw new BuiException("TreeItem.add", "the child already has a parent");
+        }
+        for (auto up = this; up !is null; up = up.parent_) {
+            if (up is child) {
+                throw new BuiException("TreeItem.add", "an item cannot contain itself");
+            }
+        }
         BK_tree_item_add(handle, child.handle);
         child.parent_ = this;
         return child;

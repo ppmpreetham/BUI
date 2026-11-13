@@ -7,6 +7,25 @@ All notable changes to **blenderui** (BUI). The format follows
 ## [Unreleased]
 
 ### Added
+- **Controls inside node-editor nodes** (issue #38): a node can hold a push button, a checkbox and a dropdown in its body,
+  between the outputs and the inputs, as Blender's node buttons do (`node_update_basis_buttons`, `draw_buttons`). The kit's
+  node items take `"b|Label"`, `"c|Label|0 or 1"` and `"d|Label|index|Option;Option"`; a press or change is a node
+  `BK_EV_CHANGE` with `a = 5` and `b` the control's index. Python: `Node(..., controls=[("button", "Run"),
+  ("checkbox", "Wireframe", True), ("dropdown", "Mode", ["Fast", "Exact"], 0)])`, `node.control_value(i)` and
+  `on_change(node, "control", (i, value))`. A class can now take the item picked from a menu it opened (`popup_pick`).
+  Arbitrary child layouts in a node are not done yet.
+- **Python components:** `TextArea(value="", *, rows=None)` puts the kit's multi-line `textarea` in `bui.components`
+  (`value`, `set_value`, `on_change` on every edit; the node's `ta_*` methods edit by byte offset), and
+  `FileBrowser(directory, *, file, mode, multiple, filters, button, on_change, on_submit)` embeds Blender's File
+  Browser in any layout (`directory`, `file`, `hidden`, `state`, `result`, `execute()`, `cancel()`, `refresh()`);
+  `bui.filebrowser.ask` now builds its window from the same component. Every component can edit its children after
+  it is built: `insert(index, child)`, `remove(child)`, `replace(old, new)` and `clear()`, working where `add` does
+  (a `Panel` or `Popover` edits its body). This is what a renderer that keeps a live tree in sync with a changing
+  description (for example an A2UI surface) needs.
+- **Node editor height:** the `nodeeditor` node's natural height follows its `"height"` (units; 14 when unset)
+  instead of always 14 units, and `NodeEditor(height=...)` sets it.
+- **JavaScript: `@blender-ui/vue`**, Vue 3 in native windows. A custom renderer (Vue's `createRenderer`) over `@blender-ui/native`, so Vue's own runtime and compiler run unchanged: `.vue` single-file components (`<script setup>`, TypeScript, scoped `<style>`), refs, `v-model` (inputs, checkboxes, radios, selects and the Blender widgets), `v-if` / `v-for`, slots, `provide` / `inject`, plugins through `createApp(...).use()`, `Teleport`, and Blender's widgets as components. `node --import @blender-ui/vue/register`, Bun and `bui build` (a Bun plugin) compile `.vue` files, cached in `node_modules/.cache/@blender-ui/vue` (a cached start never loads Vue's compiler: Node.js reaches its first frame in 125 ms, not 209); `require()` and `import` both work. Benchmarks (`bench/cells.js --vue`, `bench/startup.js --vue`) and a Vue task-list screenshot are in the docs. `<Transition>`, `v-html` and DOM-based component libraries don't work; bindings/vue/README.md lists it.
+- **`@blender-ui/native`:** `el.style.display = 'none'` and the other CSS properties as camelCase properties of `el.style`, as in a browser (they were silently ignored); `host.styleRegistry()`, the registry of components' scoped `<style>` blocks that the Svelte and Vue bindings share.
 - **D bindings** (`bindings/d`): a DUB package with raw `extern(C)` declarations for the whole kit, GPU and stable C API, plus idiomatic wrappers for nodes, contexts, windows, menus, rasters, images, video, canvases, trees, text areas, custom nodes and themes. The kit is built through CMake from `preBuildCommands`, ownership follows the Python binding's reference-hook model, and `dub run --config=test` covers the wrappers, raw API, events, menus and host errors end to end. Examples: `hello.d` and `headless.d`.
 - **D HTML, CSS and RSX** (`bindings/d`): `bui.html` adds an `Element` tree and tag constructors, `bui.css` a selector cascade with a practical CSS subset, and `bui.rsx` a compile-time `rsx!` mixin that lowers markup and `{expression}` values to `Element` calls. `Document` realises the styled tree as kit nodes with flex, grid and table layout, widgets, dynamic `:hover`/`:active` states through `Element.setState` and `Document.restyle`, and in-place text updates through `Element.setText`. Tag constructors use `body_`, `template_`, `object_` and `select_` where D or the existing API already uses the name; markup keeps the HTML spelling. `dub run --config=rsx` opens the new example, and `--config=test` covers the cascade, realiser and RSX. The D wrappers also follow the kit's current header: focus callbacks, `Context.hitAt`, custom theme files, text shadows, font size and transparent rasters.
 - **Touch screens and trackpad gestures.** One finger is the pointer: it taps, drags number fields and sliders, opens
@@ -33,6 +52,14 @@ All notable changes to **blenderui** (BUI). The format follows
   (`delta * WHEEL_LINE_PX` = the fingers' pixels), and the virtual list and data table follow the fingers exactly.
   `App::simulate_touch` (`TouchPhase`), `simulate_magnify`, `simulate_rotate`. `BK_EV_GESTURE` and the kinds in
   `blenderui-sys`, D and Lua; Python and D read its text.
+
+### Fixed
+- **Python components:** `NodeEditor` follows `add`, `insert`, `remove`, `replace` and `clear` (its `nodes` and `links` went stale when
+  children were edited that way, and a link now keeps naming the same nodes when an earlier one is inserted or removed);
+  `replace(old, new)` puts an earlier sibling in `old`'s place, not the slot after it; `FileBrowser.directory = same_folder` no longer
+  navigates (and calls `on_change`) again; a `TextArea` written with the text it already holds keeps its selection and spans.
+- **Node editor height:** an infinite, huge or not-a-number `"height"` no longer overflows the float-to-int conversion (capped at 1000 units; unset or invalid is 14).
+- **D bindings**: `[attr*=x]` no longer crashes on a value shorter than `x`; `onKey` fires once per key press; `grid-template-columns: 1fr 1fr` counts two tracks; `Image.fromRgba` rejects negative strides; `TreeItem.add` rejects cycles and items that already have a parent; a `Window` stays rooted until freed and `Context.free()` throws while a window uses it; in `Document`, radios sharing a `name` are exclusive, number inputs are no longer clamped at 0, column flex containers no longer share a row between buttons, button labels use descendant text, hidden table rows are skipped and `rowspan` reserves its columns.
 
 ## [0.5.1] - 2026-11-13
 

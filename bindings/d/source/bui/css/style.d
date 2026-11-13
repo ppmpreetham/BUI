@@ -1025,11 +1025,12 @@ private void applyDeclaration(ref Style style, const Declaration declaration,
         }
         break;
     case "grid-template-columns":
+        style.gridColumns = 0;
         foreach (token; value) {
             if (token.kind == TokenKind.function_ && token.text == "repeat") {
                 if (token.args.length && token.args[0].length &&
                     token.args[0][0].kind == TokenKind.number) {
-                    style.gridColumns = cast(int) token.args[0][0].number;
+                    style.gridColumns += cast(int) token.args[0][0].number;
                 }
             }
             else if (token.kind == TokenKind.dimension ||

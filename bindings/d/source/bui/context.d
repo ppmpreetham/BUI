@@ -54,6 +54,9 @@ final class Context {
     /// The C handle, for calls into the raw `bui.kit` API.
     BKContext* handle;
 
+    /// Live `Window`s driving this context; maintained by `Window`.
+    package int windows;
+
     private {
         Node rootNode;
         Node headerNode;
@@ -85,13 +88,18 @@ final class Context {
     }
 
     ~this() {
+        windows = 0; // only reachable at teardown; a finalizer cannot throw
         free();
     }
 
     /// Release the context. The root node is left to its wrapper.
+    /// Throws while a `Window` still drives it; free the window first.
     void free() {
         if (handle is null) {
             return;
+        }
+        if (windows != 0) {
+            throw new BuiException("Context.free", "a window still uses this context");
         }
         auto h = handle;
         handle = null;

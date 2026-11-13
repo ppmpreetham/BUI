@@ -602,6 +602,9 @@ private bool matchAttr(CssSubject subject, const AttrSelector attr) {
         if (expected.length == 0) {
             return true;
         }
+        if (expected.length > actual.length) {
+            return false;
+        }
         foreach (i; 0 .. actual.length - expected.length + 1) {
             if (actual[i .. i + expected.length] == expected) {
                 return true;

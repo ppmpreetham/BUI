@@ -34,6 +34,7 @@ void main() {
     testCss();
     testHtml();
     testRsx();
+    testReviewFixes();
     testCapi();
     writeln("bindings/d: all tests passed");
 }
@@ -527,6 +528,67 @@ private void testHtml() {
     check(dropdown.node.typeName() == "dropdown", "html select dropdown");
     check(dropdown.node.strs("items").length == 2, "html select options");
     check(dropdown.node.num("value") == 1, "html selected option");
+}
+
+private bool throwsBui(void delegate() action) {
+    try {
+        action();
+    }
+    catch (BuiException) {
+        return true;
+    }
+    return false;
+}
+
+private void testReviewFixes() {
+    // `[attr*=...]` with a needle longer than the value does not underflow.
+    check(div().attr("title", "ab").query("[title*=abcd]").length == 0,
+          "substring selector, long needle");
+    check(div().attr("title", "xabcx").query("[title*=abc]").length == 1,
+          "substring selector match");
+
+    // grid-template-columns counts its tracks.
+    auto sheet = Stylesheet.parse(`
+        .two { grid-template-columns: 1fr 1fr; }
+        .three { grid-template-columns: repeat(3, 1fr); }
+    `);
+    Style base = Style.init;
+    check(sheet.compute(div().class_("two"), base).gridColumns == 2, "grid two tracks");
+    check(sheet.compute(div().class_("three"), base).gridColumns == 3, "grid repeat tracks");
+
+    // Negative strides are rejected.
+    const(ubyte)[] rgba = new ubyte[16];
+    check(throwsBui({ Image.fromRgba(rgba, 2, 2, -1); }), "negative stride");
+
+    // Tree items cannot form cycles or have two parents.
+    auto top = new TreeItem("top");
+    auto mid = new TreeItem("mid");
+    auto leaf = new TreeItem("leaf");
+    top.add(mid);
+    mid.add(leaf);
+    check(throwsBui({ top.add(top); }), "tree self add");
+    check(throwsBui({ leaf.add(top); }), "tree cycle add");
+    check(throwsBui({ top.add(mid); }), "tree double parent");
+
+    // Realiser fixes.
+    auto page = body_(
+        input().attr("type", "number").attr("value", "-3"),
+        input().attr("type", "radio").attr("name", "g").attr("checked", "").id("r1"),
+        input().attr("type", "radio").attr("name", "g").id("r2"),
+        button(span("Deep")),
+        table(tr(td("shown")), tr(td("gone")).attr("hidden", "").id("hidden"))
+    );
+    auto document = new Document(page);
+    check(document.find("input[type=number]").node.num("value") == -3,
+          "number input is not clamped at 0");
+    check(document.find("button").node.str("text") == "Deep", "button descendant text");
+    check(document.find("#hidden td").node is null, "hidden row not realised");
+
+    auto first = document.find("#r1").node;
+    auto second = document.find("#r2").node;
+    second.set("value", 1);
+    second.dispatch(BK_EV_TOGGLE, null, 0, 0);
+    check(first.num("value") == 0 && second.num("value") == 1, "radio group exclusive");
 }
 
 private void testRsx() {

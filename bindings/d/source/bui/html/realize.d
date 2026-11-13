@@ -22,7 +22,7 @@ import bui.html.element : Element, bindEvents;
 import bui.html.tags : TagKind, tagKind, uaCss;
 import bui.html.text : asciiLower, collapseTrimmed, collapseWhitespace, trimEnd, trimStart;
 import bui.kit;
-import bui.node : Node;
+import bui.node : Node, NodeEvent;
 import bui.theme : scale, themeColor;
 import bui.video : Video;
 
@@ -390,12 +390,16 @@ private void realizeContents(Element element, Node flow) {
     // Block flow: consecutive inline items share a line box (a pack row),
     // block items stack vertically.
     const bool reverse = flex && style.flexDirection == FlexDirection.columnReverse;
+    // A column flex container's items are blockified: no shared line boxes.
+    bool inlineRun(Item item) {
+        return !flex && (item.text || isInline(item.style));
+    }
     size_t i = 0;
     bool first = true;
     while (i < items.length) {
-        if (items[i].text || isInline(items[i].style)) {
+        if (inlineRun(items[i])) {
             size_t end = i;
-            while (end < items.length && (items[end].text || isInline(items[end].style))) {
+            while (end < items.length && inlineRun(items[end])) {
                 ++end;
             }
             if (end - i == 1) {
@@ -462,17 +466,45 @@ private Node realizeTable(Element element) {
     Element[] captions;
     collectRows(element, rows, captions);
 
+    // Place every cell: a rowspan keeps its columns taken in the rows below.
+    struct Placed {
+        Element cell;
+        int row;
+        int column;
+    }
+    Placed[] placed;
+    bool[][] taken = new bool[][](rows.length);
     int columns;
-    foreach (row; rows) {
-        int count;
+    foreach (r, row; rows) {
+        int column;
         foreach (cell; row.children()) {
             if (cell.tag != "td" && cell.tag != "th") {
                 continue;
             }
-            count += attrInt(cell, "colspan", 1);
+            while (column < taken[r].length && taken[r][column]) {
+                ++column;
+            }
+            const int colspan = attrInt(cell, "colspan", 1) > 1 ? attrInt(cell, "colspan", 1) : 1;
+            const int rowspan = attrInt(cell, "rowspan", 1) > 1 ? attrInt(cell, "rowspan", 1) : 1;
+            foreach (below; r .. r + rowspan) {
+                if (below >= rows.length) {
+                    break;
+                }
+                if (taken[below].length < column + colspan) {
+                    taken[below].length = column + colspan;
+                }
+                taken[below][column .. column + colspan] = true;
+            }
+            placed ~= Placed(cell, cast(int) r, column);
+            column += colspan;
         }
-        if (count > columns) {
-            columns = count;
+        if (column > columns) {
+            columns = column;
+        }
+    }
+    foreach (row; taken) {
+        if (row.length > columns) {
+            columns = cast(int) row.length;
         }
     }
     if (columns < 1) {
@@ -497,30 +529,24 @@ private Node realizeTable(Element element) {
 
     const int columnGap = px(element.computed.columnGap);
     const int rowGap = px(element.computed.rowGap);
-    foreach (r, row; rows) {
-        int column;
-        foreach (cell; row.children()) {
-            if (cell.tag != "td" && cell.tag != "th") {
-                continue;
-            }
-            Node node = realizeElement(cell);
-            if (node is null) {
-                continue;
-            }
-            const int colspan = attrInt(cell, "colspan", 1);
-            const int rowspan = attrInt(cell, "rowspan", 1);
-            node.grid("row", cast(int) r).grid("column", column);
-            if (colspan > 1) {
-                node.grid("columnspan", colspan);
-            }
-            if (rowspan > 1) {
-                node.grid("rowspan", rowspan);
-            }
-            setInsets(node, cell.computed, column > 0 ? columnGap : 0,
-                      r > 0 ? rowGap : 0);
-            gridFlow.add(node);
-            column += colspan;
+    foreach (place; placed) {
+        Element cell = place.cell;
+        Node node = realizeElement(cell);
+        if (node is null) {
+            continue;
         }
+        const int colspan = attrInt(cell, "colspan", 1);
+        const int rowspan = attrInt(cell, "rowspan", 1);
+        node.grid("row", place.row).grid("column", place.column);
+        if (colspan > 1) {
+            node.grid("columnspan", colspan);
+        }
+        if (rowspan > 1) {
+            node.grid("rowspan", rowspan);
+        }
+        setInsets(node, cell.computed, place.column > 0 ? columnGap : 0,
+                  place.row > 0 ? rowGap : 0);
+        gridFlow.add(node);
     }
     foreach (column; 0 .. columns) {
         gridFlow.frameGridWeight(1, column, 1.0);
@@ -532,6 +558,9 @@ private Node realizeTable(Element element) {
 
 private void collectRows(Element element, ref Element[] rows, ref Element[] captions) {
     foreach (child; element.children()) {
+        if (child.computed.display == Display.none || child.hasAttr("hidden")) {
+            continue;
+        }
         switch (child.tag) {
         case "tr":
             rows ~= child;
@@ -578,9 +607,36 @@ private Node realizeWidget(Element element) {
 
 private Node realizeButton(Element element) {
     auto button = new Node("button");
-    const string text = collapseTrimmed(element.textContent());
+    const string text = collapseTrimmed(element.descendantText());
     button.set("text", text.length ? text : attrValue(element, "value", "Button"));
     return finishWidget(element, button);
+}
+
+/// Radios sharing a `name` under the same root are mutually exclusive:
+/// turning one on turns the others off.
+private void bindRadioGroup(Element element, Node node) {
+    const string name = element.attrValue("name");
+    node.on(BK_EV_TOGGLE, (NodeEvent event) {
+        if (event.node.num("value") == 0) {
+            return;
+        }
+        Element top = element;
+        while (top.parent() !is null) {
+            top = top.parent();
+        }
+        void turnOff(Element at) {
+            if (at !is element && at.tag == "input" && at.hasAttr("name") &&
+                at.attrValue("name") == name &&
+                asciiLower(attrValue(at, "type", "text")) == "radio" &&
+                at.node() !is null) {
+                at.node().set("value", 0);
+            }
+            foreach (child; at.children()) {
+                turnOff(child);
+            }
+        }
+        turnOff(top);
+    });
 }
 
 private Node realizeInput(Element element) {
@@ -595,6 +651,9 @@ private Node realizeInput(Element element) {
     if (type == "checkbox" || type == "radio") {
         auto node = new Node(type == "radio" ? "radio" : "checkbox");
         node.set("value", element.hasAttr("checked") ? 1 : 0);
+        if (type == "radio" && element.hasAttr("name")) {
+            bindRadioGroup(element, node);
+        }
         return finishWidget(element, node);
     }
 
@@ -603,8 +662,13 @@ private Node realizeInput(Element element) {
         auto node = new Node(range ? "slider" : "number");
         const double minimum = attrDouble(element, "min", 0.0);
         const double maximum = attrDouble(element, "max", range ? 100.0 : 0.0);
-        node.set("min", minimum);
-        if (maximum > minimum) {
+        // Number fields stay unbounded unless the attributes say otherwise.
+        const bool hasMin = range || element.hasAttr("min");
+        const bool hasMax = range || element.hasAttr("max");
+        if (hasMin) {
+            node.set("min", minimum);
+        }
+        if (hasMax && (!hasMin || maximum > minimum)) {
             node.set("max", maximum);
         }
         node.set("value", attrDouble(element, "value", range ? (minimum + maximum) / 2.0 : 0.0));
