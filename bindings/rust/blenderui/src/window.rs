@@ -1437,7 +1437,7 @@ impl Window {
         if let Some(&deepest) = path.last() {
             self.emit(app, deepest, &e, |l| l.scroll.iter().collect());
         }
-        self.scroll_by(&path, -lines * WHEEL_LINE_PX, modifiers.shift);
+        self.scroll_by(&path, -lines * WHEEL_LINE_PX, modifiers.shift, touch);
     }
 
     /// BK_EV_GESTURE: text "mods kind x y" (device pixels from the canvas), a and b the amounts.
@@ -1473,8 +1473,8 @@ impl Window {
             None => false,
         };
         if pan && !stopped {
-            if e.dy != 0.0 {
-                self.wheel(app, (x, y), e.dy / WHEEL_LINE_PX, modifiers, touch);
+            if e.dy != 0.0 { // the keyboard's Shift does not turn the fingers' vertical sideways
+                self.wheel(app, (x, y), e.dy / WHEEL_LINE_PX, Modifiers { shift: false, ..modifiers }, touch);
             }
             if e.dx != 0.0 { // Shift + wheel: positive scrolls left, as the fingers move right
                 self.wheel(app, (x, y), e.dx / WHEEL_LINE_PX, Modifiers { shift: true, ..modifiers }, touch);
@@ -1506,15 +1506,17 @@ impl Window {
         }
     }
 
-    /// Scroll the innermost scroll container along `path` that can move.
-    fn scroll_by(&mut self, path: &[Key], dy: f32, horizontal: bool) {
+    /// Scroll the innermost scroll container along `path` that can move. A wheel scrolls a
+    /// container with no vertical range sideways; a touch pan (`exact_axis`) keeps to its axis,
+    /// the fingers having said which way they went.
+    fn scroll_by(&mut self, path: &[Key], dy: f32, horizontal: bool, exact_axis: bool) {
         let Some(f) = &self.frame else { return };
         for key in path.iter().rev() {
             let Some(&i) = f.by_key().get(key) else { continue };
             let n = &f.nodes[i];
             let (rx, ry) = n.scroll_range;
             let (sx, sy) = n.scroll_pos;
-            let (nx, ny) = if horizontal || ry <= 0.0 {
+            let (nx, ny) = if horizontal || (ry <= 0.0 && !exact_axis) {
                 ((sx + dy).clamp(0.0, rx), sy)
             } else {
                 (sx, (sy + dy).clamp(0.0, ry))

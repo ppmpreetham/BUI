@@ -31,6 +31,7 @@ static BuiRaster *g_raster;
 static int g_clicks;
 static int g_warps;
 /* BK_EV_GESTURE as a host gets it */
+static int g_wheel_raw, g_wheel_raw_mods; /* BK_EV_WHEEL to "events" nodes */
 static struct {
   int count[4]; /* by kind */
   int mods, kind, x, y;
@@ -53,6 +54,10 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 {
   if (kind == BK_EV_CLICK) {
     g_clicks++;
+  }
+  if (kind == BK_EV_WHEEL) {
+    g_wheel_raw++;
+    sscanf((const char *)ref, "%d", &g_wheel_raw_mods);
   }
   if (kind == BK_EV_GESTURE &&
       sscanf((const char *)ref, "%d %d %d %d", &g_gesture.mods, &g_gesture.kind, &g_gesture.x,
@@ -376,6 +381,22 @@ static void test_node_editor_cancel(void)
   BK_touch(ctx, 2, BK_TOUCH_UP, sx + 60, sy + 60, 0);
   CHECK(BK_strs_count(editor, "items") == 1);
 
+  /* a node's checkbox: a tap toggles it, a pinch that begins on it does not */
+  const char *b_ctl[] = {"o|Result|float", "c|Wire|0", "i|A|float|0.5"};
+  BK_set_strs(b, "items", b_ctl, 3);
+  BK_render(ctx, g_raster, W, H, 1);
+  /* the control row: below the header and the output, in the padded block */
+  const float cx = r[0] + 50 + 300 + 30; /* its left part: the node runs past the window */
+  const float cy = r[1] + 50 + (20 + 5 + 22 + 2.5f + 10);
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, cx, cy, 0);
+  BK_touch(ctx, 1, BK_TOUCH_UP, cx, cy, 0);
+  CHECK(strcmp(BK_strs_get(b, "items", 1), "c|Wire|1") == 0);
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, cx, cy, 0);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, cx + 60, cy + 60, 0);
+  BK_touch(ctx, 1, BK_TOUCH_UP, cx, cy, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, cx + 60, cy + 60, 0);
+  CHECK(strcmp(BK_strs_get(b, "items", 1), "c|Wire|1") == 0);
+
   /* a pinch that begins on empty canvas keeps the selection (an unmoved box press deselects) */
   BK_set_num(b, "selected", 1.0);
   BK_touch(ctx, 1, BK_TOUCH_DOWN, r[0] + 60.0f, r[1] + H - 40.0f, 0);
@@ -429,6 +450,8 @@ static void test_gestures_property(void)
     first = first ? first : b;
   }
   BK_set_num(col, "gestures", 1.0);
+  /* its own flag: not another one's bit ("select", a held-in button, came in at the same time) */
+  CHECK(BK_get_num(col, "gestures") == 1.0 && BK_get_num(col, "select") == 0.0);
   BKContext *ctx = context(col);
   int r0[4], r1[4];
   BK_node_rect(first, r0);
@@ -482,6 +505,77 @@ static void test_gestures_property(void)
   BK_node_rect(first, r1);
   CHECK(r1[1] < r0[1] - 60);
   CHECK(g_gesture.count[BK_GESTURE_PAN] == 0);
+  BK_context_free(ctx);
+  BK_node_free(col);
+}
+
+/* Every kit scroller is vertical and reads Shift + wheel as vertical too: a sideways touch pan
+ * must not scroll them. Its steps still reach "events" nodes (Tk's <Shift-MouseWheel>). */
+static void test_sideways_pan(void)
+{
+  BKNode *col = BK_node_new("column");
+  BKNode *first = NULL;
+  for (int i = 0; i < 60; i++) {
+    BKNode *b = BK_node_new("button");
+    BK_set_str(b, "label", "Row");
+    BK_set_num(b, "events", 1.0); /* each widget bound, as Tk programs do */
+    BK_node_add(col, b, -1);
+    first = first ? first : b;
+  }
+  BKContext *ctx = context(col);
+  int r0[4], r1[4];
+  BK_node_rect(first, r0);
+  g_wheel_raw = 0;
+  /* the fingers go 150 px left, Shift held on the keyboard as well */
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, 250, 200, BK_SHIFT);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, 300, 200, BK_SHIFT);
+  for (int i = 1; i <= 10; i++) {
+    BK_touch(ctx, 1, BK_TOUCH_MOVE, 250 - i * 15, 200, BK_SHIFT);
+    BK_touch(ctx, 2, BK_TOUCH_MOVE, 300 - i * 15, 200, BK_SHIFT);
+  }
+  BK_touch(ctx, 1, BK_TOUCH_UP, 100, 200, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, 150, 200, 0);
+  BK_render(ctx, g_raster, W, H, 1);
+  BK_node_rect(first, r1);
+  CHECK(r1[1] == r0[1]);                                          /* nothing scrolled */
+  CHECK(g_wheel_raw > 0 && (g_wheel_raw_mods & BK_SHIFT));       /* the binding still sees it */
+  /* and the keyboard's Shift does not make a vertical pan sideways */
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, 180, 200, BK_SHIFT);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, 220, 200, BK_SHIFT);
+  for (int i = 1; i <= 10; i++) {
+    BK_touch(ctx, 1, BK_TOUCH_MOVE, 180, 200 - i * 12, BK_SHIFT);
+    BK_touch(ctx, 2, BK_TOUCH_MOVE, 220, 200 - i * 12, BK_SHIFT);
+  }
+  BK_touch(ctx, 1, BK_TOUCH_UP, 180, 80, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, 220, 80, 0);
+  BK_render(ctx, g_raster, W, H, 1);
+  BK_node_rect(first, r1);
+  CHECK(r1[1] < r0[1] - 60);
+  BK_context_free(ctx);
+  BK_node_free(col);
+}
+
+/* A cancelled gesture finger drops the move it held for its partner. */
+static void test_cancel_discards_held_move(void)
+{
+  BKNode *col = BK_node_new("column");
+  BK_set_num(col, "gestures", 1.0);
+  BKContext *ctx = context(col);
+  memset(&g_gesture, 0, sizeof(g_gesture));
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, 150, 100, 0);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, 250, 100, 0);
+  BK_touch(ctx, 1, BK_TOUCH_MOVE, 150, 160, 0); /* held: waits for finger 2 */
+  BK_touch(ctx, 2, BK_TOUCH_CANCEL, 250, 100, 0);
+  BK_touch(ctx, 1, BK_TOUCH_UP, 150, 160, 0);
+  CHECK(g_gesture.count[BK_GESTURE_PAN] == 0 && g_gesture.count[BK_GESTURE_MAGNIFY] == 0 &&
+        g_gesture.count[BK_GESTURE_ROTATE] == 0);
+  /* a finger that lifts normally still sends what it held */
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, 150, 100, 0);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, 250, 100, 0);
+  BK_touch(ctx, 1, BK_TOUCH_MOVE, 150, 160, 0);
+  BK_touch(ctx, 1, BK_TOUCH_UP, 150, 160, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, 250, 100, 0);
+  CHECK(g_gesture.count[BK_GESTURE_PAN] == 1);
   BK_context_free(ctx);
   BK_node_free(col);
 }
@@ -614,6 +708,8 @@ int main(void)
   test_node_editor_cancel();
   test_drag_at_edge();
   test_gestures_property();
+  test_sideways_pan();
+  test_cancel_discards_held_move();
   test_custom_default();
   test_custom_raw();
   test_capacity();

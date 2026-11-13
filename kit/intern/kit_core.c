@@ -2883,6 +2883,9 @@ static int in_BK_wheel(BKContext *ctx, int x, int y, int delta, int mods)
   if (!target && ctx->root && y >= ctx->header_h) {
     target = deepest(ctx->root, x, y); /* non-interactive area: let containers scroll */
   }
+  /* the sideways steps of a touch pan (kit_touch.c): every kit scroller is vertical and reads
+   * Shift + wheel as vertical, so only bindings get them (Tk's <Shift-MouseWheel>) */
+  const bool sideways = (mods & (BK_FROM_TOUCH | BK_SHIFT)) == (BK_FROM_TOUCH | BK_SHIFT);
   for (BKNode *n = target; n; n = n->parent) {
     if (!NODE_ENABLED(n)) {
       continue;
@@ -2891,6 +2894,9 @@ static int in_BK_wheel(BKContext *ctx, int x, int y, int delta, int mods)
     e.delta = delta;
     if (n == target) {
       bk_event(n, BK_EV_WHEEL, mods, &e);
+    }
+    if (sideways) {
+      return 0;
     }
     if (n->cls->wheel ? n->cls->wheel(n, &e) :
                         ((n->cls->flags & CLS_VALUE) && bk_value_wheel(n, &e)))
@@ -3424,6 +3430,9 @@ int bk_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float a, 
 {
   if (ctx->modal) {
     return 0;
+  }
+  if (!target && ctx->root && y >= ctx->header_h) {
+    target = deepest(ctx->root, x, y); /* over no widget: its containers, as in_BK_wheel */
   }
   hide_tooltip(ctx);
   for (BKNode *n = target; n; n = n->parent) {

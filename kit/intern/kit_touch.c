@@ -154,9 +154,10 @@ static int pan_steps(BKContext *ctx, float dx, float dy, int mods)
   for (int i = 0; i < 8 && fabsf(t->rest_y) >= step; i++) { /* down: the content goes down */
     const int d = t->rest_y > 0.0f ? 1 : -1;
     t->rest_y -= d * step;
-    r |= BK_wheel(ctx, t->start_x, t->start_y, d, mods);
+    r |= BK_wheel(ctx, t->start_x, t->start_y, d, mods & ~BK_SHIFT);
   }
-  for (int i = 0; i < 8 && fabsf(t->rest_x) >= step; i++) { /* Shift + wheel, as BK_scroll */
+  /* Shift + wheel, as BK_scroll: with BK_FROM_TOUCH it reaches bindings only (in_BK_wheel) */
+  for (int i = 0; i < 8 && fabsf(t->rest_x) >= step; i++) {
     const int d = t->rest_x > 0.0f ? 1 : -1;
     t->rest_x -= d * step;
     r |= BK_wheel(ctx, t->start_x, t->start_y, d, mods | BK_SHIFT);
@@ -271,7 +272,8 @@ static int touch_update(BKContext *ctx, int i, int phase, int mods)
       t->held = bit;
       return 0;
     }
-    const int r = t->held ? gesture_update(ctx, tm) : 0;
+    /* an up sends the move it held; a cancel drops it, as it drops the rest of the contact */
+    const int r = t->held && phase != BK_TOUCH_CANCEL ? gesture_update(ctx, tm) : 0;
     t->held = phase == BK_TOUCH_MOVE && t->held == bit ? bit : 0;
     if (phase == BK_TOUCH_MOVE) {
       return r;

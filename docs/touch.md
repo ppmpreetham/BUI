@@ -11,11 +11,12 @@ you; if you host the kit yourself, three calls feed it.
 |---|---|
 | **One** | It is the pointer: it moves there, presses, drags and releases, as the left mouse button does. When it lifts, the pointer leaves, so no hover highlight or tooltip stays behind. Pointer events made this way carry `BK_FROM_TOUCH` in their mods. |
 | **A second one** | Whatever the first finger was doing is cancelled, as <kbd>Esc</kbd> cancels a drag in Blender: a dragged value goes back, a pressed button is not clicked, a number field does not start editing. The two fingers are now a gesture. |
-| **Two, moving together** | Pan. The scroll view or region under them scrolls, and the content follows the fingers. The node editor pans its view. |
+| **Two, moving together** | Pan. The scroll view or region under them scrolls, and the content follows the fingers. The node editor pans its view. Kit scroll views only scroll vertically, so the sideways part of a pan moves nothing there. Bindings still get it as Shift + wheel, for Tk's `<Shift-MouseWheel>`. A Shift held on the keyboard doesn't turn a vertical pan sideways. |
 | **Two, spreading or pinching** | Magnify about their centre (`BK_magnify`). The node editor zooms. |
 | **Two, turning** | Rotate about their centre (`BK_rotate`). |
 | **After a gesture** | No finger becomes the pointer again until every finger has lifted, so lifting one finger of a pinch never clicks what is under the other. |
 | **More than two** | Followed, not used, up to ten contacts. |
+| **Cancelled** | The platform took a contact back (`BK_TOUCH_CANCEL`): what it did as the pointer is undone, and a gesture finger's last, unsent move is dropped. A finger that lifts normally sends it. |
 
 Blender has no touch-screen input, so there is no source to follow for touch itself. One finger
 does what X11, Wayland compositors and Windows do for windows that don't know about touch. Two
@@ -78,7 +79,10 @@ div().id("map").on_gesture(|e, window, cx| {
 other events. `touch` is `false` for a trackpad pinch or turn. A pan that no listener stops then
 scrolls the scroll container under it and reaches `on_scroll_wheel` listeners, with
 `ScrollWheelEvent::touch` set and `delta` in lines (`delta * WHEEL_LINE_PX` is the pixels the
-fingers moved). Pages written for the wheel scroll with two fingers without any change; the
+fingers moved). The horizontal part comes as a separate event with `modifiers.shift` set, so a
+listener that scrolls one way should ignore the other. Unlike the wheel, a touch pan never
+scrolls a container along the other axis: a vertical pan over a strip that only scrolls sideways
+leaves it alone. Pages written for the wheel scroll with two fingers without any change; the
 virtual list and the data table use that to keep their rows under the fingers.
 `rsx!` takes `onGesture={...}`. Tests can drive it with `cx.simulate_touch(window, id,
 TouchPhase::Down, x, y)`, `simulate_magnify` and `simulate_rotate`.

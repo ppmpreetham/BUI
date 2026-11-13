@@ -114,6 +114,9 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                 })
                 .on_mouse_up(MouseButton::Left, move |_, _, cx| up.update(cx, |s, _| s.pointer_up()))
                 .on_scroll_wheel(move |e, w, cx| {
+                    if e.touch && e.modifiers.shift {
+                        return; // the sideways part of a touch pan: the list only scrolls vertically
+                    }
                     wh.update(cx, |s, _| {
                         // Blender's wheel scrolls at once, a notch or a touchpad fraction alike: no easing;
                         // two fingers move the rows by exactly as far as they moved

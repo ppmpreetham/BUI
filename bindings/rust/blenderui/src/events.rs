@@ -69,7 +69,8 @@ pub struct ScrollWheelEvent {
     pub modifiers: Modifiers,
     /// Two fingers on a touch screen, not a wheel or trackpad: `delta` is then the pixels the
     /// fingers moved over [`WHEEL_LINE_PX`], so `delta * WHEEL_LINE_PX` keeps the content under
-    /// them. `modifiers.shift` marks the horizontal part of a pan.
+    /// them. `modifiers.shift` marks the horizontal part of a pan (and only that): a listener that
+    /// scrolls one way should ignore the other.
     pub touch: bool,
 }
 

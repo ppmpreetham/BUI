@@ -126,27 +126,6 @@ def test_value_field_and_view():
     assert ed.zoom > z
 
 
-def test_touch_and_trackpad():
-    app, ed, a, b = make()
-    ctx = app.ctx
-    # two fingers spread: the view zooms about them; moved together: it pans
-    z = ed.zoom
-    ctx.touch(1, 0, 300.0, 300.0, 0)
-    ctx.touch(2, 0, 400.0, 300.0, 0)
-    assert not ctx.touch(1, 1, 270.0, 300.0, 0)  # held until the other finger moves too
-    assert ctx.touch(2, 1, 430.0, 300.0, 0)
-    assert ed.zoom > z * 1.3, (z, ed.zoom)
-    px, z = ed.get("panx"), ed.zoom
-    ctx.touch(1, 1, 300.0, 300.0, 0)
-    ctx.touch(2, 1, 460.0, 300.0, 0)
-    assert abs(ed.get("panx") - (px + 30)) < 1e-3 and abs(ed.zoom - z) < 1e-5, (px, ed.get("panx"))
-    ctx.touch(1, 2, 300.0, 300.0, 0)
-    ctx.touch(2, 3, 460.0, 300.0, 0)
-    assert not ctx.touch(9, 1, 0.0, 0.0, 0)  # an unknown contact
-    # a trackpad pinch zooms too; the editor does not rotate
-    z = ed.zoom
-    assert ctx.magnify(400, 300, -0.25, 0) and ed.zoom < z
-    assert not ctx.rotate(400, 300, 15.0, 0)
 def control_pos(ed, node, k):
     """The center of control ``k``: below the header and the outputs, in the padded block."""
     gx, gy = node.location
@@ -210,6 +189,29 @@ def test_node_controls_validated():
         pass
     else:
         raise AssertionError("an unknown control kind was accepted")
+
+
+def test_touch_and_trackpad():
+    app, ed, a, b = make()
+    ctx = app.ctx
+    # two fingers spread: the view zooms about them; moved together: it pans
+    z = ed.zoom
+    ctx.touch(1, 0, 300.0, 300.0, 0)
+    ctx.touch(2, 0, 400.0, 300.0, 0)
+    assert not ctx.touch(1, 1, 270.0, 300.0, 0)  # held until the other finger moves too
+    assert ctx.touch(2, 1, 430.0, 300.0, 0)
+    assert ed.zoom > z * 1.3, (z, ed.zoom)
+    px, z = ed.get("panx"), ed.zoom
+    ctx.touch(1, 1, 300.0, 300.0, 0)
+    ctx.touch(2, 1, 460.0, 300.0, 0)
+    assert abs(ed.get("panx") - (px + 30)) < 1e-3 and abs(ed.zoom - z) < 1e-5, (px, ed.get("panx"))
+    ctx.touch(1, 2, 300.0, 300.0, 0)
+    ctx.touch(2, 3, 460.0, 300.0, 0)
+    assert not ctx.touch(9, 1, 0.0, 0.0, 0)  # an unknown contact
+    # a trackpad pinch zooms too; the editor does not rotate
+    z = ed.zoom
+    assert ctx.magnify(400, 300, -0.25, 0) and ed.zoom < z
+    assert not ctx.rotate(400, 300, 15.0, 0)
 
 
 def test_area_header():
