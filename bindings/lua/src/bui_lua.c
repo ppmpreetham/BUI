@@ -552,6 +552,7 @@ BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   lua_pushinteger(L, BK_EV_WHEEL); lua_setfield(L, -2, "EV_WHEEL");    lua_pushinteger(L, BK_EV_SUBMIT); lua_setfield(L, -2, "EV_SUBMIT");
   lua_pushinteger(L, BK_EV_VIEW); lua_setfield(L, -2, "EV_VIEW");     lua_pushinteger(L, BK_EV_SCROLL); lua_setfield(L, -2, "EV_SCROLL");
   lua_pushinteger(L, BK_EV_CONFIGURE); lua_setfield(L, -2, "EV_CONFIGURE");lua_pushinteger(L, BK_EV_KEYRELEASE); lua_setfield(L, -2, "EV_KEYRELEASE");
+  lua_pushinteger(L, BK_EV_GESTURE); lua_setfield(L, -2, "EV_GESTURE");
 
   /* Cursor constants */
   lua_pushinteger(L, BK_CURSOR_DEFAULT); lua_setfield(L, -2, "CURSOR_DEFAULT");  lua_pushinteger(L, BK_CURSOR_EW); lua_setfield(L, -2, "CURSOR_EW");

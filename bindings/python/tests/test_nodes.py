@@ -133,7 +133,8 @@ def test_touch_and_trackpad():
     z = ed.zoom
     ctx.touch(1, 0, 300.0, 300.0, 0)
     ctx.touch(2, 0, 400.0, 300.0, 0)
-    assert ctx.touch(1, 1, 270.0, 300.0, 0) and ctx.touch(2, 1, 430.0, 300.0, 0)
+    assert not ctx.touch(1, 1, 270.0, 300.0, 0)  # held until the other finger moves too
+    assert ctx.touch(2, 1, 430.0, 300.0, 0)
     assert ed.zoom > z * 1.3, (z, ed.zoom)
     px, z = ed.get("panx"), ed.zoom
     ctx.touch(1, 1, 300.0, 300.0, 0)

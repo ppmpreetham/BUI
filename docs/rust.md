@@ -428,7 +428,8 @@ gets `on_click`.
 | `on_mouse_up(button, ..)`                  | `MouseUpEvent`                                          | yes     |
 | `on_mouse_move`                            | `MouseMoveEvent { position, pressed_button, modifiers }` | yes    |
 | `on_hover`                                 | `bool`: entered / left                                  | no      |
-| `on_scroll_wheel`                          | `ScrollWheelEvent { position, delta, modifiers }`       | yes     |
+| `on_scroll_wheel`                          | `ScrollWheelEvent { position, delta, modifiers, touch }` | yes    |
+| `on_gesture`                               | `GestureEvent { kind, position, dx, dy, magnify, degrees, modifiers, touch }`: touch pan / pinch / turn, trackpad pinch / turn ([touch.md](touch.md)) | yes |
 | `on_key_down`, `on_key_up`                 | `KeyDownEvent { keystroke: Keystroke { key, key_char, modifiers } }` | yes (from the focused element) |
 | `on_change`, `on_input`                    | `ChangeEvent { value, checked, number }`                | yes     |
 

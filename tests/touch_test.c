@@ -30,6 +30,12 @@ enum { W = 400, H = 300 };
 static BuiRaster *g_raster;
 static int g_clicks;
 static int g_warps;
+/* BK_EV_GESTURE as a host gets it */
+static struct {
+  int count[4]; /* by kind */
+  int mods, kind, x, y;
+  double a, b, pan_x, pan_y, magnify, degrees;
+} g_gesture;
 
 static void host_noop(void *data) {}
 static void host_cursor(void *data, int c) {}
@@ -47,6 +53,25 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
 {
   if (kind == BK_EV_CLICK) {
     g_clicks++;
+  }
+  if (kind == BK_EV_GESTURE &&
+      sscanf((const char *)ref, "%d %d %d %d", &g_gesture.mods, &g_gesture.kind, &g_gesture.x,
+             &g_gesture.y) == 4 &&
+      g_gesture.kind >= BK_GESTURE_PAN && g_gesture.kind <= BK_GESTURE_ROTATE)
+  {
+    g_gesture.count[g_gesture.kind]++;
+    g_gesture.a = a;
+    g_gesture.b = b;
+    if (g_gesture.kind == BK_GESTURE_PAN) {
+      g_gesture.pan_x += a;
+      g_gesture.pan_y += b;
+    }
+    else if (g_gesture.kind == BK_GESTURE_MAGNIFY) {
+      g_gesture.magnify += a;
+    }
+    else {
+      g_gesture.degrees += a;
+    }
   }
 }
 
@@ -391,6 +416,76 @@ static void test_drag_at_edge(void)
   BK_node_free(col);
 }
 
+/* A node with "gestures" (an HTML document, a window's root) gets them as BK_EV_GESTURE and
+ * takes them; one with only "events" (Tk bindings) still scrolls as before. */
+static void test_gestures_property(void)
+{
+  BKNode *col = BK_node_new("column");
+  BKNode *first = NULL;
+  for (int i = 0; i < 60; i++) {
+    BKNode *b = BK_node_new("button");
+    BK_set_str(b, "label", "Row");
+    BK_node_add(col, b, -1);
+    first = first ? first : b;
+  }
+  BK_set_num(col, "gestures", 1.0);
+  BKContext *ctx = context(col);
+  int r0[4], r1[4];
+  BK_node_rect(first, r0);
+  memset(&g_gesture, 0, sizeof(g_gesture));
+  /* pan: 60 px down, then 30 px left */
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, 150, 100, 0);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, 250, 100, 0);
+  for (int i = 1; i <= 3; i++) {
+    BK_touch(ctx, 1, BK_TOUCH_MOVE, 150, 100 + i * 20, 0);
+    BK_touch(ctx, 2, BK_TOUCH_MOVE, 250, 100 + i * 20, 0);
+  }
+  BK_touch(ctx, 1, BK_TOUCH_MOVE, 120, 160, 0);
+  BK_touch(ctx, 2, BK_TOUCH_MOVE, 220, 160, 0);
+  CHECK(g_gesture.count[BK_GESTURE_PAN] == 4); /* one per pair of moves */
+  CHECK(g_gesture.count[BK_GESTURE_MAGNIFY] == 0 && g_gesture.count[BK_GESTURE_ROTATE] == 0);
+  CHECK(fabs(g_gesture.pan_x + 30.0) < 1e-3 && fabs(g_gesture.pan_y - 60.0) < 1e-3);
+  CHECK(g_gesture.mods & BK_FROM_TOUCH);
+  CHECK(g_gesture.x == 170 && g_gesture.y == 160); /* the centre, relative to the node */
+  /* spread to twice the distance, then turn 30 degrees counter-clockwise */
+  BK_touch(ctx, 1, BK_TOUCH_MOVE, 70, 160, 0);
+  BK_touch(ctx, 2, BK_TOUCH_MOVE, 270, 160, 0);
+  CHECK(g_gesture.count[BK_GESTURE_MAGNIFY] == 1 && fabs(g_gesture.magnify - 1.0) < 1e-4);
+  const float a = 30.0f * (float)M_PI / 180.0f;
+  BK_touch(ctx, 1, BK_TOUCH_MOVE, 170 - 100 * cosf(a), 160 + 100 * sinf(a), 0);
+  BK_touch(ctx, 2, BK_TOUCH_MOVE, 170 + 100 * cosf(a), 160 - 100 * sinf(a), 0);
+  CHECK(fabs(g_gesture.degrees - 30.0) < 0.5);
+  BK_touch(ctx, 1, BK_TOUCH_UP, 0, 0, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, 0, 0, 0);
+  BK_render(ctx, g_raster, W, H, 1);
+  BK_node_rect(first, r1);
+  CHECK(r1[1] == r0[1]); /* the host took the pan: the region did not scroll */
+  /* a trackpad pinch and turn (BK_magnify, BK_rotate) come the same way, without the touch bit */
+  memset(&g_gesture, 0, sizeof(g_gesture));
+  CHECK(BK_magnify(ctx, 40, 30, 0.25f, BK_CTRL));
+  CHECK(g_gesture.kind == BK_GESTURE_MAGNIFY && g_gesture.a == 0.25 && g_gesture.mods == BK_CTRL);
+  CHECK(BK_rotate(ctx, 40, 30, -12.0f, 0) && g_gesture.degrees == -12.0);
+
+  /* "events" alone: a pan still scrolls the region and no gesture is sent */
+  BK_set_num(col, "gestures", 0.0);
+  BK_set_num(col, "events", 1.0);
+  memset(&g_gesture, 0, sizeof(g_gesture));
+  BK_touch(ctx, 1, BK_TOUCH_DOWN, 180, 200, 0);
+  BK_touch(ctx, 2, BK_TOUCH_DOWN, 220, 200, 0);
+  for (int i = 1; i <= 10; i++) {
+    BK_touch(ctx, 1, BK_TOUCH_MOVE, 180, 200 - i * 12, 0);
+    BK_touch(ctx, 2, BK_TOUCH_MOVE, 220, 200 - i * 12, 0);
+  }
+  BK_touch(ctx, 1, BK_TOUCH_UP, 180, 80, 0);
+  BK_touch(ctx, 2, BK_TOUCH_UP, 220, 80, 0);
+  BK_render(ctx, g_raster, W, H, 1);
+  BK_node_rect(first, r1);
+  CHECK(r1[1] < r0[1] - 60);
+  CHECK(g_gesture.count[BK_GESTURE_PAN] == 0);
+  BK_context_free(ctx);
+  BK_node_free(col);
+}
+
 /* -- custom nodes -- */
 
 static void test_custom_default(void)
@@ -518,6 +613,7 @@ int main(void)
   test_node_editor();
   test_node_editor_cancel();
   test_drag_at_edge();
+  test_gestures_property();
   test_custom_default();
   test_custom_raw();
   test_capacity();

@@ -16,7 +16,7 @@ use blenderui_table::Size;
 use crate::element::{canvas_with, Div};
 use crate::html::div;
 use crate::css::Decl;
-use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement, Pixels, Styled, Window};
+use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement, Pixels, Styled, Window, WHEEL_LINE_PX};
 
 type Listener = Box<dyn Fn(&TableEvent, &mut Window, &mut App)>;
 
@@ -195,7 +195,12 @@ impl<D: TableDelegate> IntoElement for DataTable<D> {
                     dispatch(state, &up, w, cx);
                 })
                 .on_scroll_wheel(move |e, w, cx| {
-                    state.update(cx, |s, _| s.wheel(e.delta, e.modifiers.shift, w));
+                    state.update(cx, |s, _| if e.touch { // the rows follow the fingers
+                        let px = -f64::from(e.delta * WHEEL_LINE_PX);
+                        if e.modifiers.shift { s.scroll_by_px(px, 0.0, w) } else { s.scroll_by_px(0.0, px, w) }
+                    } else {
+                        s.wheel(e.delta, e.modifiers.shift, w)
+                    });
                     dispatch(state, &wh, w, cx);
                 })
                 .on_key_down(move |e, w, cx| {

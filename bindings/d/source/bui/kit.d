@@ -78,6 +78,11 @@ enum BK_EV_VIEW = 17;
 enum BK_EV_SCROLL = 18;
 enum BK_EV_CONFIGURE = 19;
 enum BK_EV_KEYRELEASE = 20;
+/// "gestures" nodes: text = "mods kind x y", a, b = amounts (see BK_GESTURE_*).
+enum BK_EV_GESTURE = 21;
+enum BK_GESTURE_PAN = 1;
+enum BK_GESTURE_MAGNIFY = 2;
+enum BK_GESTURE_ROTATE = 3;
 
 /* ---- geometry ------------------------------------------------------------ */
 enum BK_GEOM_NONE = 0;

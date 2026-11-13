@@ -24,6 +24,15 @@ All notable changes to **blenderui** (BUI). The format follows
   `KitContext.touch` / `magnify` / `rotate`, Lua `ctx:touch` / `magnify` / `rotate` with `bui.TOUCH_*`, D
   `Context.touch` / `magnify` / `rotate` and `setTouch`, and `blenderui-sys` declarations. `tests/touch_test.c`; [docs/touch.md](docs/touch.md) and the website's Touch and
   gestures page.
+- **Gestures for your own content.** A node with the new `"gestures"` property takes touch and trackpad gestures as
+  `BK_EV_GESTURE` (ref `"mods kind x y"`, `BK_GESTURE_PAN` / `MAGNIFY` / `ROTATE`, a / b the amounts) instead of the
+  kit scrolling for it; nodes with only `"events"` are unchanged. The two fingers' moves are paired into one update,
+  so a pan no longer wobbles the zoom. **Rust:** `on_gesture(|e: &GestureEvent, ..|)` on every element
+  (`GestureEvent { kind: GestureKind, position, dx, dy, magnify, degrees, modifiers, touch }`, `onGesture` in `rsx!`);
+  a pan no listener stops scrolls the page and reaches `on_scroll_wheel` with the new `ScrollWheelEvent::touch`
+  (`delta * WHEEL_LINE_PX` = the fingers' pixels), and the virtual list and data table follow the fingers exactly.
+  `App::simulate_touch` (`TouchPhase`), `simulate_magnify`, `simulate_rotate`. `BK_EV_GESTURE` and the kinds in
+  `blenderui-sys`, D and Lua; Python and D read its text.
 
 ## [0.5.1] - 2026-11-13
 

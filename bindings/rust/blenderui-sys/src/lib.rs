@@ -49,6 +49,17 @@ pub const BK_EV_VIEW: c_int = 17;
 pub const BK_EV_SCROLL: c_int = 18;
 pub const BK_EV_CONFIGURE: c_int = 19;
 pub const BK_EV_KEYRELEASE: c_int = 20;
+/// A touch / trackpad gesture over a node with the "gestures" property:
+/// text = "mods kind x y", a, b = the amounts (see `BK_GESTURE_*`).
+pub const BK_EV_GESTURE: c_int = 21;
+
+// `BK_EV_GESTURE` kinds.
+/// Two fingers moved together: a, b = pixels the content follows.
+pub const BK_GESTURE_PAN: c_int = 1;
+/// Pinch: a = scale change (0.1 = 10% larger).
+pub const BK_GESTURE_MAGNIFY: c_int = 2;
+/// Turn: a = degrees, positive counter-clockwise.
+pub const BK_GESTURE_ROTATE: c_int = 3;
 
 // Modifier bits for input calls.
 pub const BK_SHIFT: c_int = 1;

@@ -300,11 +300,9 @@ typedef struct BKEvent {
   float wheel_x, wheel_y; /* BK_scroll: precise deltas (custom nodes) */
   /* BKClass.gesture: Blender's MOUSEPAN (pan_x, pan_y: pixels the content follows),
    * MOUSEZOOM (magnify: scale change) and MOUSEROTATE (rotate: degrees, > 0 counter-clockwise) */
-  int gesture; /* BK_GESTURE_* */
+  int gesture; /* BK_GESTURE_* (BUI_kit.h) */
   float pan_x, pan_y, magnify, rotate;
 } BKEvent;
-
-enum { BK_GESTURE_PAN = 1, BK_GESTURE_MAGNIFY, BK_GESTURE_ROTATE };
 
 #define EV_SHIFT(e) (((e)->mods & BK_SHIFT) != 0)
 #define EV_CTRL(e) (((e)->mods & BK_CTRL) != 0)
@@ -403,6 +401,7 @@ enum {
   NF_ACTIVE_DEFAULT = 1 << 26, /* buttons: UI_BUT_ACTIVE_DEFAULT (drawn with the select colors) */
   NF_DEFAULT_SET = 1 << 27, /* `defval` was set: by "default", or by the first "value" a widget got */
   NF_BARE = 1 << 28,        /* "bare": an HTML text field with no frame (CSS `border-style: none`) */
+  NF_GESTURES = 1 << 29,    /* "gestures": touch / trackpad gestures go to the host (BK_EV_GESTURE) */
 };
 
 #define BK_HTML(n) (((n)->flags & NF_HTML) != 0)
@@ -588,6 +587,7 @@ typedef struct BKTouch {
   int start_x, start_y;   /* the gesture's first centre */
   float cx, cy, dist, ang; /* its centre, spread and angle at the last update */
   float rest_x, rest_y;   /* pan not yet sent as whole wheel steps (pixels) */
+  int held;               /* 1 g0 / 2 g1: moved, its update waits for the other finger */
 } BKTouch;
 
 struct BKContext {

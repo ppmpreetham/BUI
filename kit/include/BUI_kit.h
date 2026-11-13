@@ -121,8 +121,16 @@ enum {
   BK_EV_VIEW,   /* scrolled view changed (nodes with "viewevents") */
   BK_EV_SCROLL, /* scrollbar request: a = 0 moveto (b = fraction), 1 units, 2 pages (b = count) */
   BK_EV_CONFIGURE, /* geometry changed ("events" nodes): a = width, b = height */
-  BK_EV_KEYRELEASE /* ref = "\tkeysym", a = mods */
+  BK_EV_KEYRELEASE, /* ref = "\tkeysym", a = mods */
+  /* Touch / trackpad gesture over a node with the "gestures" property, which takes it:
+   * ref = "mods kind x y" (kind BK_GESTURE_*; x, y: the gesture's centre, relative to the node),
+   * PAN: a, b = pixels moved (the content follows the fingers); MAGNIFY: a = scale change
+   * (0.1 = 10% larger); ROTATE: a = degrees, > 0 counter-clockwise. */
+  BK_EV_GESTURE
 };
+
+/* BK_EV_GESTURE kinds, as Blender's MOUSEPAN / MOUSEZOOM / MOUSEROTATE. */
+enum { BK_GESTURE_PAN = 1, BK_GESTURE_MAGNIFY, BK_GESTURE_ROTATE };
 
 typedef struct BKHost {
   void *data;

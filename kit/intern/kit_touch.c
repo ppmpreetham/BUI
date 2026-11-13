@@ -132,12 +132,14 @@ static void gesture_begin(BKContext *ctx, int i0, int i1)
   t->start_y = px(t->cy);
   t->target = bk_ctx_hit(ctx, t->start_x, t->start_y);
   t->rest_x = t->rest_y = 0.0f;
+  t->held = 0;
 }
 
 static void gesture_end(BKTouch *t)
 {
   t->g0 = t->g1 = -1;
   t->target = NULL;
+  t->held = 0;
 }
 
 /* A pan nothing took: the region or scroll view under the gesture's start scrolls one wheel
@@ -261,8 +263,18 @@ static int touch_update(BKContext *ctx, int i, int phase, int mods)
     return 1;
   }
   if (i == t->g0 || i == t->g1) {
+    /* One update per pair of moves: hosts report the fingers one by one, so updating after each
+     * would make a pure pan wobble the spread and angle between them. A finger that moves again
+     * while the other stays put, or lifts, sends what it held. */
+    const int bit = i == t->g0 ? 1 : 2;
+    if (phase == BK_TOUCH_MOVE && !t->held) {
+      t->held = bit;
+      return 0;
+    }
+    const int r = t->held ? gesture_update(ctx, tm) : 0;
+    t->held = phase == BK_TOUCH_MOVE && t->held == bit ? bit : 0;
     if (phase == BK_TOUCH_MOVE) {
-      return gesture_update(ctx, tm);
+      return r;
     }
     gesture_end(t);
     return 1;

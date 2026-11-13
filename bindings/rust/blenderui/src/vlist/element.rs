@@ -14,7 +14,7 @@ use super::state::{ListState, ViewInfo};
 use crate::css::Decl;
 use crate::element::{canvas_with, Div};
 use crate::html::div;
-use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement, Styled, Window};
+use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement, Styled, Window, WHEEL_LINE_PX};
 
 type Listener<S, P> = Rc<dyn Fn(usize, &mut List<S, P>)>;
 
@@ -115,9 +115,11 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                 .on_mouse_up(MouseButton::Left, move |_, _, cx| up.update(cx, |s, _| s.pointer_up()))
                 .on_scroll_wheel(move |e, w, cx| {
                     wh.update(cx, |s, _| {
-                        // Blender's wheel scrolls at once, a notch or a touchpad fraction alike: no easing
+                        // Blender's wheel scrolls at once, a notch or a touchpad fraction alike: no easing;
+                        // two fingers move the rows by exactly as far as they moved
                         let lines = f64::from(e.delta);
-                        s.view.wheel(-lines * WHEEL_NOTCH_PX, true);
+                        let step = if e.touch { f64::from(WHEEL_LINE_PX) } else { WHEEL_NOTCH_PX };
+                        s.view.wheel(-lines * step, true);
                     });
                     w.request_animation_frame();
                 })

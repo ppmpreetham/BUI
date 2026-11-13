@@ -56,6 +56,46 @@ The same calls are on every binding: `ctx.touch(id, phase, x, y, mods)`,
 with `BK_TOUCH_*` in D (and `node.setTouch(true)` for custom nodes); `BK_touch`, `BK_magnify`
 and `BK_rotate` in `blenderui-sys`.
 
+## Gestures for your own elements and windows
+
+Kit widgets react to gestures by themselves (scroll views scroll, the node editor pans and
+zooms). Your own content can take them too.
+
+**Rust (`blenderui`):** every element can listen.
+
+```rust
+div().id("map").on_gesture(|e, window, cx| {
+    match e.kind {
+        GestureKind::Pan => { /* e.dx, e.dy: the fingers' movement, in logical pixels */ }
+        GestureKind::Magnify => { /* e.magnify: 0.1 = 10% larger, about e.position */ }
+        GestureKind::Rotate => { /* e.degrees, positive counter-clockwise */ }
+    }
+    cx.stop_propagation(); // a stopped pan does not also scroll the page
+})
+```
+
+`GestureEvent { kind, position, dx, dy, magnify, degrees, modifiers, touch }` bubbles like the
+other events. `touch` is `false` for a trackpad pinch or turn. A pan that no listener stops then
+scrolls the scroll container under it and reaches `on_scroll_wheel` listeners, with
+`ScrollWheelEvent::touch` set and `delta` in lines (`delta * WHEEL_LINE_PX` is the pixels the
+fingers moved). Pages written for the wheel scroll with two fingers without any change; the
+virtual list and the data table use that to keep their rows under the fingers.
+`rsx!` takes `onGesture={...}`. Tests can drive it with `cx.simulate_touch(window, id,
+TouchPhase::Down, x, y)`, `simulate_magnify` and `simulate_rotate`.
+
+**C and the other bindings:** give a node the `"gestures"` property
+(`BK_set_num(node, "gestures", 1)`). Gestures over it or its children then come to your
+`BKHost.emit` as `BK_EV_GESTURE`, and the kit doesn't scroll anything for them:
+
+| Field | Value |
+|---|---|
+| `ref` | `"mods kind x y"`: `mods` with `BK_FROM_TOUCH` for a touch screen; `kind` `BK_GESTURE_PAN`, `MAGNIFY` or `ROTATE`; `x`, `y` the gesture's centre, relative to the node |
+| `a`, `b` | Pan: the pixels moved. Magnify: `a` = scale change. Rotate: `a` = degrees |
+
+Nodes with only `"events"` (Tk bindings, Qt event handlers) are unchanged: two fingers still
+scroll under them. The two fingers' moves are paired into one update, so a pan sends no magnify
+or rotate of its own and a pinch sends no pan.
+
 ## Custom nodes
 
 By default a `custom` node gets touch the way it gets the mouse: `BK_CUSTOM_PRESS`, `MOTION` and
@@ -91,5 +131,3 @@ touches take the normal path, so a tap outside closes the menu.
   hidden-pointer drag of number fields is for the mouse); a number field dragged by touch stops
   changing at the edge.
 - One finger never scrolls; scrolling takes two (as in Blender, where a single drag edits).
-- Each finger's move is its own update, so a pan may wobble the zoom by a rounding error between
-  the two fingers' events. Nothing waits for a platform's frame grouping yet.

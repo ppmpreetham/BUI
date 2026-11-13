@@ -787,6 +787,7 @@ static const struct {
     {"opaque", NF_OPAQUE, false},
     {"html", NF_HTML, true}, /* Chrome's form-control look (kit_widgets.c) */
     {"bare", NF_BARE, false},
+    {"gestures", NF_GESTURES, false},
     {"active_default", NF_ACTIVE_DEFAULT, false},
 };
 
@@ -3415,8 +3416,9 @@ int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods)
 
 /* Touch and trackpad gestures, as Blender's MOUSEPAN / MOUSEZOOM / MOUSEROTATE reach the view
  * under them (view2d_ops.cc): the first of `target` and its parents that takes the gesture.
- * A custom node always does (it gets WHEEL in notches as BK_scroll's, MAGNIFY, ROTATE), so the
- * region under an embedded UI never moves, as with the wheel (custom_wheel). */
+ * A node with "gestures" always does (the host gets BK_EV_GESTURE: an HTML document, a canvas,
+ * a whole window's root), and so does a custom node (WHEEL in notches as BK_scroll's, MAGNIFY,
+ * ROTATE), so the region under them never moves, as with the wheel (custom_wheel). */
 int bk_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float a, float b, int mods)
 {
   if (ctx->modal) {
@@ -3426,6 +3428,14 @@ int bk_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float a, 
   for (BKNode *n = target; n; n = n->parent) {
     if (!NODE_ENABLED(n)) {
       continue;
+    }
+    if (n->flags & NF_GESTURES) {
+      char buf[96];
+      snprintf(buf, sizeof(buf), "%d %d %d %d", mods, kind, x - n->x, y - n->y);
+      ctx->in_input++;
+      bk_emit(n, BK_EV_GESTURE, buf, a, b);
+      ctx->in_input--;
+      return 1;
     }
     if (BK_IS_CUSTOM(n)) {
       BKCustomEvent ce;

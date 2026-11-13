@@ -1412,6 +1412,13 @@ static void host_schedule(void *data, int ms, int timer)
   Py_XDECREF(a);
 }
 
+/* Raw events ("events" / "gestures" nodes) carry a C string in `ref`; the others a PyObject. */
+static int raw_text_event(int kind)
+{
+  return (kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE ||
+         kind == BK_EV_GESTURE;
+}
+
 static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, double b)
 {
   if (kind == BK_EV_CALL && ref) {
@@ -1423,7 +1430,7 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
     return;
   }
   PyObject *r;
-  if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE) {
+  if (raw_text_event(kind)) {
     /* raw events: ref is a C string */
     r = PyObject_CallMethod(target, "_on_event", "isdd", kind, ref ? (const char *)ref : "", a,
                             b);
@@ -1495,7 +1502,7 @@ static void defer_emit(BKNode *node, int kind, void *ref, double a, double b)
     return;
   }
   PyObject *payload;
-  if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE) {
+  if (raw_text_event(kind)) {
     payload = PyUnicode_FromString(ref ? (const char *)ref : ""); /* raw events: a C string */
   }
   else {
