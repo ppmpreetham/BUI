@@ -787,6 +787,7 @@ static const struct {
     {"opaque", NF_OPAQUE, false},
     {"html", NF_HTML, true}, /* Chrome's form-control look (kit_widgets.c) */
     {"bare", NF_BARE, false},
+    {"gestures", NF_GESTURES, false},
     {"active_default", NF_ACTIVE_DEFAULT, false},
     {"select", NF_SELECT, false},
 };
@@ -1411,6 +1412,7 @@ BKContext *BK_context_new(BKNode *root)
   ctx->cursor = BK_CURSOR_DEFAULT;
   ctx->layout_dirty = true;
   ctx->full_dirty = true;
+  bk_touch_init(ctx);
   if (root) {
     root->ctx_root = ctx;
   }
@@ -1727,6 +1729,16 @@ void bk_forget(BKContext *ctx, BKNode *subtree)
   if (ctx->last_click_node && is_within(ctx->last_click_node, subtree)) {
     ctx->last_click_node = NULL;
   }
+  for (int i = 0; i < BK_MAX_TOUCH; i++) { /* its raw contacts are ignored until they lift */
+    BKTouchPoint *tp = &ctx->touch.pts[i];
+    if (tp->role == BK_TP_RAW && is_within(tp->raw, subtree)) {
+      tp->role = BK_TP_DEAD;
+      tp->raw = NULL;
+    }
+  }
+  if (ctx->touch.target && is_within(ctx->touch.target, subtree)) {
+    ctx->touch.target = NULL;
+  }
   /* popups owned by the subtree */
   for (int i = 0; i < ctx->npopups; i++) {
     if (ctx->popups[i]->parent && is_within(ctx->popups[i]->parent, subtree)) {
@@ -1876,8 +1888,6 @@ static int drag_toggle_apply(BKContext *ctx, BKNode *under)
   return 1;
 }
 
-static BKNode *hit_all(BKContext *ctx, int x, int y);
-
 /* drag_toggle_set_xy_xy (interface_handlers.cc): touch every toggle whose rect the segment from
  * the last pointer position to this one crosses (BLI_rctf_isect_segment), so fast drags don't
  * skip buttons; the segment is sampled every 2 px through the regular hit test. Panel headers
@@ -1895,7 +1905,7 @@ static int drag_toggle_segment(BKContext *ctx, int x, int y)
   for (int i = 0; i <= steps; i++) {
     const int sx = x0 + (int)lroundf((x - x0) * (float)i / steps);
     const int sy = y0 + (int)lroundf((y - y0) * (float)i / steps);
-    changed |= drag_toggle_apply(ctx, hit_all(ctx, sx, sy));
+    changed |= drag_toggle_apply(ctx, bk_ctx_hit(ctx, sx, sy));
   }
   ctx->dt_last_x = x;
   ctx->dt_last_y = y;
@@ -2285,7 +2295,7 @@ int BK_render(BKContext *ctx, BuiRaster *r, int w, int h, int full)
 #define DOUBLE_CLICK_PX 4
 #define TOOLTIP_DELAY_MS 500 /* UI_TOOLTIP_DELAY 0.5 */
 
-static BKNode *hit_all(BKContext *ctx, int x, int y)
+BKNode *bk_ctx_hit(BKContext *ctx, int x, int y)
 {
   for (int i = ctx->npopups - 1; i >= 0; i--) {
     if (bk_contains(ctx->popups[i], x, y)) {
@@ -2414,10 +2424,13 @@ void bk_update_cursor(BKContext *ctx)
   update_cursor(ctx);
 }
 
-static bool continuous(BKContext *ctx)
+/* A drag with the hidden pointer that wraps at the window edge and comes back where it began
+ * (USE_CONT_MOUSE_CORRECT). Not for a finger: warping moves the mouse, not the finger, so its
+ * next position would count the wrap again. */
+static bool continuous(BKContext *ctx, int mods)
 {
   return ctx->host.warp && ctx->grab && ctx->dragging && !BK_HTML(ctx->grab) &&
-         ctx->grab->cls->drag_cursor == BK_CURSOR_NONE;
+         ctx->grab->cls->drag_cursor == BK_CURSOR_NONE && !(mods & BK_FROM_TOUCH);
 }
 
 static void wrap_pointer(BKContext *ctx, int x, int y)
@@ -2473,7 +2486,7 @@ static int in_BK_motion(BKContext *ctx, int x, int y, int mods)
     }
     BKEvent e = make_event(ctx, g, x, y, mods);
     g->cls->move(g, &e);
-    BKNode *under = hit_all(ctx, x, y);
+    BKNode *under = bk_ctx_hit(ctx, x, y);
     if (under != ctx->hover) {
       set_hover(ctx, under);
     }
@@ -2504,17 +2517,17 @@ static int in_BK_motion(BKContext *ctx, int x, int y, int mods)
     if (ctx->dt_active) { /* Blender: drag across toggles */
       changed |= drag_toggle_segment(ctx, x, y);
     }
-    BKNode *under = hit_all(ctx, x, y);
+    BKNode *under = bk_ctx_hit(ctx, x, y);
     if (under != ctx->hover) {
       set_hover(ctx, under);
       changed = 1;
     }
-    if (continuous(ctx)) {
+    if (continuous(ctx, mods)) {
       wrap_pointer(ctx, x, y);
     }
     return changed;
   }
-  BKNode *under = hit_all(ctx, x, y);
+  BKNode *under = bk_ctx_hit(ctx, x, y);
   if (under != ctx->hover) {
     set_hover(ctx, under);
     changed = 1;
@@ -2585,7 +2598,7 @@ static int in_BK_press(BKContext *ctx, int x, int y, int mods)
       return 1;
     }
   }
-  BKNode *target = hit_all(ctx, x, y);
+  BKNode *target = bk_ctx_hit(ctx, x, y);
   if (ctx->focus && target != ctx->focus) {
     end_edit(ctx, true);
   }
@@ -2639,7 +2652,7 @@ static int in_BK_release(BKContext *ctx, int x, int y, int mods)
     }
     return 1;
   }
-  const bool was_continuous = continuous(ctx);
+  const bool was_continuous = continuous(ctx, mods);
   const int vx = x + ctx->off_x, vy = y + ctx->off_y;
   BKNode *grab = ctx->grab;
   ctx->dt_active = 0;
@@ -2689,7 +2702,7 @@ static int in_BK_release(BKContext *ctx, int x, int y, int mods)
   ctx->off_x = ctx->off_y = 0;
   ctx->pointer_x = x;
   ctx->pointer_y = y;
-  set_hover(ctx, hit_all(ctx, x, y));
+  set_hover(ctx, bk_ctx_hit(ctx, x, y));
   update_cursor(ctx);
   return 1;
 }
@@ -2701,7 +2714,7 @@ static BKNode *buttons_target(BKContext *ctx, int x, int y)
   if (ctx->modal || ctx->npopups) {
     return NULL;
   }
-  BKNode *n = hit_all(ctx, x, y);
+  BKNode *n = bk_ctx_hit(ctx, x, y);
   return n && (n->cls->flags & CLS_BUTTONS) && NODE_ENABLED(n) ? n : NULL;
 }
 
@@ -2724,7 +2737,7 @@ static int in_BK_context_menu(BKContext *ctx, int x, int y, int mods)
   if (ctx->focus) {
     end_edit(ctx, true);
   }
-  BKNode *under = hit_all(ctx, x, y);
+  BKNode *under = bk_ctx_hit(ctx, x, y);
   if (under && (under->flags & NF_EVENTS)) { /* <Button-3> bindings see it first */
     BKEvent e = make_event(ctx, under, x, y, mods);
     raw_event(under, BK_EV_PRESS, mods, &e, 3);
@@ -2733,7 +2746,7 @@ static int in_BK_context_menu(BKContext *ctx, int x, int y, int mods)
   for (int i = 0; i < ctx->npopups; i++) {
     in_popup |= bk_contains(ctx->popups[i], x, y);
   }
-  BKNode *target = hit_all(ctx, x, y);
+  BKNode *target = bk_ctx_hit(ctx, x, y);
   if (!in_popup) {
     BK_close_popups(ctx);
   }
@@ -2866,10 +2879,13 @@ static BKNode *deepest(BKNode *n, int x, int y)
 static int in_BK_wheel(BKContext *ctx, int x, int y, int delta, int mods)
 {
   hide_tooltip(ctx);
-  BKNode *target = hit_all(ctx, x, y);
+  BKNode *target = bk_ctx_hit(ctx, x, y);
   if (!target && ctx->root && y >= ctx->header_h) {
     target = deepest(ctx->root, x, y); /* non-interactive area: let containers scroll */
   }
+  /* the sideways steps of a touch pan (kit_touch.c): every kit scroller is vertical and reads
+   * Shift + wheel as vertical, so only bindings get them (Tk's <Shift-MouseWheel>) */
+  const bool sideways = (mods & (BK_FROM_TOUCH | BK_SHIFT)) == (BK_FROM_TOUCH | BK_SHIFT);
   for (BKNode *n = target; n; n = n->parent) {
     if (!NODE_ENABLED(n)) {
       continue;
@@ -2878,6 +2894,9 @@ static int in_BK_wheel(BKContext *ctx, int x, int y, int delta, int mods)
     e.delta = delta;
     if (n == target) {
       bk_event(n, BK_EV_WHEEL, mods, &e);
+    }
+    if (sideways) {
+      return 0;
     }
     if (n->cls->wheel ? n->cls->wheel(n, &e) :
                         ((n->cls->flags & CLS_VALUE) && bk_value_wheel(n, &e)))
@@ -3377,7 +3396,7 @@ int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods)
 
 int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods)
 {
-  BKNode *t = BK_IS_CUSTOM(ctx->grab) ? ctx->grab : (ctx->modal ? NULL : hit_all(ctx, x, y));
+  BKNode *t = BK_IS_CUSTOM(ctx->grab) ? ctx->grab : (ctx->modal ? NULL : bk_ctx_hit(ctx, x, y));
   if (BK_IS_CUSTOM(t) && NODE_ENABLED(t)) {
     if (dx == 0.0f && dy == 0.0f) {
       return 0;
@@ -3400,6 +3419,91 @@ int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods)
     r |= BK_wheel(ctx, x, y, dx > 0.0f ? -1 : 1, mods | BK_SHIFT);
   }
   return r;
+}
+
+/* Touch and trackpad gestures, as Blender's MOUSEPAN / MOUSEZOOM / MOUSEROTATE reach the view
+ * under them (view2d_ops.cc): the first of `target` and its parents that takes the gesture.
+ * A node with "gestures" always does (the host gets BK_EV_GESTURE: an HTML document, a canvas,
+ * a whole window's root), and so does a custom node (WHEEL in notches as BK_scroll's, MAGNIFY,
+ * ROTATE), so the region under them never moves, as with the wheel (custom_wheel). */
+int bk_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float a, float b, int mods)
+{
+  if (ctx->modal) {
+    return 0;
+  }
+  if (!target && ctx->root && y >= ctx->header_h) {
+    target = deepest(ctx->root, x, y); /* over no widget: its containers, as in_BK_wheel */
+  }
+  hide_tooltip(ctx);
+  for (BKNode *n = target; n; n = n->parent) {
+    if (!NODE_ENABLED(n)) {
+      continue;
+    }
+    if (n->flags & NF_GESTURES) {
+      char buf[96];
+      snprintf(buf, sizeof(buf), "%d %d %d %d", mods, kind, x - n->x, y - n->y);
+      ctx->in_input++;
+      bk_emit(n, BK_EV_GESTURE, buf, a, b);
+      ctx->in_input--;
+      return 1;
+    }
+    if (BK_IS_CUSTOM(n)) {
+      BKCustomEvent ce;
+      memset(&ce, 0, sizeof(ce));
+      ce.mods = mods;
+      if (kind == BK_GESTURE_PAN) {
+        const float step = 2.0f * bk_unit(); /* the region's pixels per wheel notch */
+        ce.type = BK_CUSTOM_WHEEL;
+        ce.wheel_x = -a / step; /* content follows the fingers: moving left scrolls right */
+        ce.wheel_y = b / step;
+      }
+      else if (kind == BK_GESTURE_MAGNIFY) {
+        ce.type = BK_CUSTOM_MAGNIFY;
+        ce.magnify = a;
+      }
+      else {
+        ce.type = BK_CUSTOM_ROTATE;
+        ce.rotate = a;
+      }
+      ctx->in_input++;
+      bk_custom_event(n, &ce, x, y);
+      ctx->in_input--;
+      return 1;
+    }
+    if (n->cls->gesture) {
+      BKEvent e = make_event(ctx, n, x, y, mods);
+      e.gesture = kind;
+      e.pan_x = kind == BK_GESTURE_PAN ? a : 0.0f;
+      e.pan_y = kind == BK_GESTURE_PAN ? b : 0.0f;
+      e.magnify = kind == BK_GESTURE_MAGNIFY ? a : 0.0f;
+      e.rotate = kind == BK_GESTURE_ROTATE ? a : 0.0f;
+      ctx->in_input++;
+      const int used = n->cls->gesture(n, &e);
+      ctx->in_input--;
+      if (used) {
+        bk_views_check(ctx); /* scrollbars follow */
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
+static BKNode *gesture_target(BKContext *ctx, int x, int y)
+{
+  return BK_IS_CUSTOM(ctx->grab) ? ctx->grab : bk_ctx_hit(ctx, x, y);
+}
+
+int BK_magnify(BKContext *ctx, int x, int y, float delta, int mods)
+{
+  return delta != 0.0f &&
+         bk_gesture(ctx, gesture_target(ctx, x, y), x, y, BK_GESTURE_MAGNIFY, delta, 0.0f, mods);
+}
+
+int BK_rotate(BKContext *ctx, int x, int y, float degrees, int mods)
+{
+  return degrees != 0.0f &&
+         bk_gesture(ctx, gesture_target(ctx, x, y), x, y, BK_GESTURE_ROTATE, degrees, 0.0f, mods);
 }
 
 int BK_context_menu(BKContext *ctx, int x, int y, int mods)
@@ -3464,7 +3568,7 @@ int BK_button(BKContext *ctx, int x, int y, int button, int release, int mods)
       return 1;
     }
   }
-  BKNode *under = hit_all(ctx, x, y);
+  BKNode *under = bk_ctx_hit(ctx, x, y);
   if (!under || !(under->flags & NF_EVENTS)) {
     return 0;
   }
@@ -3788,7 +3892,7 @@ void bk_window_focus(BKContext *ctx, BKWindow *win, const BKWindowCallbacks *cb,
 
 BKNode *BK_hit_at(BKContext *ctx, int x, int y)
 {
-  return hit_all(ctx, x, y);
+  return bk_ctx_hit(ctx, x, y);
 }
 
 /** \} */

@@ -27,7 +27,7 @@ struct NodeEvent {
     void* ref_;
     double a;
     double b;
-    /// The key text for `BK_EV_KEY` / `BK_EV_KEYRELEASE`, else empty.
+    /// The key text for `BK_EV_KEY` / `BK_EV_KEYRELEASE`, "mods kind x y" for `BK_EV_GESTURE`, else empty.
     const(char)[] text;
 }
 
@@ -366,7 +366,7 @@ final class Node {
             return;
         }
         const(char)[] text;
-        if (kind == BK_EV_KEY || kind == BK_EV_KEYRELEASE) {
+        if (kind == BK_EV_KEY || kind == BK_EV_KEYRELEASE || kind == BK_EV_GESTURE) {
             text = cslice(cast(const(char)*) ref_);
         }
         auto event = NodeEvent(this, kind, ref_, a, b, text);

@@ -298,6 +298,10 @@ typedef struct BKEvent {
   const char *text;
   const char *keysym;
   float wheel_x, wheel_y; /* BK_scroll: precise deltas (custom nodes) */
+  /* BKClass.gesture: Blender's MOUSEPAN (pan_x, pan_y: pixels the content follows),
+   * MOUSEZOOM (magnify: scale change) and MOUSEROTATE (rotate: degrees, > 0 counter-clockwise) */
+  int gesture; /* BK_GESTURE_* (BUI_kit.h) */
+  float pan_x, pan_y, magnify, rotate;
 } BKEvent;
 
 #define EV_SHIFT(e) (((e)->mods & BK_SHIFT) != 0)
@@ -331,6 +335,7 @@ typedef struct BKClass {
   int (*key_up)(BKNode *n, BKEvent *e); /* a key release, sent to the top popup */
   void (*popup_pick)(BKNode *n, void *data); /* a menu this node opened: the picked item's `data` */
   int (*wheel)(BKNode *n, BKEvent *e);
+  int (*gesture)(BKNode *n, BKEvent *e); /* touch / trackpad pan, magnify, rotate; 1 = used */
   int (*cursor_at)(BKNode *n, int x, int y);
   void (*finish_edit)(BKNode *n, bool confirm);
   int (*context_items)(BKNode *n, BKMenuSpec *items, int max);
@@ -398,6 +403,7 @@ enum {
   NF_DEFAULT_SET = 1 << 27, /* `defval` was set: by "default", or by the first "value" a widget got */
   NF_BARE = 1 << 28,        /* "bare": an HTML text field with no frame (CSS `border-style: none`) */
   NF_SELECT = 1 << 29,      /* "select": held selected by the host (UI_SELECT: a checked push button) */
+  NF_GESTURES = 1 << 30,    /* "gestures": touch / trackpad gestures go to the host (BK_EV_GESTURE) */
 };
 
 #define BK_HTML(n) (((n)->flags & NF_HTML) != 0)
@@ -563,6 +569,28 @@ typedef struct BKUndo {
 #define BK_MAX_UNDO 128
 #define BK_MAX_MULTI 32
 #define BK_MAX_ANIM 32
+#define BK_MAX_TOUCH 10 /* contacts followed at once; more are ignored */
+
+/* One finger on the screen (kit_touch.c). */
+typedef struct BKTouchPoint {
+  int id;      /* the host's contact id */
+  int role;    /* BK_TP_*: free, the default path, a raw custom node's, or ignored */
+  float x, y;  /* last position, window pixels */
+  BKNode *raw; /* BK_TP_RAW: the custom node that takes it */
+} BKTouchPoint;
+enum { BK_TP_FREE = 0, BK_TP_DEFAULT, BK_TP_RAW, BK_TP_DEAD };
+
+typedef struct BKTouch {
+  BKTouchPoint pts[BK_MAX_TOUCH];
+  int pointer;            /* the contact that is the pointer, -1 none */
+  int g0, g1;             /* the gesture's two contacts, -1 none */
+  bool latched;           /* a gesture ran: no pointer until every contact lifted */
+  BKNode *target;         /* what the gesture began over (scroll target) */
+  int start_x, start_y;   /* the gesture's first centre */
+  float cx, cy, dist, ang; /* its centre, spread and angle at the last update */
+  float rest_x, rest_y;   /* pan not yet sent as whole wheel steps (pixels) */
+  int held;               /* 1 g0 / 2 g1: moved, its update waits for the other finger */
+} BKTouch;
 
 struct BKContext {
   BKNode *root, *header;
@@ -622,6 +650,8 @@ struct BKContext {
   int next_button;     /* the button the next in_BK_press / in_BK_release is for (0 = 1) */
   int in_custom_frame; /* inside custom frame callbacks: no host requests */
   double custom_timer_due; /* armed BK_TIMER_CUSTOM (bk_time), 0 = none */
+  /* touch screen contacts and their gesture (kit_touch.c) */
+  BKTouch touch;
   /* every live context (BK_set_theme redraws them all) */
   BKContext *next_ctx;
 };
@@ -644,6 +674,16 @@ void bk_custom_timer(BKContext *ctx);        /* BK_TIMER_CUSTOM fired */
 void bk_ctx_arm_timer(BKContext *ctx);
 bool bk_animations_enabled(void); /* BK_set_animations: off = reduced motion */
 void bk_update_cursor(BKContext *ctx);
+/* Raw touches (BK_custom_set_touch): whether n takes them, and one contact for it. */
+bool bk_custom_takes_touch(const BKNode *n);
+int bk_custom_touch(BKNode *n, int id, int phase, int x, int y, int mods);
+
+/* The topmost node at x, y: popups, then the header, then the root. */
+BKNode *bk_ctx_hit(BKContext *ctx, int x, int y);
+/* Touch / trackpad gestures (kit_core.c): a BK_GESTURE_* event at x, y for `target` and its
+ * parents (a custom node, a class with a gesture hook); 0 when none took it. */
+int bk_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float a, float b, int mods);
+void bk_touch_init(BKContext *ctx);
 
 void bk_undo_record(BKNode *n, int kind);
 void bk_anim_start(BKNode *n);

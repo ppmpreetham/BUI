@@ -34,6 +34,9 @@
 #    include "cursor-shape-v1-client-protocol.h"
 #  endif
 #  include "xdg-decoration-unstable-v1-client-protocol.h"
+#  ifdef BUI_WL_POINTER_GESTURES
+#    include "pointer-gestures-unstable-v1-client-protocol.h"
+#  endif
 #  include "xdg-shell-client-protocol.h"
 
 #  include <dlfcn.h>
@@ -53,6 +56,7 @@
 #  define MAX_TIMERS 16
 #  define MAX_RECTS 32
 #  define MAX_OUTPUTS 8
+#  define MAX_TOUCHES 10 /* as the kit's BK_MAX_TOUCH */
 
 /* -- libxkbcommon, loaded on first use -- */
 
@@ -164,6 +168,19 @@ static struct {
   struct wl_seat *seat;
   struct wl_pointer *pointer;
   struct wl_keyboard *keyboard;
+  struct wl_touch *touch;
+  struct {
+    int used;
+    int32_t id;
+    BKWindow *win; /* the surface it went down on (wl_touch.up / motion do not say) */
+    double x, y;   /* raster pixels */
+  } touches[MAX_TOUCHES];
+#  ifdef BUI_WL_POINTER_GESTURES
+  struct zwp_pointer_gestures_v1 *gestures;
+  struct zwp_pointer_gesture_pinch_v1 *pinch; /* of the pointer, made once both exist */
+  BKWindow *pinch_win;
+  double pinch_scale; /* the last update's (scale is since the pinch began) */
+#  endif
   struct wl_data_device_manager *data_manager;
   struct wl_data_device *data_device;
   struct wl_data_offer *offer; /* the clipboard, with a text mime type */
@@ -730,11 +747,138 @@ static void run_repeat(void)
   }
 }
 
+/* -- seat: touch screen (wl_touch), into BK_touch -- */
+
+static int touch_slot(int32_t id)
+{
+  for (int i = 0; i < MAX_TOUCHES; i++) {
+    if (g.touches[i].used && g.touches[i].id == id) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static void touch_down(void *d, struct wl_touch *t, uint32_t serial, uint32_t time,
+                       struct wl_surface *surface, int32_t id, wl_fixed_t x, wl_fixed_t y)
+{
+  BKWindow *win = find_window(surface);
+  g.serial = serial;
+  int i = touch_slot(id);
+  for (int j = 0; i < 0 && j < MAX_TOUCHES; j++) {
+    i = g.touches[j].used ? -1 : j;
+  }
+  if (!win || i < 0) {
+    return;
+  }
+  g.touches[i].used = 1;
+  g.touches[i].id = id;
+  g.touches[i].win = win;
+  g.touches[i].x = wl_fixed_to_double(x) * win->bscale;
+  g.touches[i].y = wl_fixed_to_double(y) * win->bscale;
+  BK_touch(win->ctx, id, BK_TOUCH_DOWN, (float)g.touches[i].x, (float)g.touches[i].y,
+           mods_now() & ~BK_BUTTON1);
+}
+
+static void touch_up(void *d, struct wl_touch *t, uint32_t serial, uint32_t time, int32_t id)
+{
+  const int i = touch_slot(id);
+  g.serial = serial;
+  if (i >= 0) {
+    g.touches[i].used = 0;
+    if (g.touches[i].win) {
+      BK_touch(g.touches[i].win->ctx, id, BK_TOUCH_UP, (float)g.touches[i].x,
+               (float)g.touches[i].y, mods_now() & ~BK_BUTTON1);
+    }
+  }
+}
+
+static void touch_motion(void *d, struct wl_touch *t, uint32_t time, int32_t id, wl_fixed_t x,
+                         wl_fixed_t y)
+{
+  const int i = touch_slot(id);
+  BKWindow *win = i >= 0 ? g.touches[i].win : NULL;
+  if (win) {
+    g.touches[i].x = wl_fixed_to_double(x) * win->bscale;
+    g.touches[i].y = wl_fixed_to_double(y) * win->bscale;
+    BK_touch(win->ctx, id, BK_TOUCH_MOVE, (float)g.touches[i].x, (float)g.touches[i].y,
+             mods_now() & ~BK_BUTTON1);
+  }
+}
+
+/* The compositor took every touch point (a system gesture): none of them is kept. */
+static void touch_cancel(void *d, struct wl_touch *t)
+{
+  for (int i = 0; i < MAX_TOUCHES; i++) {
+    if (g.touches[i].used && g.touches[i].win) {
+      BK_touch(g.touches[i].win->ctx, g.touches[i].id, BK_TOUCH_CANCEL, (float)g.touches[i].x,
+               (float)g.touches[i].y, 0);
+    }
+    g.touches[i].used = 0;
+  }
+}
+
+static struct wl_touch_listener touch_listener = {
+    .down = touch_down, .up = touch_up, .motion = touch_motion, .cancel = touch_cancel};
+
+/* -- seat: touchpad pinch (pointer-gestures), as GHOST_SystemWayland's gesture_pinch -- */
+
+#  ifdef BUI_WL_POINTER_GESTURES
+static void pinch_begin(void *d, struct zwp_pointer_gesture_pinch_v1 *p, uint32_t serial,
+                        uint32_t time, struct wl_surface *surface, uint32_t fingers)
+{
+  g.pinch_win = find_window(surface);
+  g.pinch_scale = 1.0;
+}
+
+static void pinch_update(void *d, struct zwp_pointer_gesture_pinch_v1 *p, uint32_t time,
+                         wl_fixed_t dx, wl_fixed_t dy, wl_fixed_t scale, wl_fixed_t rotation)
+{
+  BKWindow *win = g.pinch_win;
+  const double s = wl_fixed_to_double(scale);
+  if (!win || s <= 0.0) {
+    return;
+  }
+  const int mods = mods_now() & ~BK_BUTTON1;
+  /* scale is since the pinch began; rotation is degrees since the last update, clockwise */
+  BK_magnify(win->ctx, (int)g.px, (int)g.py, (float)(s / g.pinch_scale - 1.0), mods);
+  if (win == g.pinch_win) { /* the magnify may have closed it */
+    BK_rotate(win->ctx, (int)g.px, (int)g.py, (float)-wl_fixed_to_double(rotation), mods);
+  }
+  g.pinch_scale = s;
+}
+
+static void pinch_end(void *d, struct zwp_pointer_gesture_pinch_v1 *p, uint32_t serial,
+                      uint32_t time, int32_t cancelled)
+{
+  g.pinch_win = NULL;
+}
+
+static struct zwp_pointer_gesture_pinch_v1_listener pinch_listener = {
+    .begin = pinch_begin, .update = pinch_update, .end = pinch_end};
+
+/* The pinch needs the pointer and the gestures global, which may come in either order. */
+static void pinch_attach(void)
+{
+  if (g.gestures && g.pointer && !g.pinch) {
+    g.pinch = zwp_pointer_gestures_v1_get_pinch_gesture(g.gestures, g.pointer);
+    zwp_pointer_gesture_pinch_v1_add_listener(g.pinch, &pinch_listener, NULL);
+  }
+}
+#  endif
+
 static void seat_capabilities(void *d, struct wl_seat *seat, uint32_t caps)
 {
   if ((caps & WL_SEAT_CAPABILITY_POINTER) && !g.pointer) {
     g.pointer = wl_seat_get_pointer(seat);
     wl_pointer_add_listener(g.pointer, &pointer_listener, NULL);
+#  ifdef BUI_WL_POINTER_GESTURES
+    pinch_attach();
+#  endif
+  }
+  if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !g.touch) {
+    g.touch = wl_seat_get_touch(seat);
+    wl_touch_add_listener(g.touch, &touch_listener, NULL);
   }
   if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !g.keyboard) {
     g.keyboard = wl_seat_get_keyboard(seat);
@@ -939,6 +1083,12 @@ static void registry_global(void *d, struct wl_registry *reg, uint32_t name, con
     g.seat = wl_registry_bind(reg, name, &wl_seat_interface, BK_MIN(version, 5u));
     wl_seat_add_listener(g.seat, &seat_listener, NULL);
   }
+#  ifdef BUI_WL_POINTER_GESTURES
+  else if (!strcmp(iface, zwp_pointer_gestures_v1_interface.name)) {
+    g.gestures = wl_registry_bind(reg, name, &zwp_pointer_gestures_v1_interface, 1);
+    pinch_attach();
+  }
+#  endif
   else if (!strcmp(iface, wl_data_device_manager_interface.name)) {
     g.data_manager = wl_registry_bind(reg, name, &wl_data_device_manager_interface, 1);
   }
@@ -976,6 +1126,10 @@ static void fill_listeners(void)
   fill_noop(&buffer_listener, sizeof(buffer_listener));
   fill_noop(&frame_listener, sizeof(frame_listener));
   fill_noop(&pointer_listener, sizeof(pointer_listener));
+  fill_noop(&touch_listener, sizeof(touch_listener));
+#  ifdef BUI_WL_POINTER_GESTURES
+  fill_noop(&pinch_listener, sizeof(pinch_listener));
+#  endif
   fill_noop(&keyboard_listener, sizeof(keyboard_listener));
   fill_noop(&seat_listener, sizeof(seat_listener));
   fill_noop(&offer_listener, sizeof(offer_listener));
@@ -1173,6 +1327,16 @@ static void close_window(BKWindow *win)
     g.keyboard_win = NULL;
     g.repeat_key = 0;
   }
+  for (int i = 0; i < MAX_TOUCHES; i++) { /* its fingers' remaining events go nowhere */
+    if (g.touches[i].win == win) {
+      g.touches[i].win = NULL;
+    }
+  }
+#  ifdef BUI_WL_POINTER_GESTURES
+  if (g.pinch_win == win) {
+    g.pinch_win = NULL;
+  }
+#  endif
   role_destroy(win);
   wl_surface_destroy(win->surface);
   buf_destroy(&win->bufs[0]);

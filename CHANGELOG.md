@@ -28,8 +28,38 @@ All notable changes to **blenderui** (BUI). The format follows
 - **`@blender-ui/native`:** `el.style.display = 'none'` and the other CSS properties as camelCase properties of `el.style`, as in a browser (they were silently ignored); `host.styleRegistry()`, the registry of components' scoped `<style>` blocks that the Svelte and Vue bindings share.
 - **D bindings** (`bindings/d`): a DUB package with raw `extern(C)` declarations for the whole kit, GPU and stable C API, plus idiomatic wrappers for nodes, contexts, windows, menus, rasters, images, video, canvases, trees, text areas, custom nodes and themes. The kit is built through CMake from `preBuildCommands`, ownership follows the Python binding's reference-hook model, and `dub run --config=test` covers the wrappers, raw API, events, menus and host errors end to end. Examples: `hello.d` and `headless.d`.
 - **D HTML, CSS and RSX** (`bindings/d`): `bui.html` adds an `Element` tree and tag constructors, `bui.css` a selector cascade with a practical CSS subset, and `bui.rsx` a compile-time `rsx!` mixin that lowers markup and `{expression}` values to `Element` calls. `Document` realises the styled tree as kit nodes with flex, grid and table layout, widgets, dynamic `:hover`/`:active` states through `Element.setState` and `Document.restyle`, and in-place text updates through `Element.setText`. Tag constructors use `body_`, `template_`, `object_` and `select_` where D or the existing API already uses the name; markup keeps the HTML spelling. `dub run --config=rsx` opens the new example, and `--config=test` covers the cascade, realiser and RSX. The D wrappers also follow the kit's current header: focus callbacks, `Context.hitAt`, custom theme files, text shadows, font size and transparent rasters.
+- **Touch screens and trackpad gestures.** One finger is the pointer: it taps, drags number fields and sliders, opens
+  menus and picks rows, and leaves no hover behind. A second finger cancels what the first was doing (as Escape
+  cancels a drag: values go back, nothing is clicked) and the two become a gesture until both lift. Moving them
+  together scrolls the view under them, spreading them zooms (`BK_magnify`), turning them rotates (`BK_rotate`). These
+  are GHOST's trackpad Scroll / Magnify / Rotate events (Blender's MOUSEPAN / MOUSEZOOM / MOUSEROTATE); the node editor
+  pans and zooms on them. New C API: `BK_touch(ctx, id, phase, x, y, mods)` with `BK_TOUCH_DOWN` / `MOVE` / `UP` /
+  `CANCEL`, `BK_magnify`, `BK_rotate`, the `BK_FROM_TOUCH` modifier bit, and for custom nodes `BK_CUSTOM_TOUCH`,
+  `BK_CUSTOM_MAGNIFY`, `BK_CUSTOM_ROTATE` with `BKCustomEvent.touch_id`, `touch_phase`, `magnify`, `rotate`, and
+  `BK_custom_set_touch(node, 1)` to receive every contact raw. Window hosts: `WM_TOUCH` on Windows (touch-made mouse
+  messages and press-and-hold are dropped), XInput 2.2 touch on X11 (libXi loaded at run time; older servers keep
+  emulated mouse input), `wl_touch` and the pointer-gestures pinch on Wayland, `magnifyWithEvent:` /
+  `rotateWithEvent:` on macOS. Dear ImGui reports touch as `ImGuiMouseSource_TouchScreen`. Python
+  `KitContext.touch` / `magnify` / `rotate`, Lua `ctx:touch` / `magnify` / `rotate` with `bui.TOUCH_*`, D
+  `Context.touch` / `magnify` / `rotate` and `setTouch`, and `blenderui-sys` declarations. `tests/touch_test.c`; [docs/touch.md](docs/touch.md) and the website's Touch and
+  gestures page.
+- **Gestures for your own content.** A node with the new `"gestures"` property takes touch and trackpad gestures as
+  `BK_EV_GESTURE` (ref `"mods kind x y"`, `BK_GESTURE_PAN` / `MAGNIFY` / `ROTATE`, a / b the amounts) instead of the
+  kit scrolling for it; nodes with only `"events"` are unchanged. The two fingers' moves are paired into one update,
+  so a pan no longer wobbles the zoom. **Rust:** `on_gesture(|e: &GestureEvent, ..|)` on every element
+  (`GestureEvent { kind: GestureKind, position, dx, dy, magnify, degrees, modifiers, touch }`, `onGesture` in `rsx!`);
+  a pan no listener stops scrolls the page and reaches `on_scroll_wheel` with the new `ScrollWheelEvent::touch`
+  (`delta * WHEEL_LINE_PX` = the fingers' pixels), and the virtual list and data table follow the fingers exactly.
+  `App::simulate_touch` (`TouchPhase`), `simulate_magnify`, `simulate_rotate`. `BK_EV_GESTURE` and the kinds in
+  `blenderui-sys`, D and Lua; Python and D read its text.
 - **Qt syntax:** containers drawn the Blender way (`QStackedWidget`, `QToolBox` as Blender panels, `QSplitter` with region edges to drag, `QToolBar`, `QDockWidget`, `QTabBar`, and `QMainWindow.addToolBar` / `addDockWidget` / `setStatusBar`); model/view (`QStandardItemModel`, `QStringListModel`, the abstract models, `QListView`, `QTreeView`, `QTableView` in Blender's tree list); real `QMessageBox` and `QInputDialog` dialogs; `QSettings` (an INI file with Qt's groups and arrays), `QKeySequence`, `QShortcut` and `QClipboard`; `blockSignals`, dynamic properties, `findChildren`, point mapping, `showEvent` / `hideEvent` and the descriptive properties on every widget. Actions shared by menus, tool buttons and shortcuts (`QAction` with visibility, data, tips and shortcuts bound on its window, `QActionGroup`, a real `QToolButton`, menu sections and corner widgets, `triggered` up to the menu bar), `QButtonGroup` ids, Qt's full layout API (`QBoxLayout` directions, `insert*`, `takeAt`, `replaceWidget`, `QSpacerItem`, grid cell queries and minimum sizes, `QFormLayout` rows), `QDialogButtonBox` (which `QMessageBox` and `QInputDialog` now use), `QAbstractSpinBox`, validators and `maxLength` on `QLineEdit`, spin box prefix / wrapping / special value text, slider tracking and page steps, combo box icons, models and popups, checkable `QGroupBox`, `QFrame` boxes and lines, a `QStatusBar` with permanent widgets, window states, opacity and size limits through the host, `startTimer`, `QFontMetrics`, `QPalette` from Blender's theme, `QCursor.pos`, `QScreen`, and the context-menu policies. Dates and times: `QDate`, `QTime`, `QDateTime` with Qt's format strings, `QDateTimeEdit` / `QDateEdit` / `QTimeEdit` as Blender's aligned number fields, and `QCalendarWidget`. Measured by the new `tools/qt_coverage.py` against Qt's headers: 57% of the core widget classes' methods (was 21% by the same count), 37% across all 142 classes.
 - **Kit:** a `select` node flag draws a button held in (Blender's `UI_SELECT`, for checked push buttons), and a separator with `vertical` draws its line across a row (`uiButSeparatorLine.is_vertical`).
+- **Touch pans keep to their axis.** The sideways part of a pan no longer scrolls the kit's vertical scrollers (lists,
+  trees, grids, text areas, scroll views, the region): they read Shift + wheel as vertical, so those steps now reach
+  only bindings. A Shift held on the keyboard no longer turns a vertical pan sideways. In `blenderui`, a vertical
+  pan no longer scrolls a horizontal-only container, and the virtual list ignores the sideways part. A cancelled
+  gesture finger drops the move it held instead of sending it. Gestures over empty space reach the containers
+  under them (a `"gestures"` root with no widget under the fingers), as the wheel does.
 
 ### Fixed
 - **Python components:** `NodeEditor` follows `add`, `insert`, `remove`, `replace` and `clear` (its `nodes` and `links` went stale when

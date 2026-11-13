@@ -773,6 +773,27 @@ impl App {
         });
     }
 
+    /// A touch screen contact at (x, y); `id` tells the fingers apart.
+    pub fn simulate_touch(&mut self, window: WindowId, id: i32, phase: TouchPhase, x: f32, y: f32) {
+        self.input(window, |ctx, s| unsafe {
+            sys::BK_touch(ctx, id, phase.to_kit(), x * s, y * s, 0);
+        });
+    }
+
+    /// A trackpad pinch at (x, y): `delta` is the scale change (0.1 = 10% larger).
+    pub fn simulate_magnify(&mut self, window: WindowId, x: f32, y: f32, delta: f32) {
+        self.input(window, |ctx, s| unsafe {
+            sys::BK_magnify(ctx, (x * s) as c_int, (y * s) as c_int, delta, 0);
+        });
+    }
+
+    /// A trackpad turn at (x, y), degrees, positive counter-clockwise.
+    pub fn simulate_rotate(&mut self, window: WindowId, x: f32, y: f32, degrees: f32) {
+        self.input(window, |ctx, s| unsafe {
+            sys::BK_rotate(ctx, (x * s) as c_int, (y * s) as c_int, degrees, 0);
+        });
+    }
+
     /// Type text / press a key (`keysym` as in Tk: "Return", "BackSpace", "a" ...).
     pub fn simulate_key(&mut self, window: WindowId, text: &str, keysym: &str) {
         let (t, k) = (CString::new(text).unwrap_or_default(), CString::new(keysym).unwrap_or_default());
@@ -780,6 +801,11 @@ impl App {
             sys::BK_key(ctx, t.as_ptr(), k.as_ptr(), 0);
         });
     }
+}
+
+/// The kit modifier bits that start a raw event's text ("mods ...").
+fn kit_mods(text: &str) -> i32 {
+    text.split_whitespace().next().and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
 // ==========================================================================
@@ -935,6 +961,8 @@ impl Window {
             sys::BK_geom_set(canvas, c"relwidth".as_ptr(), 1.0);
             sys::BK_geom_set(canvas, c"relheight".as_ptr(), 1.0);
             sys::BK_set_num(canvas, c"events".as_ptr(), 1.0);
+            // touch and trackpad gestures come here (BK_EV_GESTURE), not as kit scrolling
+            sys::BK_set_num(canvas, c"gestures".as_ptr(), 1.0);
             let ctx = sys::BK_context_new(root);
             let host = sys::BKHost {
                 data: id as *mut c_void,
@@ -1224,9 +1252,10 @@ impl Window {
     /// Call the listeners `pick` selects, from element `key` up to the root.
     /// The frame is moved out of the window meanwhile, so listeners can take
     /// `&mut Window` while the frame lends them out: no copies, no `Rc`.
+    /// Calls the listeners from `key` up; true when one stopped the propagation.
     fn emit<E: 'static>(&mut self, app: &mut App, key: Key, e: &E,
-                        pick: impl Fn(&Listeners) -> Vec<&Listener<E>>) {
-        let Some(frame) = self.frame.take() else { return };
+                        pick: impl Fn(&Listeners) -> Vec<&Listener<E>>) -> bool {
+        let Some(frame) = self.frame.take() else { return false };
         app.propagate = true;
         let mut cur = frame.by_key().get(&key).copied();
         'up: while let Some(i) = cur {
@@ -1240,10 +1269,12 @@ impl Window {
             }
             cur = frame.nodes[i].parent;
         }
+        let stopped = !app.propagate;
         app.propagate = true;
         if self.frame.is_none() {
             self.frame = Some(frame);
         }
+        stopped
     }
 
     fn update_hover(&mut self, app: &mut App, fire: bool) {
@@ -1378,13 +1409,9 @@ impl Window {
             sys::BK_EV_WHEEL => {
                 let (modifiers, _) = self.pointer_event(&ev.text);
                 let (px_, py_) = self.pointer;
-                let e = ScrollWheelEvent { position: point(px(px_), px(py_)), delta: ev.a as f32, modifiers };
-                let path = self.path_at(px_, py_);
-                if let Some(&deepest) = path.last() {
-                    self.emit(app, deepest, &e, |l| l.scroll.iter().collect());
-                }
-                self.scroll_by(&path, -(ev.a as f32) * 40.0, modifiers.shift);
+                self.wheel(app, (px_, py_), ev.a as f32, modifiers, kit_mods(&ev.text) & sys::BK_FROM_TOUCH != 0);
             }
+            sys::BK_EV_GESTURE => self.gesture(app, &ev),
             sys::BK_EV_KEY | sys::BK_EV_KEYRELEASE => {
                 let mut parts = ev.text.splitn(2, '\t');
                 let ch = parts.next().unwrap_or("").to_owned();
@@ -1400,6 +1427,58 @@ impl Window {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// A wheel step (or a touch pan in lines): `on_scroll_wheel`, then the scroll container.
+    fn wheel(&mut self, app: &mut App, at: (f32, f32), lines: f32, modifiers: Modifiers, touch: bool) {
+        let e = ScrollWheelEvent { position: point(px(at.0), px(at.1)), delta: lines, modifiers, touch };
+        let path = self.path_at(at.0, at.1);
+        if let Some(&deepest) = path.last() {
+            self.emit(app, deepest, &e, |l| l.scroll.iter().collect());
+        }
+        self.scroll_by(&path, -lines * WHEEL_LINE_PX, modifiers.shift, touch);
+    }
+
+    /// BK_EV_GESTURE: text "mods kind x y" (device pixels from the canvas), a and b the amounts.
+    /// `on_gesture` listeners get it; a pan nobody stopped then scrolls like a wheel, so pages
+    /// scroll with two fingers and `on_scroll_wheel` sees it (with `touch` set).
+    fn gesture(&mut self, app: &mut App, ev: &RawEvent) {
+        let mut it = ev.text.split_whitespace().map(|v| v.parse::<i32>().unwrap_or(0));
+        let (mods, kind) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+        let (x, y) = (it.next().unwrap_or(0) as f32 / self.scale, it.next().unwrap_or(0) as f32 / self.scale);
+        let kind = match kind {
+            sys::BK_GESTURE_PAN => GestureKind::Pan,
+            sys::BK_GESTURE_MAGNIFY => GestureKind::Magnify,
+            sys::BK_GESTURE_ROTATE => GestureKind::Rotate,
+            _ => return,
+        };
+        let (a, b) = (ev.a as f32, ev.b as f32);
+        let pan = kind == GestureKind::Pan;
+        let modifiers = Modifiers::from_kit(mods);
+        let touch = mods & sys::BK_FROM_TOUCH != 0;
+        let e = GestureEvent {
+            kind,
+            position: point(px(x), px(y)),
+            dx: if pan { a / self.scale } else { 0.0 },
+            dy: if pan { b / self.scale } else { 0.0 },
+            magnify: if kind == GestureKind::Magnify { a } else { 0.0 },
+            degrees: if kind == GestureKind::Rotate { a } else { 0.0 },
+            modifiers,
+            touch,
+        };
+        self.pointer = (x, y);
+        let stopped = match self.path_at(x, y).last() {
+            Some(&deepest) => self.emit(app, deepest, &e, |l| l.gesture.iter().collect()),
+            None => false,
+        };
+        if pan && !stopped {
+            if e.dy != 0.0 { // the keyboard's Shift does not turn the fingers' vertical sideways
+                self.wheel(app, (x, y), e.dy / WHEEL_LINE_PX, Modifiers { shift: false, ..modifiers }, touch);
+            }
+            if e.dx != 0.0 { // Shift + wheel: positive scrolls left, as the fingers move right
+                self.wheel(app, (x, y), e.dx / WHEEL_LINE_PX, Modifiers { shift: true, ..modifiers }, touch);
+            }
         }
     }
 
@@ -1427,15 +1506,17 @@ impl Window {
         }
     }
 
-    /// Scroll the innermost scroll container along `path` that can move.
-    fn scroll_by(&mut self, path: &[Key], dy: f32, horizontal: bool) {
+    /// Scroll the innermost scroll container along `path` that can move. A wheel scrolls a
+    /// container with no vertical range sideways; a touch pan (`exact_axis`) keeps to its axis,
+    /// the fingers having said which way they went.
+    fn scroll_by(&mut self, path: &[Key], dy: f32, horizontal: bool, exact_axis: bool) {
         let Some(f) = &self.frame else { return };
         for key in path.iter().rev() {
             let Some(&i) = f.by_key().get(key) else { continue };
             let n = &f.nodes[i];
             let (rx, ry) = n.scroll_range;
             let (sx, sy) = n.scroll_pos;
-            let (nx, ny) = if horizontal || ry <= 0.0 {
+            let (nx, ny) = if horizontal || (ry <= 0.0 && !exact_axis) {
                 ((sx + dy).clamp(0.0, rx), sy)
             } else {
                 (sx, (sy + dy).clamp(0.0, ry))

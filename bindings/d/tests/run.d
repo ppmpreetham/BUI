@@ -114,6 +114,15 @@ private void testRenderAndInput() {
     context.release(x, y, 0);
     check(clicks == 1, "click callback");
 
+    context.touch(1, BK_TOUCH_DOWN, x, y);
+    context.touch(1, BK_TOUCH_UP, x, y);
+    check(clicks == 2, "a tap clicks");
+    context.touch(1, BK_TOUCH_DOWN, x, y);
+    context.touch(2, BK_TOUCH_DOWN, x + 30, y);
+    context.touch(1, BK_TOUCH_UP, x, y);
+    context.touch(2, BK_TOUCH_UP, x + 30, y);
+    check(clicks == 2, "a second finger cancels the tap");
+
     auto hit = context.hitAt(x, y);
     bool inside = false;
     for (auto node = hit; node !is null; node = node.parent()) {
@@ -340,6 +349,27 @@ private void testCustom() {
     context.press(rect[0] + rect[2] / 2, rect[1] + rect[3] / 2, 0);
     context.release(rect[0] + rect[2] / 2, rect[1] + rect[3] / 2, 0);
     check(events >= 1, "custom event callback");
+
+    float magnified = 0, turned = 0;
+    int touches;
+    auto gestures = setCustom(node, CustomHandlers(
+        (Node, CustomEvent e) {
+            magnified += e.type == BK_CUSTOM_MAGNIFY ? e.magnify : 0;
+            turned += e.type == BK_CUSTOM_ROTATE ? e.rotate : 0;
+            touches += e.type == BK_CUSTOM_TOUCH && e.touchId == 7;
+            return 1;
+        },
+        null, null, (Node) {}, 80, 40));
+    const cx = rect[0] + rect[2] / 2, cy = rect[1] + rect[3] / 2;
+    check(context.magnify(cx, cy, 0.5f), "magnify used");
+    check(context.rotate(cx, cy, -10.0f), "rotate used");
+    check(magnified == 0.5f && turned == -10.0f, "gesture values");
+    node.setTouch(true);
+    context.touch(7, BK_TOUCH_DOWN, cx, cy);
+    context.touch(7, BK_TOUCH_MOVE, cx + 3, cy);
+    context.touch(7, BK_TOUCH_UP, cx + 3, cy);
+    check(touches == 3, "raw touches");
+    check(gestures.pendingError() is null, "no gesture callback exception");
 
     raster.free();
     context.free();

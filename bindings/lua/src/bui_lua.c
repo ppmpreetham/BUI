@@ -552,6 +552,7 @@ BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   lua_pushinteger(L, BK_EV_WHEEL); lua_setfield(L, -2, "EV_WHEEL");    lua_pushinteger(L, BK_EV_SUBMIT); lua_setfield(L, -2, "EV_SUBMIT");
   lua_pushinteger(L, BK_EV_VIEW); lua_setfield(L, -2, "EV_VIEW");     lua_pushinteger(L, BK_EV_SCROLL); lua_setfield(L, -2, "EV_SCROLL");
   lua_pushinteger(L, BK_EV_CONFIGURE); lua_setfield(L, -2, "EV_CONFIGURE");lua_pushinteger(L, BK_EV_KEYRELEASE); lua_setfield(L, -2, "EV_KEYRELEASE");
+  lua_pushinteger(L, BK_EV_GESTURE); lua_setfield(L, -2, "EV_GESTURE");
 
   /* Cursor constants */
   lua_pushinteger(L, BK_CURSOR_DEFAULT); lua_setfield(L, -2, "CURSOR_DEFAULT");  lua_pushinteger(L, BK_CURSOR_EW); lua_setfield(L, -2, "CURSOR_EW");
@@ -567,6 +568,11 @@ BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   lua_pushinteger(L, BK_SHIFT); lua_setfield(L, -2, "MOD_SHIFT");  lua_pushinteger(L, BK_CTRL); lua_setfield(L, -2, "MOD_CTRL");
   lua_pushinteger(L, BK_ALT); lua_setfield(L, -2, "MOD_ALT");     lua_pushinteger(L, BK_BUTTON1); lua_setfield(L, -2, "MOD_BUTTON1");
   lua_pushinteger(L, BK_BUTTON2); lua_setfield(L, -2, "MOD_BUTTON2"); lua_pushinteger(L, BK_BUTTON3); lua_setfield(L, -2, "MOD_BUTTON3");
+  lua_pushinteger(L, BK_FROM_TOUCH); lua_setfield(L, -2, "MOD_FROM_TOUCH");
+
+  /* Touch phases (ctx:touch) */
+  lua_pushinteger(L, BK_TOUCH_DOWN); lua_setfield(L, -2, "TOUCH_DOWN");  lua_pushinteger(L, BK_TOUCH_MOVE); lua_setfield(L, -2, "TOUCH_MOVE");
+  lua_pushinteger(L, BK_TOUCH_UP); lua_setfield(L, -2, "TOUCH_UP");      lua_pushinteger(L, BK_TOUCH_CANCEL); lua_setfield(L, -2, "TOUCH_CANCEL");
 
   /* Image formats */
   lua_pushinteger(L, BK_IMAGE_NONE); lua_setfield(L, -2, "IMAGE_NONE");  lua_pushinteger(L, BK_IMAGE_PNG); lua_setfield(L, -2, "IMAGE_PNG");

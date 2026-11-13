@@ -48,7 +48,8 @@ If you use [hooks](../hooks/) instead, you don't need either: writing a signal r
 | `on_mouse_up(button, f)` | `MouseUpEvent { button, position, modifiers }` | Yes |
 | `on_mouse_move` | `MouseMoveEvent { position, pressed_button, modifiers }` | Yes |
 | `on_hover` | `bool`: `true` when the pointer enters, `false` when it leaves | No |
-| `on_scroll_wheel` | `ScrollWheelEvent { position, delta, modifiers }` | Yes |
+| `on_scroll_wheel` | `ScrollWheelEvent { position, delta, modifiers, touch }` | Yes |
+| `on_gesture` | `GestureEvent { kind, position, dx, dy, magnify, degrees, modifiers, touch }` | Yes |
 | `on_key_down`, `on_key_up` | `KeyDownEvent` / `KeyUpEvent { keystroke }` | Yes, from the focused element |
 | `on_change`, `on_input` | `ChangeEvent { value, checked, number }` | Yes |
 
@@ -58,7 +59,8 @@ The details:
 - **`MouseButton`** is `Left`, `Right` or `Middle`.
 - **`Modifiers`** has `shift`, `control` and `alt`.
 - **`ClickEvent::click_count()`** tells a double-click from a single one.
-- **`ScrollWheelEvent::delta`** is in lines; positive scrolls the content up (the wheel turned away from you).
+- **`ScrollWheelEvent::delta`** is in lines; positive scrolls the content up (the wheel turned away from you). `touch` marks a two-finger pan on a touch screen: `delta * WHEEL_LINE_PX` is then the pixels the fingers moved.
+- **`GestureEvent`** is a touch pan (`dx`, `dy`), pinch (`magnify`, 0.1 = 10% larger) or turn (`degrees`, positive counter-clockwise), or a trackpad pinch or turn (`touch` false), at `position`. `cx.stop_propagation()` keeps a pan from also scrolling the page. See [Touch and gestures](../../concepts/touch/).
 - **`Keystroke`** has `key` (the key's name: `"a"`, `"Return"`, `"Left"` …), `key_char` (the typed text, if any) and `modifiers`.
 - **`ChangeEvent`** carries `value` (the text), `checked` (checkboxes and radios) and `number` (numbers, ranges, and a select's index). `on_input` and `on_change` both fire when the value changes. [The three looks](../styled-and-blender-components/#form-controls) lists what each control sends.
 

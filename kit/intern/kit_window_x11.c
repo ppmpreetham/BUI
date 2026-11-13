@@ -26,6 +26,13 @@
 #  include <X11/Xutil.h>
 #  include <X11/cursorfont.h>
 #  include <X11/keysym.h>
+/* Touch screens through XInput 2.2 when its header is there (libXi is loaded at run time too). */
+#  if defined(__has_include)
+#    if __has_include(<X11/extensions/XInput2.h>)
+#      include <X11/extensions/XInput2.h>
+#      define BK_X11_XI2
+#    endif
+#  endif
 
 #  include <errno.h>
 #  include <fcntl.h>
@@ -215,6 +222,55 @@ static void (*g_wake_cb)(void) = NULL;
 static int g_wake_pipe[2] = {-1, -1};
 static char *g_clip_text = NULL; /* what we own on CLIPBOARD */
 
+/* -- touch screens (XInput 2.2), optional -- */
+
+#  ifdef BK_X11_XI2
+static int g_xi_opcode = -1; /* the XInput extension's major opcode, -1: no touch */
+static Status (*p_XIQueryVersion)(Display *, int *, int *);
+static int (*p_XISelectEvents)(Display *, Window, XIEventMask *, int);
+static Bool (*p_XGetEventData)(Display *, XGenericEventCookie *);
+static void (*p_XFreeEventData)(Display *, XGenericEventCookie *);
+static Bool (*p_XQueryExtension)(Display *, const char *, int *, int *, int *);
+
+/* After the display opened: XInput 2.2 with touch events, or nothing changes. */
+static void xi_init(Display *dpy)
+{
+  void *xi = dlopen("libXi.so.6", RTLD_NOW | RTLD_LOCAL);
+  void *x11 = dlopen("libX11.so.6", RTLD_NOW | RTLD_LOCAL); /* x11_load's, counted again */
+  if (!xi || !x11) {
+    return;
+  }
+  *(void **)&p_XIQueryVersion = dlsym(xi, "XIQueryVersion");
+  *(void **)&p_XISelectEvents = dlsym(xi, "XISelectEvents");
+  *(void **)&p_XGetEventData = dlsym(x11, "XGetEventData");
+  *(void **)&p_XFreeEventData = dlsym(x11, "XFreeEventData");
+  *(void **)&p_XQueryExtension = dlsym(x11, "XQueryExtension");
+  int op, ev, err, major = 2, minor = 2;
+  if (p_XIQueryVersion && p_XISelectEvents && p_XGetEventData && p_XFreeEventData &&
+      p_XQueryExtension && p_XQueryExtension(dpy, "XInputExtension", &op, &ev, &err) &&
+      p_XIQueryVersion(dpy, &major, &minor) == Success && (major > 2 || minor >= 2))
+  {
+    g_xi_opcode = op;
+  }
+}
+
+/* Touches on the window come as touch events (the server then sends it no emulated pointer
+ * events for them). */
+static void xi_select(Window xid)
+{
+  if (g_xi_opcode < 0) {
+    return;
+  }
+  unsigned char bits[XIMaskLen(XI_LASTEVENT)];
+  memset(bits, 0, sizeof(bits));
+  XISetMask(bits, XI_TouchBegin);
+  XISetMask(bits, XI_TouchUpdate);
+  XISetMask(bits, XI_TouchEnd);
+  XIEventMask mask = {XIAllMasterDevices, (int)sizeof(bits), bits};
+  p_XISelectEvents(g_dpy, xid, &mask, 1);
+}
+#  endif
+
 static double now_ms(void)
 {
   struct timespec ts;
@@ -240,6 +296,9 @@ static int open_display(void)
   a_utf8 = XInternAtom(g_dpy, "UTF8_STRING", False);
   a_targets = XInternAtom(g_dpy, "TARGETS", False);
   a_bui_sel = XInternAtom(g_dpy, "BUI_SELECTION", False);
+#  ifdef BK_X11_XI2
+  xi_init(g_dpy);
+#  endif
   return 1;
 }
 
@@ -560,6 +619,29 @@ static void handle_key(BKWindow *win, XKeyEvent *ke, int press)
   BK_key(win->ctx, printable ? text : "", name, mods);
 }
 
+#  ifdef BK_X11_XI2
+static void handle_touch(XGenericEventCookie *c)
+{
+  if (c->extension != g_xi_opcode || !p_XGetEventData(g_dpy, c)) {
+    return;
+  }
+  const XIDeviceEvent *de = (const XIDeviceEvent *)c->data;
+  const int phase = c->evtype == XI_TouchBegin  ? BK_TOUCH_DOWN :
+                    c->evtype == XI_TouchUpdate ? BK_TOUCH_MOVE :
+                    c->evtype == XI_TouchEnd    ? BK_TOUCH_UP :
+                                                  -1;
+  BKWindow *win = phase >= 0 ? find_window(de->event) : NULL;
+  if (win && win->xid) {
+    if (phase == BK_TOUCH_DOWN) {
+      XSetInputFocus(g_dpy, win->xid, RevertToParent, CurrentTime); /* as Button1 */
+    }
+    BK_touch(win->ctx, de->detail, phase, (float)de->event_x, (float)de->event_y,
+             mods_of((unsigned)de->mods.effective));
+  }
+  p_XFreeEventData(g_dpy, c);
+}
+#  endif
+
 static void close_window(BKWindow *win)
 {
   if (!win->xid) {
@@ -592,6 +674,12 @@ static void handle_event(XEvent *ev)
     XSendEvent(g_dpy, rq->requestor, False, 0, (XEvent *)&sn);
     return;
   }
+#  ifdef BK_X11_XI2
+  if (ev->type == GenericEvent) { /* no window field: its own lookup */
+    handle_touch(&ev->xcookie);
+    return;
+  }
+#  endif
   BKWindow *win = find_window(ev->xany.window);
   if (!win || !win->xid) {
     return;
@@ -759,6 +847,9 @@ static bool create_xid(BKWindow *win, bool transparent)
     return false;
   }
   XSetWMProtocols(g_dpy, win->xid, &a_delete, 1);
+#  ifdef BK_X11_XI2
+  xi_select(win->xid);
+#  endif
   win->gc = XCreateGC(g_dpy, win->xid, 0, NULL);
   BK_window_set_title(win, win->title);
   BUI_raster_set_alpha(win->raster, win->depth == 32);

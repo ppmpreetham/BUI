@@ -359,3 +359,145 @@ fn canvas_image_and_video_sources() {
         assert_eq!(pixel(&img, s, s), 0x0000ff, "the image's pixel shows");
     });
 }
+
+/// Touch and trackpad gestures reach `on_gesture`; a pan nobody stops scrolls like the wheel,
+/// with `touch` set on the wheel event.
+#[test]
+fn gestures_reach_listeners_and_pans_scroll() {
+    use std::cell::RefCell;
+    thread_local! {
+        static GESTURES: RefCell<Vec<GestureEvent>> = const { RefCell::new(Vec::new()) };
+        static WHEELS: RefCell<Vec<(f32, bool)>> = const { RefCell::new(Vec::new()) };
+        static SIDEWAYS: RefCell<Vec<bool>> = const { RefCell::new(Vec::new()) };
+    }
+    struct Touchy;
+    impl Render for Touchy {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            body()
+                .m_0()
+                // on the body: every unstopped pan bubbles here, over the map or the list
+                .on_scroll_wheel(|e, _, _| WHEELS.with(|w| w.borrow_mut().push((e.delta, e.touch))))
+                .child(div().id("map").w(px(200.0)).h(px(100.0)).on_gesture(|e, _, cx| {
+                    GESTURES.with(|g| g.borrow_mut().push(e.clone()));
+                    if e.kind == GestureKind::Pan {
+                        cx.stop_propagation(); // the map pans itself: the page stays put
+                    }
+                }))
+                .child(
+                    div().id("list").h(px(100.0)).overflow_y_scroll()
+                        .on_scroll_wheel(|e, _, _| SIDEWAYS.with(|s| s.borrow_mut().push(e.modifiers.shift)))
+                        .child(div().id("row0").h(px(100.0)))
+                        .child(div().h(px(200.0))),
+                )
+        }
+    }
+    let (down, mv, up) = (TouchPhase::Down, TouchPhase::Move, TouchPhase::Up);
+    Application::headless().run(|cx| {
+        let id = open(cx, 200.0, 200.0, Touchy).id;
+        cx.draw(id);
+        // pinch on the map: 80 px apart to 120 px
+        cx.simulate_touch(id, 1, down, 60.0, 50.0);
+        cx.simulate_touch(id, 2, down, 140.0, 50.0);
+        cx.simulate_touch(id, 1, mv, 40.0, 50.0);
+        cx.simulate_touch(id, 2, mv, 160.0, 50.0);
+        // both fingers 20 px down: a pan the map stops
+        cx.simulate_touch(id, 1, mv, 40.0, 70.0);
+        cx.simulate_touch(id, 2, mv, 160.0, 70.0);
+        cx.simulate_touch(id, 1, up, 40.0, 70.0);
+        cx.simulate_touch(id, 2, up, 160.0, 70.0);
+        let got = GESTURES.with(|g| g.borrow_mut().drain(..).collect::<Vec<_>>());
+        let mag: Vec<_> = got.iter().filter(|e| e.kind == GestureKind::Magnify).collect();
+        assert_eq!(mag.len(), 1, "{got:?}");
+        assert!((mag[0].magnify - 0.5).abs() < 1e-3 && mag[0].touch, "{:?}", mag[0]);
+        assert!((mag[0].position.x.0 - 100.0).abs() < 1.0 && (mag[0].position.y.0 - 50.0).abs() < 1.0);
+        let pans: Vec<_> = got.iter().filter(|e| e.kind == GestureKind::Pan).collect();
+        assert_eq!(pans.len(), 1, "{got:?}");
+        assert!(pans[0].dx.abs() < 1e-3 && (pans[0].dy - 20.0).abs() < 1e-3, "{:?}", pans[0]);
+        assert!(got.iter().all(|e| e.kind != GestureKind::Rotate), "a pure pinch and pan do not turn");
+        assert!(WHEELS.with(|w| w.borrow().is_empty()), "a stopped pan scrolls nothing");
+
+        // a pan over the list nobody stops: the list scrolls 30 px, its wheel listener sees touch
+        let before = cx.element_bounds(id, "row0").unwrap().origin.y;
+        cx.simulate_touch(id, 1, down, 60.0, 170.0);
+        cx.simulate_touch(id, 2, down, 140.0, 170.0);
+        cx.simulate_touch(id, 1, mv, 60.0, 140.0);
+        cx.simulate_touch(id, 2, mv, 140.0, 140.0);
+        cx.simulate_touch(id, 1, up, 60.0, 140.0);
+        cx.simulate_touch(id, 2, up, 140.0, 140.0);
+        cx.draw(id);
+        let after = cx.element_bounds(id, "row0").unwrap().origin.y;
+        assert!((before - after - 30.0).abs() < 1e-3, "content follows the fingers: {before} -> {after}");
+        let wheels = WHEELS.with(|w| w.borrow_mut().drain(..).collect::<Vec<_>>());
+        assert_eq!(wheels.len(), 1, "{wheels:?}");
+        assert!(wheels[0].1 && (wheels[0].0 * WHEEL_LINE_PX + 30.0).abs() < 1e-3, "{wheels:?}");
+
+        // sideways over the list (it scrolls only vertically): it stays put, and the wheel
+        // listener sees the movement as a horizontal (Shift) touch step
+        let before = cx.element_bounds(id, "row0").unwrap().origin.y;
+        cx.simulate_touch(id, 1, down, 60.0, 150.0);
+        cx.simulate_touch(id, 2, down, 140.0, 150.0);
+        cx.simulate_touch(id, 1, mv, 20.0, 150.0);
+        cx.simulate_touch(id, 2, mv, 100.0, 150.0);
+        cx.simulate_touch(id, 1, up, 20.0, 150.0);
+        cx.simulate_touch(id, 2, up, 100.0, 150.0);
+        cx.draw(id);
+        assert_eq!(cx.element_bounds(id, "row0").unwrap().origin.y, before, "a sideways pan scrolls nothing vertically");
+        let wheels = WHEELS.with(|w| w.borrow_mut().drain(..).collect::<Vec<_>>());
+        assert_eq!(wheels.len(), 1, "{wheels:?}");
+        assert!(wheels[0].1, "{wheels:?}");
+        assert_eq!(SIDEWAYS.with(|s| s.borrow_mut().drain(..).collect::<Vec<_>>()), vec![false, true],
+                   "the list's listener saw the vertical pan, then the sideways one with shift");
+
+        // trackpad: magnify and rotate at the pointer, not from a touch screen
+        cx.simulate_magnify(id, 100.0, 50.0, -0.2);
+        cx.simulate_rotate(id, 100.0, 50.0, 15.0);
+        let got = GESTURES.with(|g| g.borrow_mut().drain(..).collect::<Vec<_>>());
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[0].kind == GestureKind::Magnify && (got[0].magnify + 0.2).abs() < 1e-6 && !got[0].touch);
+        assert!(got[1].kind == GestureKind::Rotate && got[1].degrees == 15.0 && !got[1].touch);
+    });
+}
+
+/// A vertical touch pan does not scroll a container that only scrolls sideways (the wheel does,
+/// as a convenience for mice without a horizontal wheel).
+#[test]
+fn vertical_touch_pan_keeps_a_horizontal_strip() {
+    struct Strip;
+    impl Render for Strip {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            body().m_0().child(
+                div().id("strip").w(px(200.0)).h(px(100.0)).overflow_x_scroll()
+                    .child(div().id("wide").w(px(600.0)).h(px(100.0))),
+            )
+        }
+    }
+    Application::headless().run(|cx| {
+        let id = open(cx, 200.0, 200.0, Strip).id;
+        cx.draw(id);
+        let x0 = cx.element_bounds(id, "wide").unwrap().origin.x;
+        let (down, mv, up) = (TouchPhase::Down, TouchPhase::Move, TouchPhase::Up);
+        // upwards: the direction that would scroll a container forwards
+        cx.simulate_touch(id, 1, down, 60.0, 80.0);
+        cx.simulate_touch(id, 2, down, 140.0, 80.0);
+        cx.simulate_touch(id, 1, mv, 60.0, 30.0);
+        cx.simulate_touch(id, 2, mv, 140.0, 30.0);
+        cx.simulate_touch(id, 1, up, 60.0, 30.0);
+        cx.simulate_touch(id, 2, up, 140.0, 30.0);
+        cx.draw(id);
+        assert_eq!(cx.element_bounds(id, "wide").unwrap().origin.x, x0, "a vertical pan moved the strip");
+        // a sideways pan does scroll it, following the fingers
+        cx.simulate_touch(id, 1, down, 100.0, 50.0);
+        cx.simulate_touch(id, 2, down, 160.0, 50.0);
+        cx.simulate_touch(id, 1, mv, 60.0, 50.0);
+        cx.simulate_touch(id, 2, mv, 120.0, 50.0);
+        cx.simulate_touch(id, 1, up, 60.0, 50.0);
+        cx.simulate_touch(id, 2, up, 120.0, 50.0);
+        cx.draw(id);
+        let x1 = cx.element_bounds(id, "wide").unwrap().origin.x;
+        assert!((x0 - x1 - 40.0).abs() < 1e-3, "the strip follows the fingers: {x0} -> {x1}");
+        // the mouse wheel still scrolls it sideways, as before
+        cx.simulate_scroll(id, 100.0, 50.0, -1);
+        cx.draw(id);
+        assert!(cx.element_bounds(id, "wide").unwrap().origin.x < x1, "the wheel no longer scrolls the strip");
+    });
+}

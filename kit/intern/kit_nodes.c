@@ -62,6 +62,8 @@ typedef struct NodeEdit {
   BKNode *hit;                 /* node pressed */
   int link_node, link_sock;    /* the fixed end of a dragged link */
   bool link_from_output;
+  bool link_picked;            /* the drag took a link off an input: a cancel puts it back */
+  int picked_from, picked_out, picked_to, picked_in;
   int value_node, value_sock;
   double value_start;
   BKNode *ctl_node; /* the control pressed (M_CONTROL), or the one whose menu is open */
@@ -1137,11 +1139,17 @@ static int editor_press(BKNode *e, BKEvent *ev)
       d->link_node = old.from;
       d->link_sock = old.out;
       d->link_from_output = true;
+      d->link_picked = true;
+      d->picked_from = old.from;
+      d->picked_out = old.out;
+      d->picked_to = old.to;
+      d->picked_in = old.in;
     }
     else {
       d->link_node = ni;
       d->link_sock = k;
       d->link_from_output = !input;
+      d->link_picked = false;
     }
     d->mode = M_LINK;
     bk_invalidate(e);
@@ -1362,6 +1370,9 @@ static void editor_cancel(BKNode *e)
   else if (d->mode == M_VALUE) {
     set_input_value(e->kids[d->value_node], d->value_sock, d->value_start);
   }
+  else if (d->mode == M_LINK && d->link_picked) { /* node_link_cancel: the graph is as it was */
+    add_link(e, d->picked_from, d->picked_out, d->picked_to, d->picked_in);
+  }
   d->mode = M_NONE;
   bk_invalidate(e);
 }
@@ -1378,6 +1389,25 @@ static int editor_wheel(BKNode *e, BKEvent *ev)
   }
   else { /* VIEW2D_OT_zoom_in / out about the cursor */
     zoom_at(e, ev->delta > 0 ? 1.25f : 0.8f, ev->x, ev->y);
+  }
+  bk_invalidate(e);
+  return 1;
+}
+
+/* Touch and trackpad gestures (view2d_ops.cc): MOUSEPAN moves the view with the fingers
+ * (view_pan_invoke), MOUSEZOOM zooms about them (view_zoomdrag_invoke); no rotation. */
+static int editor_gesture(BKNode *e, BKEvent *ev)
+{
+  NodeEdit *d = ed(e);
+  if (ev->gesture == BK_GESTURE_PAN) {
+    d->panx += ev->pan_x;
+    d->pany += ev->pan_y;
+  }
+  else if (ev->gesture == BK_GESTURE_MAGNIFY) {
+    zoom_at(e, 1.0f + ev->magnify, ev->x, ev->y);
+  }
+  else {
+    return 0;
   }
   bk_invalidate(e);
   return 1;
@@ -1509,6 +1539,7 @@ const BKClass bk_cls_nodeeditor = {.name = "nodeeditor",
                                    .cancel = editor_cancel,
                                    .popup_pick = editor_popup_pick,
                                    .wheel = editor_wheel,
+                                   .gesture = editor_gesture,
                                    .key = editor_key,
                                    .cursor_at = editor_cursor_at,
                                    .set_num = editor_set_num,
