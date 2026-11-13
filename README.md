@@ -1285,6 +1285,11 @@ run time, and every open window relayouts and redraws:
 | Dear ImGui              | Its Blender style follows the kit's theme (pick it before the backend starts)                               |
 | Any app, no code change | `BUI_THEME=light` (or `dark`)                                                                               |
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/ppmpreetham/BUI/main/docs/images/themes.gif" width="640" alt="The same dashboard in seven themes, one cut after another: Blender Dark, Blender Light, Catppuccin Mocha, Nord, Dracula, Gruvbox and Tokyo Night">
+  <br><sub>One dashboard, seven themes: Blender's Dark and Light, then five theme files</sub>
+</p>
+
 **Your own themes.** A theme file is JSON in the shape of gpui-kit's, with Blender's names for the colors
 (`user_interface.wcol_regular.inner`, or in plain English `button.background`). It starts from Dark or Light and
 lists only what it changes: colors, a few short palette names (`background`, `primary.background`) that fill in

@@ -423,6 +423,25 @@ A misspelled name fails the build. The same icons work inline:
 </Compare>
 ```
 
+### LoopVideo
+
+```mdx
+<LoopVideo
+  src="videos/themes.mp4"
+  poster="images/themes-poster.png"
+  width={960}
+  height={500}
+  alt="The same dashboard in seven themes, one cut after another"
+  caption="One dashboard, seven themes."
+/>
+```
+
+A short silent clip that plays by itself and loops, on the same hatched stage as a
+`<Figure>`. Use it for a few seconds and a few hundred KB (this one is 135 KB); anything longer
+or bigger is a `<LazyVideo>`, which downloads nothing until the reader presses play. Readers who
+ask their system for less motion see the `poster` instead. Files go in `public/videos` and
+`public/images`.
+
 ### Kbd, Badge, Hatch, PageStatusList
 
 ```mdx

@@ -1,0 +1,63 @@
+---
+/**
+ * A short silent clip that plays by itself, over and over, on the hatched stage of <Figure>.
+ *
+ *   <LoopVideo src="videos/themes.mp4" poster="images/themes-poster.png" alt="…" caption="…" />
+ *
+ * For clips of a few seconds and a few hundred KB (a theme showcase, a small animation). Longer or
+ * larger video belongs in <LazyVideo>, which downloads nothing until the reader presses play. The
+ * clip is muted, has no controls and stays still for readers who ask for less motion: they see the poster.
+ */
+import { href } from "../../lib/docs";
+
+interface Props {
+  src: string;
+  poster: string;
+  alt: string;
+  caption?: string;
+  /** Natural size in CSS pixels, so the page doesn't jump while the clip loads. */
+  width?: number;
+  height?: number;
+}
+
+const { src, poster, alt, caption, width, height } = Astro.props;
+---
+
+<figure class="figure not-prose border border-border" data-reveal>
+  <div class="figure-stage hatch flex justify-center px-4 py-6 sm:px-8 sm:py-9">
+    <video
+      class="loop-video img-outline h-auto max-w-full"
+      src={href(src)}
+      poster={href(poster)}
+      width={width}
+      height={height}
+      aria-label={alt}
+      autoplay
+      loop
+      muted
+      playsinline
+      preload="auto"
+    ></video>
+  </div>
+  {caption && <figcaption class="border-t border-border bg-surface px-4 py-2.5 text-[13px] leading-5 text-muted [&_code]:font-mono [&_code]:text-[0.9em]" set:html={caption} />}
+</figure>
+
+<style>
+  .figure-stage {
+    background-color: var(--stage);
+  }
+  .loop-video {
+    display: block;
+    box-shadow: var(--shadow);
+  }
+</style>
+
+<script>
+  // less motion: keep the poster, don't play
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    document.querySelectorAll<HTMLVideoElement>("video.loop-video").forEach((v) => {
+      v.removeAttribute("autoplay");
+      v.pause();
+    });
+  }
+</script>
