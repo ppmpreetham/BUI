@@ -582,9 +582,15 @@ A bigger program in the same syntax, a material editor (not the output of the sn
 <br><sub>Qt syntax (<code>examples/site/qt_material.py</code>)</sub>
 </p>
 
-Qt syntax is **partial** (about 24% of Qt's method names on the main widget
-classes); anything missing raises `AttributeError`. Guide:
-[docs/qt.md](docs/qt.md).
+Qt syntax is **partial**: 57% of Qt's public methods, signals and slots on
+the 36 core widget classes, measured from Qt's headers by
+`tools/qt_coverage.py` ([per class](docs/qt-coverage.md)). It has containers
+(docks, toolbars, splitters, Blender-panel tool boxes), actions shared by
+menus, tool buttons and shortcuts, Qt's full layout API, model/view on
+Blender's tree list, validators, date and time editors and a calendar, real
+`QDialogButtonBox` / `QMessageBox` / `QInputDialog`, `QSettings` and shortcuts.
+Missing names raise `AttributeError`; a few setters are accepted and ignored
+(listed in the guide). Guide: [docs/qt.md](docs/qt.md).
 
 </details>
 
@@ -2113,7 +2119,7 @@ ship. The tables below have the details.
   ported from Blender's UI sources, with edits (each marked `BUI:`), and the rest
   of Blender (its data system, window manager and operators) isn't included.
   There is no automated sync with Blender's releases.
-- **Partial areas:** Qt syntax (about 24%), CSS (261 of 745 properties render),
+- **Partial areas:** Qt syntax (57% of the core classes' methods), CSS (261 of 745 properties render),
   video has no audio, and image formats such as AVIF, EXR, TIFF, JPEG XL and
   HEIC aren't supported.
 - **License.** GPL: a program that includes BUI is distributed under the GPL too

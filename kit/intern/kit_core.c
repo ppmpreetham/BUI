@@ -789,6 +789,7 @@ static const struct {
     {"bare", NF_BARE, false},
     {"gestures", NF_GESTURES, false},
     {"active_default", NF_ACTIVE_DEFAULT, false},
+    {"select", NF_SELECT, false},
 };
 
 static int g_view_watchers; /* > 0 once any node asked for view events */
