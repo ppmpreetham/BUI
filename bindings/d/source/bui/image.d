@@ -8,7 +8,7 @@
  */
 module bui.image;
 
-import core.atomic : atomicLoad, atomicStore;
+import core.atomic : atomicExchange, atomicStore;
 
 import bui.errors : BuiException;
 import bui.internal.util : cslice, cstr;
@@ -279,8 +279,7 @@ private extern(C) void imageNotifyCallback(void*) {
 /// first, on this thread.
 int pollImages() {
     const n = BK_image_poll();
-    if (atomicLoad(g_imageReady)) {
-        atomicStore(g_imageReady, false);
+    if (atomicExchange(&g_imageReady, false)) {
         if (g_imageNotify !is null) {
             g_imageNotify();
         }

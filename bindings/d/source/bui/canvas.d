@@ -8,11 +8,10 @@
  */
 module bui.canvas;
 
-import bui.errors : BuiException;
 import bui.image : Image;
 import bui.internal.util : cstr;
 import bui.kit;
-import bui.node : Node;
+import bui.node : Node, requireHandle;
 import bui.video : Video;
 
 /// One canvas item; `type` is one of the `BK_ITEM_*` constants.
@@ -57,13 +56,7 @@ struct CanvasItem {
                            float y1,
                            const float[4] fill = [0, 0, 0, 0],
                            const float[4] outline = [0, 0, 0, 0]) {
-        CanvasItem item;
-        item.id = id;
-        item.type = BK_ITEM_RECT;
-        item.coords = [x0, y0, x1, y1];
-        item.fill[] = fill[];
-        item.outline[] = outline[];
-        return item;
+        return boxItem(id, BK_ITEM_RECT, x0, y0, x1, y1, fill, outline);
     }
 
     /// A filled/outlined oval touching the given box.
@@ -74,9 +67,20 @@ struct CanvasItem {
                            float y1,
                            const float[4] fill = [0, 0, 0, 0],
                            const float[4] outline = [0, 0, 0, 0]) {
+        return boxItem(id, BK_ITEM_OVAL, x0, y0, x1, y1, fill, outline);
+    }
+
+    private static CanvasItem boxItem(int id,
+                                      int type,
+                                      float x0,
+                                      float y0,
+                                      float x1,
+                                      float y1,
+                                      const float[4] fill,
+                                      const float[4] outline) {
         CanvasItem item;
         item.id = id;
-        item.type = BK_ITEM_OVAL;
+        item.type = type;
         item.coords = [x0, y0, x1, y1];
         item.fill[] = fill[];
         item.outline[] = outline[];
@@ -148,48 +152,42 @@ struct CanvasItem {
 
 /// Insert or replace item `item.id`.
 void setItem(Node canvas, CanvasItem item) {
-    auto node = need(canvas, "setItem");
+    auto node = requireHandle(canvas, "Canvas.setItem", "no canvas node");
     auto c = item.toC(canvas);
     BK_canvas_set_item(node, &c);
 }
 
 /// Append an item, rebuilding a whole display list.
 void addItem(Node canvas, CanvasItem item) {
-    auto node = need(canvas, "addItem");
+    auto node = requireHandle(canvas, "Canvas.addItem", "no canvas node");
     auto c = item.toC(canvas);
     BK_canvas_add_item(node, &c);
 }
 
 /// Insert at `index`, or append when `index` is past the end.
 void putItem(Node canvas, int index, CanvasItem item) {
-    auto node = need(canvas, "putItem");
+    auto node = requireHandle(canvas, "Canvas.putItem", "no canvas node");
     auto c = item.toC(canvas);
     BK_canvas_put_item(node, index, &c);
 }
 
 /// Drop items after the first `count`.
 void truncate(Node canvas, int count) {
-    BK_canvas_truncate(need(canvas, "truncate"), count);
+    BK_canvas_truncate(requireHandle(canvas, "Canvas.truncate", "no canvas node"), count);
 }
 
 /// Delete item by id (a negative id deletes every item).
 void deleteItem(Node canvas, int id) {
-    BK_canvas_delete(need(canvas, "deleteItem"), id);
+    BK_canvas_delete(requireHandle(canvas, "Canvas.deleteItem", "no canvas node"), id);
 }
 
 /// Raise or lower an item.
 void raiseItem(Node canvas, int id, bool toTop = true) {
-    BK_canvas_raise(need(canvas, "raiseItem"), id, toTop ? 1 : 0);
+    BK_canvas_raise(requireHandle(canvas, "Canvas.raiseItem", "no canvas node"), id,
+                    toTop ? 1 : 0);
 }
 
 /// Number of items.
 int itemCount(Node canvas) {
-    return BK_canvas_count(need(canvas, "itemCount"));
-}
-
-private BKNode* need(Node canvas, string operation) {
-    if (canvas is null || canvas.handle is null) {
-        throw new BuiException("Canvas." ~ operation, "no canvas node");
-    }
-    return canvas.handle;
+    return BK_canvas_count(requireHandle(canvas, "Canvas.itemCount", "no canvas node"));
 }

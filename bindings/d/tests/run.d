@@ -35,6 +35,7 @@ void main() {
     testHtml();
     testRsx();
     testReviewFixes();
+    testReviewRegressions();
     testCapi();
     writeln("bindings/d: all tests passed");
 }
@@ -561,6 +562,137 @@ private void testReviewFixes() {
     check(first.num("value") == 0 && second.num("value") == 1, "radio group exclusive");
 }
 
+private void testReviewRegressions() {
+    // `onKey` binds the key event only; the release must not repeat it.
+    int keys;
+    auto keyPage = body_(div("key").id("key").onKey((string key) {
+        ++keys;
+    }));
+    auto keyDocument = new Document(keyPage);
+    auto keyed = keyDocument.find("#key").node;
+    keyed.dispatch(BK_EV_KEY, cast(void*) "a".ptr, 0, 0);
+    keyed.dispatch(BK_EV_KEYRELEASE, cast(void*) "a".ptr, 0, 0);
+    check(keys == 1, "onKey fires once per key event");
+
+    // A rowspan reserves its column in the following row.
+    auto tablePage = body_(table(
+        tr(td("a").attr("rowspan", "2").id("span-a"), td("b")),
+        tr(td("c").id("span-c"))
+    ));
+    auto tableDocument = new Document(tablePage);
+    check(tableDocument.find("#span-c").outerNode().geom("column") == 1,
+          "rowspan reserves a column");
+
+    // A column flex container blockifies its inline children.
+    auto flexPage = body_(div(span("a"), span("b")).id("flex")
+        .style("display: flex; flex-direction: column"));
+    auto flexDocument = new Document(flexPage);
+    check(flexDocument.find("#flex").outerNode().childCount() == 2,
+          "column flex keeps its items separate");
+
+    // A hidden row group hides its rows.
+    auto hiddenPage = body_(table(tbody(tr(td("gone")))
+        .attr("hidden", "").id("hidden-body")));
+    auto hiddenDocument = new Document(hiddenPage);
+    check(hiddenDocument.find("#hidden-body").node is null,
+          "hidden tbody is not realised");
+    check(hiddenDocument.find("td").node is null,
+          "hidden tbody row is not realised");
+
+    // Tree operations reject a node that is not a tree.
+    auto label = new Node("label");
+    check(throwsBui({ setRoots(label, []); }), "tree type guard");
+    label.free();
+
+    // The texture accessor returns the texture ID, not a success flag.
+    static assert(is(typeof(Video.init.texture(0)) == int),
+                  "Video.texture returns a texture id");
+
+    // A document that takes over an existing element tree rebinds the state
+    // callback instead of keeping the old document's hook.
+    auto rebindPage = body_(div("x").id("box"));
+    auto firstDocument = new Document(rebindPage, "#box { width: 50vw; }");
+    auto secondDocument = new Document(rebindPage, "#box { width: 50vw; }");
+    secondDocument.setViewport(200, 100);
+    check(secondDocument.find("#box").outerNode().geom("reqwidth") == 100,
+          "second document viewport applied");
+    secondDocument.find("#box").node.dispatch(BK_EV_ENTER, null, 0, 0);
+    check(secondDocument.find("#box").outerNode().geom("reqwidth") == 100,
+          "state callback follows the current document");
+    assert(firstDocument !is null);
+
+    // Freeing a root closes the popups it owns before the C node disappears.
+    auto popupRoot = new Node("frame");
+    auto popupContext = new Context(popupRoot);
+    popupContext.openMenu(popupRoot, [new MenuItem("One", {})]);
+    check(popupContext.popupCount() == 1, "root popup opened");
+    popupRoot.free();
+    check(popupContext.popupCount() == 0, "freeing the root closes its popups");
+    popupContext.free();
+
+    // A disposed document releases its kit root and the element tree can be
+    // mounted again.
+    auto disposablePage = body_(div("x").id("box"));
+    auto disposable = new Document(disposablePage);
+    auto disposableRoot = disposable.node();
+    check(disposableRoot !is null, "document root");
+    disposable.dispose();
+    check(disposable.node() is null, "document dispose drops the kit root");
+    check(disposableRoot.handle is null, "disposed root node is freed");
+    auto remounted = new Document(disposablePage, "#box { color: #00ff00; }");
+    check(remounted.find("#box").node !is null, "element tree remounts after dispose");
+
+    // `clear` detaches children so their wrappers can be released.
+    auto detachRoot = new TreeItem("detach");
+    auto detachChild = new TreeItem("child");
+    detachRoot.add(detachChild);
+    check(detachChild.parent() is detachRoot, "tree parent before clear");
+    detachRoot.clear();
+    check(detachChild.parent() is null, "tree clear detaches children");
+    detachChild.free();
+    check(detachChild.handle is null, "detached child frees");
+    detachRoot.free();
+    check(detachRoot.handle is null, "detached root frees");
+
+    // Every wrapper surface rejects an empty node the same way.
+    Node empty;
+    check(throwsBui({ insertText(empty, 0, "x"); }), "textarea handle guard");
+    check(throwsBui({ addItem(empty, CanvasItem.rect(1, 0, 0, 1, 1)); }),
+          "canvas handle guard");
+    check(throwsBui({ requestFrame(empty); }), "custom frame guard");
+    check(throwsBui({ setCursor(empty, 0); }), "custom cursor guard");
+    check(throwsBui({ hasFocus(empty); }), "custom focus guard");
+
+    // Rectangles and ovals share their construction path.
+    auto rectItem = CanvasItem.rect(7, 1, 2, 3, 4,
+                                    [0.1f, 0.2f, 0.3f, 0.4f],
+                                    [0.5f, 0.6f, 0.7f, 0.8f]);
+    check(rectItem.id == 7 && rectItem.type == BK_ITEM_RECT, "canvas rect type");
+    check(rectItem.coords.length == 4 && rectItem.coords[0] == 1 &&
+          rectItem.coords[3] == 4, "canvas rect coords");
+    check(rectItem.fill[1] == 0.2f && rectItem.outline[3] == 0.8f,
+          "canvas rect colors");
+    auto ovalItem = CanvasItem.oval(8, 5, 6, 7, 8);
+    check(ovalItem.id == 8 && ovalItem.type == BK_ITEM_OVAL, "canvas oval type");
+    check(ovalItem.coords.length == 4 && ovalItem.coords[0] == 5 &&
+          ovalItem.coords[3] == 8, "canvas oval coords");
+    check(ovalItem.fill[3] == 0 && ovalItem.outline[3] == 0, "canvas oval defaults");
+
+    // The color parser shares the CSS token helpers.
+    Color parsed;
+    check(tryParseColor("  ReD ", parsed) && parsed.r == 1 && parsed.g == 0 &&
+          parsed.a == 1, "color name trim and case");
+    check(tryParseColor("#0f08", parsed) && parsed.r == 0 && parsed.g == 1 &&
+          parsed.b == 0 && parsed.a > 0.53 && parsed.a < 0.54,
+          "color short hex with alpha");
+    check(tryParseColor("rgb(100% 0% 50% / 50%)", parsed) &&
+          parsed.r == 1 && parsed.b > 0.49 && parsed.b < 0.51 &&
+          parsed.a > 0.49 && parsed.a < 0.51, "color rgb percentages");
+    check(tryParseColor(" hsl(120, 100%, 25%) ", parsed) && parsed.g > 0.49,
+          "color hsl whitespace");
+    check(!tryParseColor("currentcolor", parsed), "color keyword rejected");
+}
+
 private void testRsx() {
     int count = 3;
     string label = "dynamic";
@@ -628,6 +760,13 @@ private void testRsx() {
     check(dynamic.attrValue("class") == "one two", "rsx dynamic class");
     check(dynamic.children()[0].hasAttr("hidden"), "rsx dynamic flag on");
     check(!dynamic.children()[1].hasAttr("disabled"), "rsx dynamic flag off");
+
+    auto raw = mixin(rsx!`
+        <div id="raw">{r"C:\tmp\"}</div>
+    `);
+    auto rawDocument = new Document(raw);
+    check(rawDocument.find("#raw").node.str("text") == r"C:\tmp\",
+          "rsx raw string expression");
 }
 
 private void testCapi() {

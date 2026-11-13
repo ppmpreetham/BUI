@@ -214,7 +214,9 @@ stringify or toggle through `flagAttr`.
 `Element.setState("hover", true)` or in the kit `ENTER`/`LEAVE`/`PRESS`/
 `RELEASE` handlers; layout structure is fixed when the document is built. A
 changed text leaf updates in place with `Element.setText`; a different document
-structure needs a new `Document`.
+structure needs a new `Document`. `Document.dispose()` releases the realised kit
+tree and detaches its state hooks, after which the element tree can be mounted
+again.
 
 The subset is deliberately smaller than the Rust engine's full taffy layout: no
 flex wrapping, no media queries, no pseudo-elements, no animations and no
@@ -312,6 +314,9 @@ player.play();
 auto videoNode = new Node("video");
 videoNode.setVideo(player);
 ```
+
+`Video.texture(tex, maxW, maxH)` copies the current frame into `tex` and returns
+its texture ID (0 before the first frame).
 
 `Image` decodes PNG, JPEG, WebP, GIF, BMP, TGA, QOI, HDR, PNM and SVG through
 the kit's shared decoders. `Image.fromRgba`, `fromArgb`, `decode`, `probe`,

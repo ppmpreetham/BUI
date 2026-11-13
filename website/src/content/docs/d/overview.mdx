@@ -136,7 +136,7 @@ auto document = new Document(page);
 auto context = new Context(document.node());
 ```
 
-Tag constructors work without the mixin: `body_(div("text").class_("card"))`. `Document.find` queries the tree by CSS selector, `Element.setText` updates a realised text leaf, and `Document.restyle` re-runs the cascade after a state change. The supported CSS subset, tag naming rules and limits have [their own page](../html-css-rsx/).
+Tag constructors work without the mixin: `body_(div("text").class_("card"))`. `Document.find` queries the tree by CSS selector, `Element.setText` updates a realised text leaf, and `Document.restyle` re-runs the cascade after a state change. `Document.dispose()` releases the realised kit tree and its state hooks so the element tree can be mounted again. The supported CSS subset, tag naming rules and limits have [their own page](../html-css-rsx/).
 
 ## Events
 

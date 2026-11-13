@@ -236,5 +236,8 @@ private BKNode* handle(Node tree, string operation) {
     if (tree is null || tree.handle is null) {
         throw new BuiException("Tree." ~ operation, "no tree node");
     }
+    if (cslice(BK_node_type(tree.handle)) != "tree") {
+        throw new BuiException("Tree." ~ operation, "not a tree node");
+    }
     return tree.handle;
 }

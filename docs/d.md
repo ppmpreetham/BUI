@@ -193,7 +193,8 @@ custom elements. `class={names}` and `hidden={flag}` toggle through
 `flagAttr`. `Document.restyle` re-runs the cascade for visual properties after
 a state change; `Element.setText` updates a realised text leaf in place. Layout
 structure is fixed when the document is built, so a different structure needs a
-new `Document`.
+new `Document`. `Document.dispose()` releases the realised kit tree and detaches
+the document's state hooks; the element tree can then be mounted again.
 
 The CSS subset is smaller than the Rust engine's taffy layout: no flex
 wrapping, media queries, pseudo-elements, animations or Tailwind, and text does
@@ -348,6 +349,9 @@ player.play();
 auto videoNode = new Node("video");
 videoNode.setVideo(player);
 ```
+
+`Video.texture(tex, maxW, maxH)` copies the current frame into `tex` and returns
+its texture ID (0 before the first frame).
 
 `Image` uses the kit's shared decoders: PNG, JPEG, WebP, GIF, BMP, TGA, QOI,
 HDR, PNM and SVG. `Image.fromRgba`, `fromArgb`, `decode`, `probe`, `toRgba`

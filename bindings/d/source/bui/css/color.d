@@ -8,6 +8,8 @@
  */
 module bui.css.color;
 
+import bui.css.tokens : asciiLower, isSpace, trim;
+
 /// A color with straight alpha, channels in 0..1.
 struct Color {
     float r;
@@ -136,30 +138,6 @@ private immutable NamedColor[] namedColors = [
     NamedColor("white", 0xffffff), NamedColor("whitesmoke", 0xf5f5f5),
     NamedColor("yellow", 0xffff00), NamedColor("yellowgreen", 0x9acd32),
 ];
-
-private bool isSpace(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-}
-
-private string trimText(string text) {
-    size_t first = 0;
-    size_t last = text.length;
-    while (first < last && isSpace(text[first])) {
-        ++first;
-    }
-    while (last > first && isSpace(text[last - 1])) {
-        --last;
-    }
-    return text[first .. last];
-}
-
-private string lowerText(string text) {
-    char[] out_ = new char[text.length];
-    foreach (i, c; text) {
-        out_[i] = c >= 'A' && c <= 'Z' ? cast(char) (c + ('a' - 'A')) : c;
-    }
-    return cast(string) out_;
-}
 
 private int hexDigit(char c) {
     if (c >= '0' && c <= '9') {
@@ -360,11 +338,11 @@ private bool parseColorFunction(string name, string inner, out Color color) {
 /// Parse a CSS color. Returns false for invalid colors and for `currentcolor`
 /// or a CSS-wide keyword (the cascade resolves those).
 bool tryParseColor(string text, out Color color) {
-    const string s = trimText(text);
+    const string s = trim(text);
     if (s.length == 0) {
         return false;
     }
-    const string lower = lowerText(s);
+    const string lower = asciiLower(s);
     if (lower == "transparent") {
         color = Color.transparent();
         return true;
@@ -381,7 +359,7 @@ bool tryParseColor(string text, out Color color) {
         ++open;
     }
     if (open < s.length && s[$ - 1] == ')') {
-        return parseColorFunction(lowerText(trimText(s[0 .. open])),
+        return parseColorFunction(asciiLower(trim(s[0 .. open])),
                                   s[open + 1 .. $ - 1], color);
     }
     foreach (named; namedColors) {
