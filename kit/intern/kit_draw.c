@@ -557,7 +557,9 @@ static void shape_preset_trias_from_rect_menu(WidgetTrias *tria, const BKRect *r
   const float centy = rect->ymin + 0.5f * height;
   const float size = 0.4f * height;
   if (width > height * 1.1f) {
-    centx = rect->xmax - 0.32f * height; /* wider buttons: align tighter right */
+    /* wider buttons: align right. Blender's 0.32 suits its two small arrows; the chevron drawn here is
+     * wider, and 0.32 left it 3 px from the edge. 0.5 gives it the padding the label has on the left. */
+    centx = rect->xmax - 0.5f * height;
   }
   /* Blender 4.x draws the menu indicator as a down chevron at this spot. */
   tria->center[0] = centx;
@@ -878,8 +880,8 @@ void bk_widget_menubut(BKWCol *wcol, BKRect *rect, int state, int corners)
   }
   wtb.draw_emboss = wtb.draw_emboss && !(state & ST_ALIGN_DOWN);
   widgetbase_draw(&wtb, wcol);
-  /* text space, arrows are about 0.6 height of button */
-  rect->xmax -= (6 * bk_rh(rect)) / 10;
+  /* text space, the arrow takes about 0.7 height of the button */
+  rect->xmax -= (7 * bk_rh(rect)) / 10; /* the chevron sits 0.5 of the height in, see above */
 }
 
 void bk_widget_optionbut(BKWCol *wcol, BKRect *rect, int state)

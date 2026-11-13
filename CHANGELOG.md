@@ -6,6 +6,10 @@ All notable changes to **blenderui** (BUI). The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **Menu buttons (dropdowns):** the chevron sat 3 px from the right edge, with no padding. It now sits half the button's
+  height in, as far from the edge as the label is from the left one, and the label stops before it.
+
 ## [0.5.1] - 2026-11-13
 
 ### Added
