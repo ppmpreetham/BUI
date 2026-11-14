@@ -4,10 +4,9 @@
  */
 module bui.textarea;
 
-import bui.errors : BuiException;
 import bui.internal.util : cstr;
 import bui.kit;
-import bui.node : Node;
+import bui.node : Node, requireHandle;
 
 /// A styled range: foreground and/or background color.
 struct TextSpan {
@@ -41,34 +40,39 @@ struct TextSpan {
 
 /// Insert `text` at byte offset `offset`.
 void insertText(Node textarea, int offset, string text) {
-    BK_textarea_insert(need(textarea, "insertText"), offset, cstr(text));
+    BK_textarea_insert(requireHandle(textarea, "Textarea.insertText", "no textarea node"),
+                       offset, cstr(text));
 }
 
 /// Delete bytes `start` up to (not including) `end`.
 void deleteText(Node textarea, int start, int end) {
-    BK_textarea_delete(need(textarea, "deleteText"), start, end);
+    BK_textarea_delete(requireHandle(textarea, "Textarea.deleteText", "no textarea node"),
+                       start, end);
 }
 
 /// The caret byte offset.
 int caret(Node textarea) {
-    return BK_textarea_caret(need(textarea, "caret"));
+    return BK_textarea_caret(requireHandle(textarea, "Textarea.caret", "no textarea node"));
 }
 
 /// Move the caret to byte offset `offset`.
 void setCaret(Node textarea, int offset) {
-    BK_textarea_set_caret(need(textarea, "setCaret"), offset);
+    BK_textarea_set_caret(requireHandle(textarea, "Textarea.setCaret", "no textarea node"),
+                          offset);
 }
 
 /// Selection start and end byte offsets.
 int[2] selection(Node textarea) {
     int start, end;
-    BK_textarea_selection(need(textarea, "selection"), &start, &end);
+    BK_textarea_selection(requireHandle(textarea, "Textarea.selection", "no textarea node"),
+                          &start, &end);
     return [start, end];
 }
 
 /// Select bytes `start` up to `end`.
 void setSelection(Node textarea, int start, int end) {
-    BK_textarea_set_selection(need(textarea, "setSelection"), start, end);
+    BK_textarea_set_selection(requireHandle(textarea, "Textarea.setSelection",
+                                            "no textarea node"), start, end);
 }
 
 /// Replace the styled ranges.
@@ -82,22 +86,17 @@ void setSpans(Node textarea, TextSpan[] spans) {
         raw[i].has_fg = span.hasFg ? 1 : 0;
         raw[i].has_bg = span.hasBg ? 1 : 0;
     }
-    BK_textarea_set_spans(need(textarea, "setSpans"), raw.ptr, cast(int) raw.length);
+    BK_textarea_set_spans(requireHandle(textarea, "Textarea.setSpans", "no textarea node"),
+                          raw.ptr, cast(int) raw.length);
 }
 
 /// Byte offset under window pixel `x`, `y`.
 int indexAt(Node textarea, int x, int y) {
-    return BK_textarea_index_at(need(textarea, "indexAt"), x, y);
+    return BK_textarea_index_at(requireHandle(textarea, "Textarea.indexAt", "no textarea node"),
+                                x, y);
 }
 
 /// Scroll so byte offset `offset` is visible.
 void see(Node textarea, int offset) {
-    BK_textarea_see(need(textarea, "see"), offset);
-}
-
-private BKNode* need(Node textarea, string operation) {
-    if (textarea is null || textarea.handle is null) {
-        throw new BuiException("Textarea." ~ operation, "no textarea node");
-    }
-    return textarea.handle;
+    BK_textarea_see(requireHandle(textarea, "Textarea.see", "no textarea node"), offset);
 }

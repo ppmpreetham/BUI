@@ -5,7 +5,7 @@ description: A DUB package with a one-to-one raw C API, idiomatic D wrappers and
 section: D
 order: 10
 languages: ["d"]
-sources: ["bindings/d/README.md", "bindings/d/dub.json", "bindings/d/source/bui/node.d", "bindings/d/source/bui/context.d", "bindings/d/source/bui/window.d", "bindings/d/source/bui/menu.d", "bindings/d/source/bui/raster.d", "bindings/d/source/bui/theme.d", "bindings/d/source/bui/html/realize.d", "bindings/d/source/bui/rsx.d", "bindings/d/tests/run.d", "docs/d.md"]
+sources: ["bindings/d/README.md", "bindings/d/dub.json", "bindings/d/source/bui/node.d", "bindings/d/source/bui/context.d", "bindings/d/source/bui/window.d", "bindings/d/source/bui/menu.d", "bindings/d/source/bui/raster.d", "bindings/d/source/bui/theme.d", "bindings/d/source/bui/html/realize.d", "bindings/d/source/bui/rsx.d", "bindings/d/tests/run.d"]
 ---
 
 **The `bindings/d` package gives D programs Blender's widget drawing, layout and interaction rules.** It is a DUB package with three layers: raw `extern(C)` declarations that match the C headers one to one, D classes and delegates for the common paths, and an HTML/CSS/RSX authoring layer. All of them come from `import bui;`.
@@ -136,7 +136,7 @@ auto document = new Document(page);
 auto context = new Context(document.node());
 ```
 
-Tag constructors work without the mixin: `body_(div("text").class_("card"))`. `Document.find` queries the tree by CSS selector, `Element.setText` updates a realised text leaf, and `Document.restyle` re-runs the cascade after a state change. The supported CSS subset, tag naming rules and limits have [their own page](../html-css-rsx/).
+Tag constructors work without the mixin: `body_(div("text").class_("card"))`. `Document.find` queries the tree by CSS selector, `Element.setText` updates a realised text leaf, and `Document.restyle` re-runs the cascade after a state change. `Document.dispose()` releases the realised kit tree and its state hooks so the element tree can be mounted again. The supported CSS subset, tag naming rules and limits have [their own page](../html-css-rsx/).
 
 ## Events
 
@@ -153,11 +153,13 @@ slider.onChange((NodeEvent e) {
 
 `on(handler)` sees every event, `on(kind, handler)` sees one `BK_EV_*` kind, and `onClick`, `onChange`, `onSubmit`, `onActivate`, `onToggle` and `onBrowse` are shorthands. Events carry the node, the kind, the payload reference, two doubles and, for raw key events, the key text.
 
-Callbacks run inside C frames. The wrappers catch exceptions and store the first one: `Context.pendingError()` returns it and `Context.check()` rethrows it. Every context input and render method calls `check()` for you, so a throwing host callback surfaces at the next input or render call. `Custom` and `Video` callbacks use the same pattern.
+Callbacks run inside C frames. The wrappers catch exceptions and store the first one: `Context.pendingError()` returns it and `Context.check()` rethrows it. Every context input and render method calls `check()` for you, so a throwing host callback surfaces at the next input or render call. Window callbacks (timers, close, frame and focus) store their exceptions the same way; `Window.pendingError()` and `Window.check()` expose them. `Custom` and `Video` callbacks use the same pattern.
 
 ## Ownership
 
-A `Node` created in D owns its C node. `free()` releases it and is idempotent; the destructor calls it too. Nodes the kit returns (`parent`, `child`, `hover`, `focus`, `popup`) are borrowed and never free their C node. When the node has a D wrapper, that wrapper is returned, so identity survives the round trip.
+A `Node` created in D owns its C node. `free()` releases it and is idempotent; the destructor calls it too. Nodes the kit returns (`parent`, `child`, `hover`, `focus`, `popup`, `pickerPart`) are borrowed and never free their C node. When the node has a D wrapper, that wrapper is returned, so identity survives the round trip.
+
+A C-owned node gets one cached borrowed wrapper, retained by the kit for the node's lifetime. Handlers added through `parent().child(i)` therefore keep receiving that node's events; `free()` on a borrowed wrapper only drops its handlers.
 
 Attaching a node to a parent makes the kit retain its D wrapper through the reference hooks. Dropping your last reference to an attached node is therefore safe. Freeing an owned child detaches it first, then frees it.
 
@@ -165,7 +167,7 @@ The same split applies elsewhere:
 
 - `Window.raster()` is borrowed; `new Raster(w, h)` owns its raster.
 - `Node.setImage` and `Node.setVideo` borrow the buffer or player and keep the D wrapper alive. A `CanvasItem` only borrows its `Image` or `Video`; keep the wrapper alive yourself while the item can be drawn. The canvas keeps a `CanvasItem.family` string alive.
-- A `TreeItem` is retained when it is added to a parent or made a root. `free()` does nothing while a parent or tree still holds it; replace the roots first.
+- A `TreeItem` is retained when it is added to a parent or made a root. Its parent comes from the kit, and making it a root detaches it from its old parent. `free()` does nothing while a parent or tree still holds it; replace the roots first.
 - Menu descriptions are copied and their callbacks retained, so the `MenuItem` objects can be temporary.
 
 `Context` keeps its root `Node` alive, and `Window` keeps its `Context` alive. `free()` is safe to call more than once on all of them.
@@ -227,7 +229,7 @@ dub run --config=rsx        # an HTML/CSS page in a window
 dub run --config=test       # the integration suite
 ```
 
-The pre-build script configures CMake with the other language bindings off, builds `bui_kit` and `bui_api` in Release, and copies the four static libraries into `.bui/lib`. Set `BUI_SOURCE_DIR` to build another BUI checkout. On Windows the C kit uses the dynamic UCRT, so the package passes `-mscrtlib=msvcrt` to LDC to keep one CRT in the process.
+The build script runs from DUB's `preGenerateCommands`, so every build checks the C sources even when DUB considers the package up to date. It configures CMake with the other language bindings off, builds `bui_kit` and `bui_api` in Release, and copies the four static libraries into `.bui/lib` only when their content changes. The libraries are listed in `extraDependencyFiles` (per platform), so a changed native library triggers a relink and an unchanged one does not. Set `BUI_SOURCE_DIR` to build another BUI checkout. On Windows the C kit uses the dynamic UCRT, so the package passes `-mscrtlib=msvcrt` to LDC to keep one CRT in the process.
 
 <CardGrid>
   <Card title="D binding source" href="https://github.com/ppmpreetham/BUI/tree/main/bindings/d" icon="github" kicker="GitHub">

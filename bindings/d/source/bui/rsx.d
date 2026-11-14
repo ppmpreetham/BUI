@@ -404,6 +404,16 @@ private size_t findClosingTag(string source, size_t from, string tag) {
     throw new Exception("rsx: missing </" ~ tag ~ ">");
 }
 
+/// Whether the quote at `i` opens a D raw/token string (`r"..."`, `x"..."`,
+/// `q"..."`), where a backslash does not escape the closing quote.
+private bool rawString(string source, size_t i) {
+    if (source[i] != '"' || i == 0) {
+        return false;
+    }
+    const char prefix = source[i - 1];
+    return prefix == 'r' || prefix == 'x' || prefix == 'q';
+}
+
 /// Read a balanced `{...}` and return the D expression inside.
 private string readBraceExpression(string source, ref size_t i) {
     assert(source[i] == '{');
@@ -414,9 +424,10 @@ private string readBraceExpression(string source, ref size_t i) {
         const char c = source[i];
         if (c == '"' || c == '\'') {
             const char quote = c;
+            const bool raw = rawString(source, i);
             ++i;
             while (i < source.length && source[i] != quote) {
-                if (source[i] == '\\') {
+                if (!raw && source[i] == '\\') {
                     ++i;
                 }
                 ++i;

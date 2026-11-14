@@ -5,6 +5,10 @@
  * reference hooks, exactly like Python wrappers: dropping the D reference is
  * safe while the parent holds the node.
  *
+ * A node the kit owns (a panel body, a popup, a picker part) gets one cached
+ * borrowed wrapper, retained by the kit for the node's lifetime, so handlers
+ * added through `parent().child(i)` see the node's events too.
+ *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 module bui.node;
@@ -65,7 +69,20 @@ package Node wrapNode(BKNode* h) {
     if (auto ref_ = BK_node_ref(h)) {
         return cast(Node) ref_;
     }
-    return new Node(h, false);
+    if (auto ref_ = BK_node_borrowed_ref(h)) {
+        return cast(Node) ref_;
+    }
+    auto wrapper = new Node(h, false);
+    BK_node_set_borrowed_ref(h, cast(void*) wrapper);
+    return wrapper;
+}
+
+/// A wrapper's C handle; throws when the wrapper has no node.
+package BKNode* requireHandle(Node node, string context, string message) {
+    if (node is null || node.handle is null) {
+        throw new BuiException(context, message);
+    }
+    return node.handle;
 }
 
 /// A node in the kit's tree.
@@ -110,18 +127,30 @@ final class Node {
 
     /// Free the C node. A rooted tree's C-owned children are freed by the kit;
     /// wrapper-owned children are detached and live on until their wrappers go.
+    /// A borrowed wrapper only drops its handlers here; the kit owns its node.
     void free() {
         auto h = handle;
         if (h is null || freeing) {
             return;
         }
         freeing = true;
-        if (owned) {
-            if (auto parent = BK_node_parent(h)) {
-                BK_node_remove(parent, h);
-            }
-            BK_node_free(h);
+        if (!owned) {
+            handlers = null;
+            freeing = false;
+            return;
         }
+        if (auto parent = BK_node_parent(h)) {
+            BK_node_remove(parent, h);
+        }
+        else if (auto ctx = BK_node_context(h)) {
+            // A root skips `node_detach`, so the kit cannot drop popups
+            // whose parent lives in this tree. Close them before the
+            // parent pointer dangles.
+            if (BK_popup_count(ctx) > 0) {
+                BK_close_popups(ctx);
+            }
+        }
+        BK_node_free(h);
         handle = null;
         keepImage = null;
         keepVideo = null;
@@ -183,7 +212,7 @@ final class Node {
         return BK_node_child_count(handle);
     }
 
-    /// The child at `i`; a C-owned child comes back as a borrowed wrapper.
+    /// The child at `i`; a C-owned child comes back as a cached borrowed wrapper.
     Node child(int i) const {
         return wrapNode(BK_node_child(handle, i));
     }

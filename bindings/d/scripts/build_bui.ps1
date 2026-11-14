@@ -1,5 +1,9 @@
-# Build the C kit for the D binding. DUB runs this before compiling, so
-# `dub build`, `dub run` and `dub test` work from a clean checkout.
+# Build the C kit for the D binding. DUB runs this from
+# `preGenerateCommands`, so every `dub build`, `dub run` and `dub test`
+# checks the C sources, even when DUB would otherwise consider the package
+# up to date. The libraries are extra dependency files in `dub.json`; they
+# are only copied when their content changes, so an up-to-date native build
+# does not force a relink.
 #
 # Set BUI_SOURCE_DIR to build another BUI checkout. Set BUI_CMAKE_GENERATOR
 # to override the Visual Studio generator (for example "Ninja" with a
@@ -122,5 +126,14 @@ foreach ($name in @("kit", "gpu", "core", "api")) {
     if (-not (Test-Path $source)) {
         throw "built library not found: $source"
     }
-    Copy-Item -Force $source (Join-Path $lib $file)
+    $target = Join-Path $lib $file
+    $changed = -not (Test-Path $target)
+    if (-not $changed) {
+        $sourceHash = (Get-FileHash $source -Algorithm SHA256).Hash
+        $targetHash = (Get-FileHash $target -Algorithm SHA256).Hash
+        $changed = $sourceHash -ne $targetHash
+    }
+    if ($changed) {
+        Copy-Item -Force $source $target
+    }
 }

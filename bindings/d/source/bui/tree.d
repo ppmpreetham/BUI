@@ -23,7 +23,6 @@ final class TreeItem {
 
     private {
         bool owned;
-        TreeItem parent_;
     }
 
     /// A row with `label` and an icon id (`BK_icon_id`).
@@ -51,23 +50,17 @@ final class TreeItem {
 
     /// Free an item no parent or tree holds; replace the tree's roots first.
     void free() {
-        if (handle is null || !owned || parent_ !is null || refCount(cast(void*) this) != 0) {
+        if (handle is null || !owned || refCount(cast(void*) this) != 0) {
             return;
-        }
-        const n = BK_tree_item_child_count(handle);
-        foreach (i; 0 .. n) {
-            if (auto child = wrapTreeItem(BK_tree_item_child(handle, i))) {
-                child.parent_ = null;
-            }
         }
         BK_tree_item_set_ref(handle, null);
         BK_tree_item_free(handle);
         handle = null;
     }
 
-    /// The parent row, when this item was added through `add`.
+    /// The parent row, or null for a root.
     TreeItem parent() {
-        return parent_;
+        return handle is null ? null : wrapTreeItem(BK_tree_item_parent(handle));
     }
 
     /// Add `child`; returns it for chaining.
@@ -75,27 +68,20 @@ final class TreeItem {
         if (child is null || child.handle is null) {
             throw new BuiException("TreeItem.add", "no child");
         }
-        if (child.parent_ !is null) {
+        if (BK_tree_item_parent(child.handle) !is null) {
             throw new BuiException("TreeItem.add", "the child already has a parent");
         }
-        for (auto up = this; up !is null; up = up.parent_) {
-            if (up is child) {
+        for (auto h = handle; h !is null; h = BK_tree_item_parent(h)) {
+            if (h is child.handle) {
                 throw new BuiException("TreeItem.add", "an item cannot contain itself");
             }
         }
         BK_tree_item_add(handle, child.handle);
-        child.parent_ = this;
         return child;
     }
 
     /// Drop every child; their wrappers stay valid and detached.
     void clear() {
-        const n = BK_tree_item_child_count(handle);
-        foreach (i; 0 .. n) {
-            if (auto child = wrapTreeItem(BK_tree_item_child(handle, i))) {
-                child.parent_ = null;
-            }
-        }
         BK_tree_item_clear(handle);
     }
 
@@ -200,9 +186,6 @@ void setRoots(Node tree, TreeItem[] roots) {
         ptrs[i] = root.handle;
     }
     BK_tree_set_roots(handle(tree, "setRoots"), ptrs.ptr, cast(int) roots.length);
-    foreach (root; roots) {
-        root.parent_ = null;
-    }
 }
 
 /// The selected row, if any.
@@ -235,6 +218,9 @@ int[4] rowRect(Node tree, int row) {
 private BKNode* handle(Node tree, string operation) {
     if (tree is null || tree.handle is null) {
         throw new BuiException("Tree." ~ operation, "no tree node");
+    }
+    if (cslice(BK_node_type(tree.handle)) != "tree") {
+        throw new BuiException("Tree." ~ operation, "not a tree node");
     }
     return tree.handle;
 }

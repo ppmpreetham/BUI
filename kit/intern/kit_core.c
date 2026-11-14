@@ -257,6 +257,7 @@ void BK_node_free(BKNode *n)
   if (n->cls->free_ext) {
     n->cls->free_ext(n);
   }
+  bk_release(n->bref);
   free(n->text);
   free(n->label);
   free(n->desc);
@@ -283,6 +284,19 @@ void BK_node_set_ref(BKNode *n, void *ref)
 void *BK_node_ref(const BKNode *n)
 {
   return n->ref;
+}
+void BK_node_set_borrowed_ref(BKNode *n, void *ref)
+{
+  if (n->bref == ref) {
+    return;
+  }
+  bk_retain(ref);
+  bk_release(n->bref);
+  n->bref = ref;
+}
+void *BK_node_borrowed_ref(const BKNode *n)
+{
+  return n->bref;
 }
 
 void bk_node_add(BKNode *parent, BKNode *child)

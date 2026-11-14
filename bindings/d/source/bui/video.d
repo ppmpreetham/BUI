@@ -101,9 +101,10 @@ final class Video {
         return [w, h];
     }
 
-    /// Copy the current frame into `texture`; returns non-zero on success.
-    bool texture(int texture, int maxW = 0, int maxH = 0) {
-        return BK_video_texture(handle, texture, maxW, maxH) != 0;
+    /// Copy the current frame into `texture` and return its texture ID (0
+    /// before the first frame).
+    int texture(int texture, int maxW = 0, int maxH = 0) {
+        return BK_video_texture(handle, texture, maxW, maxH);
     }
 
     /// Call `listener` whenever the state changes.

@@ -12,7 +12,7 @@ import bui.errors : BuiException;
 import bui.gpu : BuiRaster;
 import bui.internal.util : cslice;
 import bui.kit;
-import bui.node : Node, wrapNode;
+import bui.node : Node, requireHandle, wrapNode;
 import bui.raster : Raster;
 
 /// One input event forwarded to a custom node.
@@ -209,22 +209,15 @@ Custom setCustom(Node node, CustomHandlers handlers) {
 
 /// Ask for an `onFrame` call; `ms <= 0` means the next render.
 void requestFrame(Node node, int ms = 0) {
-    BK_custom_request_frame(need(node, "requestFrame"), ms);
+    BK_custom_request_frame(requireHandle(node, "Custom.requestFrame", "no custom node"), ms);
 }
 
 /// Set the pointer shape while it is over the node (`BK_CURSOR_*`).
 void setCursor(Node node, int cursor) {
-    BK_custom_set_cursor(need(node, "setCursor"), cursor);
+    BK_custom_set_cursor(requireHandle(node, "Custom.setCursor", "no custom node"), cursor);
 }
 
 /// Non-zero while the custom node has keyboard focus.
 bool hasFocus(Node node) {
-    return BK_custom_has_focus(need(node, "hasFocus")) != 0;
-}
-
-private BKNode* need(Node node, string operation) {
-    if (node is null || node.handle is null) {
-        throw new BuiException("Custom." ~ operation, "no custom node");
-    }
-    return node.handle;
+    return BK_custom_has_focus(requireHandle(node, "Custom.hasFocus", "no custom node")) != 0;
 }
