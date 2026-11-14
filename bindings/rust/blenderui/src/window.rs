@@ -610,7 +610,7 @@ impl App {
         }
         for id in 0..self.windows.len() {
             let Some(w) = self.windows[id].as_deref_mut() else { continue };
-            if !w.dirty && !w.motion_frame {
+            if !w.dirty && !w.motion_frame && !w.sel_repaint {
                 continue;
             }
             match w.native {
@@ -1015,8 +1015,18 @@ pub struct Window {
     press_button: MouseButton,
     /// A scrollbar thumb being dragged: the container and where on the thumb it was grabbed.
     sb_drag: Option<(Key, f32)>,
+    /// `data-stick="bottom"` containers: the scroll range last frame (to see when content grew).
+    stuck: HashMap<Key, f32>,
     /// The text selection (see `selection`).
     selector: Selector,
+    /// The press in progress changed only the text selection: nothing answers to it, so it and its
+    /// release render nothing (the selection is drawn on the frame as it is).
+    press_quiet: bool,
+    /// The next `present` shows the frame it already showed (a selection change): its text boxes are
+    /// the same, so the selection's index of them stays.
+    same_frame: bool,
+    /// The selection changed: the next frame paints it again (no render, no layout).
+    sel_repaint: bool,
     /// Called when the selection changes, with the selected text if any.
     selection_hooks: Vec<Box<dyn FnMut(Option<&str>, &mut Window, &mut App)>>,
 }
@@ -1079,7 +1089,11 @@ impl Window {
                 pressed: Vec::new(),
                 press_button: MouseButton::Left,
                 sb_drag: None,
+                stuck: HashMap::new(),
                 selector: Selector::default(),
+                press_quiet: false,
+                same_frame: false,
+                sel_repaint: false,
                 selection_hooks: Vec::new(),
             };
             if headless {
@@ -1299,10 +1313,10 @@ impl Window {
     /// The selection changed by the user: draw it (the frame again, no render) and tell the hooks.
     fn selection_changed(&mut self, app: &mut App, repaint: bool) {
         if repaint {
-            if let Some(frame) = self.frame.take() {
-                self.widgets.keep(); // no layout ran: the widgets are the last frame's
-                self.present(app, frame, None);
-            }
+            // at the next frame, as a redraw of Motion's values is: a native window draws what is
+            // presented from its frame callback
+            self.sel_repaint = true;
+            self.animation_frame = true;
         }
         if self.selection_hooks.is_empty() {
             return;
@@ -1314,6 +1328,15 @@ impl Window {
         }
         hooks.append(&mut self.selection_hooks);
         self.selection_hooks = hooks;
+    }
+
+    /// Nothing on screen answers to a press on `path` or to the focus moving to it: no listeners,
+    /// `.active()` / `.focus()` refinements or Motion props on it, its ancestors or the element that
+    /// loses the focus, and no `:active` / `:focus` rule in the sheet.
+    fn press_is_quiet(&self, path: &[Key]) -> bool {
+        let Some(f) = &self.frame else { return false };
+        let plain = |k: &Key| f.by_key().get(k).and_then(|&i| f.el(i)).is_none_or(|e| !e.reactive);
+        !self.caches.state_rules && path.iter().all(plain) && self.state.focused.as_ref().is_none_or(plain)
     }
 
     fn select_press(&mut self, x: f32, y: f32, shift: bool) -> bool {
@@ -1402,7 +1425,24 @@ impl Window {
             self.caches.anim.redraw_motion(&mut frame, &mut self.caches.styles, vp);
         }
         let container_changed = self.caches.after_layout(&frame) | in_view;
+        // `data-stick="bottom"`: a scroll container that grew goes to its end
+        // (`"bottom"`: only if it was at the end; `"always"`: whatever it showed)
+        let mut stuck = false;
+        for i in 0..frame.nodes.len() {
+            let Some(mode) = frame.attr(i, "data-stick") else { continue };
+            let always = mode == "always";
+            let n = &frame.nodes[i];
+            let (key, range, pos) = (n.key, n.scroll_range.1, n.scroll_pos.1);
+            let prev = self.stuck.insert(key, range).unwrap_or(0.0);
+            if range > prev + 0.5 && (always || pos >= prev - 2.0) && pos < range - 0.5 {
+                self.state.scroll.insert(key, (n.scroll_pos.0, range));
+                stuck = true;
+            }
+        }
         self.present(app, frame, None);
+        if stuck {
+            self.dirty = true;
+        }
         // state of components that didn't render is freed; effects run now
         crate::hooks::end();
         if container_changed {
@@ -1447,6 +1487,13 @@ impl Window {
     fn update(&mut self, app: &mut App) {
         if self.dirty {
             self.rebuild(app);
+        } else if self.sel_repaint {
+            // the selection alone: the frame again, painted
+            if let Some(frame) = self.frame.take() {
+                self.widgets.keep(); // no layout ran: the widgets are the last frame's
+                self.same_frame = true;
+                self.present(app, frame, None);
+            }
         } else if self.motion_frame {
             self.redraw(app);
         }
@@ -1456,10 +1503,13 @@ impl Window {
     /// `dirty`: a redraw's boxes to paint again (the rest kept), when it can.
     fn present(&mut self, app: &mut App, frame: Frame, dirty: Option<&[bool]>) {
         FRAMES_PRESENTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.sel_repaint = false; // whatever is painted has the selection
         let vp = self.viewport();
         let scale = self.scale;
         // a selection follows its text into the new frame (and goes with it)
-        self.selector.invalidate();
+        if !std::mem::take(&mut self.same_frame) {
+            self.selector.invalidate();
+        }
         self.painter.sel = self.selector.paint(&frame, &self.caches.styles);
         {
             let _s = span(Phase::Paint);
@@ -1600,8 +1650,12 @@ impl Window {
         }
         let entered: Vec<Key> = now.difference(&self.state.hovered).copied().collect();
         let left: Vec<Key> = self.state.hovered.difference(&now).copied().collect();
+        // a restyle (a render) only where something answers to the pointer: a `:hover` rule in the
+        // sheet, or a `.hover()` refinement / Motion props on an element it entered or left
         let restyle = self.frame.as_ref().is_some_and(|f| {
-            entered.iter().chain(&left).any(|k| f.by_key().get(k).is_some())
+            entered.iter().chain(&left).any(|k| {
+                f.by_key().get(k).is_some_and(|&i| self.caches.state_rules || f.el(i).is_none_or(|e| e.reactive))
+            })
         });
         self.state.hovered = now;
         if fire {
@@ -1697,11 +1751,13 @@ impl Window {
                     return;
                 }
                 let selected = button == MouseButton::Left && self.select_press(x, y, modifiers.shift);
+                let quiet = self.press_is_quiet(&path);
+                self.press_quiet = quiet;
                 self.press_button = button;
                 self.state.active = path.iter().copied().collect();
                 self.set_focus(&path);
                 self.pressed = path.clone();
-                self.dirty = true;
+                self.dirty |= !quiet;
                 self.caches.anim.pointer_down(&path, x, y);
                 let e = MouseDownEvent { button, position: point(px(x), px(y)), modifiers,
                                          click_count: if ev.kind == sys::BK_EV_DOUBLE { 2 } else { 1 } };
@@ -1710,7 +1766,8 @@ impl Window {
                         .filter(|(b, _)| b.is_none_or(|b| b == button)).map(|(_, f)| f).collect());
                 }
                 if selected {
-                    self.selection_changed(app, false); // the press renders again: that draws it
+                    // a press that renders draws the selection with it; a quiet one draws it now
+                    self.selection_changed(app, quiet);
                 }
             }
             sys::BK_EV_RELEASE => {
@@ -1729,7 +1786,7 @@ impl Window {
                     .map(|(a, _)| *a).last();
                 self.pressed.clear();
                 self.state.active.clear();
-                self.dirty = true;
+                self.dirty |= !std::mem::take(&mut self.press_quiet);
                 self.caches.anim.pointer_up();
                 // a press that selected text is a selection, not a click (as in a browser)
                 let dragged = button == MouseButton::Left && self.selector.release();

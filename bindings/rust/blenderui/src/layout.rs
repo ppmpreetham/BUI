@@ -257,6 +257,10 @@ pub(crate) struct ElData {
     pub listeners: Option<Box<Listeners>>,
     /// Which of the author sheet's `:has()` hold here (bit = index).
     pub has: u64,
+    /// Something answers to this element being pressed or focused: listeners, `.active()` / `.focus()`
+    /// refinements or Motion props. Without any (and no `:active` / `:focus` rule in the sheet) a press
+    /// changes nothing on screen by itself.
+    pub reactive: bool,
 }
 
 const NONE: u32 = u32::MAX;
@@ -342,6 +346,8 @@ pub(crate) struct LayoutCaches {
     pub text: TextCache,
     pub images: ImageCache,
     pub author: AuthorSheet,
+    /// The author sheet has a `:hover`, `:active` or `:focus` rule.
+    pub state_rules: bool,
     pub(crate) taffy: crate::tree::LayoutTree<Measure>,
     /// Box index of each taffy node (by slot), rebuilt in place each frame.
     box_of: Vec<u32>,
@@ -449,6 +455,7 @@ impl Default for LayoutCaches {
             text: TextCache::default(),
             images: ImageCache::default(),
             author: AuthorSheet::default(),
+            state_rules: false,
             taffy: Default::default(),
             box_of: Vec::new(),
             acc: Vec::new(),
@@ -1163,12 +1170,15 @@ impl<'a> Builder<'a> {
         self.nodes[i].pos = pos;
         self.nodes[i].tpos = std::mem::replace(&mut self.next_tpos, (1, 1));
         self.nodes[i].el = self.els.len() as u32;
+        // (the user-agent sheet's own pointer rule is `a:hover`)
+        let reactive = div.listeners.is_some() || div.states.is_some() || div.motion().is_some() || div.tag == "a";
         self.els.push(ElData {
             tag: div.tag,
             id: div.id.take(),
             attrs: std::mem::take(&mut div.attrs),
             listeners: std::mem::take(&mut div.listeners),
             has: 0,
+            reactive,
         });
         if !self.author.has.is_empty() {
             // :has() looks at the element's subtree, which isn't built yet:
@@ -1418,7 +1428,7 @@ impl<'a> Builder<'a> {
         let key = child_key(self.nodes[i].key, tag, 0);
         let g = self.push(Some(i), Content::Element, None, sid, key, true);
         self.nodes[g].el = self.els.len() as u32;
-        self.els.push(ElData { tag, id: None, attrs: Vec::new(), listeners: None, has: 0 });
+        self.els.push(ElData { tag, id: None, attrs: Vec::new(), listeners: None, has: 0, reactive: false });
         if !text.is_empty() {
             self.push(Some(g), Content::Text(text), Some(g), sid, child_key(key, "#text", 1), true);
         }
@@ -2273,6 +2283,8 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         css.push('\n');
         css.push_str(caches.tw.css());
     }
+    // the pointer and the focus restyle only where the sheet says so
+    caches.state_rules = [":hover", ":active", ":focus"].iter().any(|p| css.contains(p));
     let css_hash = hash_parts(&[css.as_bytes()]);
     if css_hash != caches.author.hash {
         caches.author = AuthorSheet { hash: css_hash, sheet: Stylesheet::parse(&css) };

@@ -95,6 +95,8 @@ pub(crate) struct Selector {
     /// The selectable boxes of the frame, in document order (built when first needed).
     units: Vec<u32>,
     units_ok: bool,
+    /// The ends of `sel` as unit positions, in order (found once per frame and selection, not per paint).
+    ends: Option<(Pos, Pos)>,
     /// The last press: when, where, and how many in a row.
     click: Option<(Instant, f32, f32, u8)>,
     /// The press in progress selected text: its release is not a click.
@@ -109,11 +111,13 @@ impl Selector {
     /// The frame changed: the units are stale.
     pub(crate) fn invalidate(&mut self) {
         self.units_ok = false;
+        self.ends = None;
     }
 
     /// Drop the selection. True when there was one.
     pub(crate) fn clear(&mut self) -> bool {
         self.drag = None;
+        self.ends = None;
         self.sel.take().is_some()
     }
 
@@ -152,13 +156,17 @@ impl Selector {
     /// The ends of the selection in order, or None (and the selection dropped)
     /// when a text box it ended in is gone.
     fn range(&mut self, f: &Frame) -> Option<(Pos, Pos)> {
+        if self.ends.is_some() {
+            return self.ends;
+        }
         let sel = self.sel?;
         let ends = self.pos_of(f, sel.anchor).zip(self.pos_of(f, sel.focus));
         let Some((a, b)) = ends else {
             self.sel = None;
             return None;
         };
-        Some(if a <= b { (a, b) } else { (b, a) })
+        self.ends = Some(if a <= b { (a, b) } else { (b, a) });
+        self.ends
     }
 
     /// What paint highlights, or None when nothing is selected.
@@ -222,6 +230,7 @@ impl Selector {
     fn set(&mut self, s: Option<Selection>) -> bool {
         let changed = self.sel != s;
         self.sel = s;
+        self.ends = None;
         changed
     }
 

@@ -371,3 +371,24 @@ fn select_classes_aliases_and_inheritance() {
         assert_eq!(h.update(cx, |_, w, _| w.selected_text()).unwrap().as_deref(), Some("whole thing"));
     });
 }
+
+#[test]
+fn the_pointer_over_plain_text_renders_nothing() {
+    // nothing answers to the pointer on plain paragraphs (no `:hover` rule, no listeners): moving over
+    // them, pressing and releasing needs no render; an element with a listener still renders
+    Application::headless().run(|cx| {
+        let h = open(cx);
+        let (l1, y1, _) = spot(cx, &h, "one");
+        let (l2, y2, _) = spot(cx, &h, "two");
+        let (l3, y3, _) = spot(cx, &h, "three");
+        cx.simulate_mouse_move(h.id, l1 + 2.0, y1);
+        let before = blenderui::frames_presented();
+        cx.simulate_mouse_move(h.id, l2 + 2.0, y2);
+        cx.simulate_mouse_move(h.id, l3 + 2.0, y3);
+        cx.simulate_click(h.id, l3 + 2.0, y3);
+        assert_eq!(blenderui::frames_presented(), before, "plain text: no frame");
+        let (lc, yc, _) = spot(cx, &h, "clicky");
+        cx.simulate_mouse_move(h.id, lc + 2.0, yc);
+        assert!(blenderui::frames_presented() > before, "an element with a listener restyles on hover");
+    });
+}
