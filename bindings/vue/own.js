@@ -14,9 +14,10 @@
 // browser (`<Transition>`, `v-html`, DOM refs' layout APIs) does not work; the README lists it.
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
-import { createRenderer, h } from 'vue'
+import { Fragment, cloneVNode, createRenderer, h, ref } from 'vue'
 import native from '@blender-ui/native'
 import host from '@blender-ui/native/host'
+import screen from '@blender-ui/native/screen'
 import { patchProp, preset } from './props.js'
 
 const { document } = native // a window-less document: its nodes are detached until inserted
@@ -94,6 +95,74 @@ export const { Button, Checkbox, Radio, NumberField, NumberSlider, TextField, Te
   Widget.inheritAttrs = false
   return Widget
 })
+
+// Blender's screen (@blender-ui/native/screen: the elements blenderui lays out):
+//   <Screen :editors="{ '3D Viewport': { icon: 'VIEW3D', render: (area) => h(Viewport) } }"
+//           :layout="AreaSplit.v(0.75, '3D Viewport', 'Properties')" @change="(e) => save(e.layout)" />
+// An editor's render returns an <Editor>: its default slot is the main view, its named slots
+// (`header`, `toolHeader`, `toolbar`, `sidebar` ...) the regions, each content or a <Region>.
+
+/** A region of an <Editor> (its slot names the kind): `size`, `hidden`, `side`, `overlap`,
+ *  `resizable`, `maxsize`, `hotkey`, `@resize="({ size, hidden }) => ..."`. */
+export const Region = {
+  name: 'Region',
+  props: ['region', ...screen.REGION_PROPS],
+  emits: ['resize'],
+  setup (props, { slots, emit }) {
+    const onChange = (e) => {
+      if (e.target.localName === 'bui-region') emit('resize', { size: e.target.valueAsNumber, hidden: e.target.checked })
+    }
+    return () => h('bui-region', { region: props.region, ...screen.regionAttrs(props), onChange }, slots.default?.())
+  },
+}
+
+/** What an area shows: the default slot (the main view) and the regions' named slots. */
+export const Editor = {
+  name: 'Editor',
+  setup (_, { slots }) {
+    return () => {
+      const out = []
+      for (const [slot, kind] of Object.entries(screen.SLOT)) {
+        const content = slots[slot]?.()
+        if (!content) continue
+        const one = content.length === 1 && content[0].type === Region
+        out.push(one ? cloneVNode(content[0], { region: kind, key: kind })
+          : h(Region, { region: kind, key: kind }, () => content))
+      }
+      out.push(h('bui-main', { key: 'main' }, slots.default?.()))
+      return h('bui-area', null, out)
+    }
+  },
+}
+
+/** Areas the user splits, joins, docks and resizes as in Blender. `editors`: name ->
+ *  `{ icon, render(area) }` (`area`: `{ index, editor }`) returning an <Editor> vnode; `layout`:
+ *  the first arrangement (`AreaSplit.v/h` or a name); `saved`: a layout from `change`; events
+ *  `change({ layout })` and `window({ editor })`; `ops="resize"`. */
+export const Screen = {
+  name: 'Screen',
+  props: ['editors', 'layout', 'saved', 'ops'],
+  emits: ['change', 'window'],
+  setup (props, { emit }) {
+    const areas = ref([])
+    const onChange = (e) => {
+      if (e.target.localName !== 'bui-screen') return
+      const c = screen.screenChange(e.target.value)
+      if (c === null) return
+      if (c.window !== undefined) {
+        emit('window', { editor: c.window })
+        return
+      }
+      areas.value = c.areas
+      emit('change', { layout: c.layout })
+    }
+    return () => h('bui-screen', { layout: screen.layoutText(props.layout), saved: props.saved, ops: props.ops, onChange },
+      areas.value.map((editor, index) => h(Fragment, { key: `${index}:${editor}` },
+        [screen.editorFor(props.editors, editor).render({ index, editor })])))
+  },
+}
+
+export const AreaSplit = screen.AreaSplit
 
 // BUI's own signals, for state shared outside components (Vue's refs are Vue's): a signal as the
 // value of a prop or an attribute binds it, and the node follows it without a re-render. (`effect`

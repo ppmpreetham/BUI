@@ -109,6 +109,7 @@ pub mod events;
 pub mod geometry;
 pub mod html;
 pub mod list;
+pub mod screen;
 pub mod shadcn;
 pub mod table;
 pub(crate) mod sink;

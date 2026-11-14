@@ -68,6 +68,9 @@ blender_component! {
     ProgressBar => html::progress();
 }
 
+/// Blender's screen: areas the user splits, joins, docks and resizes (`<Screen editors={..} />`).
+pub use crate::screen::Screen;
+
 impl crate::hooks::Complete for Div {
     type Props = Div;
     fn finish(self) -> Div {

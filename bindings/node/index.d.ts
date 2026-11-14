@@ -451,3 +451,6 @@ export const native: {
   timestampCounter (): number | null
   [key: string]: unknown
 }
+
+/** Blender's screen for the DOM-like API (see `@blender-ui/native/screen`). */
+export { AreaSplit, createScreen, editorElement } from './screen'

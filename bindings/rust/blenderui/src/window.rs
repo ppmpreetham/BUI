@@ -373,7 +373,7 @@ pub struct App {
     entities: Vec<Slot>,
     headless: bool,
     globals: HashMap<TypeId, Box<dyn Any>>,
-    propagate: bool,
+    pub(crate) propagate: bool,
     /// Work sent from other threads ([`UiSender`]).
     remote: Option<(std::sync::mpsc::Sender<RemoteJob>, std::sync::mpsc::Receiver<RemoteJob>)>,
     /// Called when the user closes a window.
@@ -864,6 +864,7 @@ impl App {
 
 unsafe extern "C" fn on_emit(data: *mut c_void, node: *mut sys::BKNode, kind: c_int, ref_: *mut c_void,
                              a: c_double, b: c_double) {
+    crate::screen::kit_event(node, kind, a, b); // areas made and freed: known at once
     let text = if ref_.is_null() || kind < sys::BK_EV_PRESS {
         String::new()
     } else {
@@ -998,6 +999,8 @@ pub struct Window {
     painter: Painter,
     state: UiState,
     widgets: Widgets,
+    /// Blender screens (`blenderui::screen`): their kit nodes, by element key.
+    screens: crate::screen::Screens,
     dirty: bool,
     /// Only scroll offsets changed since the last frame: it is placed again, not rendered
     /// (when [`scroll_free`](Self::scroll_free)).
@@ -1083,6 +1086,7 @@ impl Window {
                 painter: Painter::new(),
                 state: UiState::default(),
                 widgets: Widgets::new(),
+                screens: crate::screen::Screens::default(),
                 dirty: true,
                 scrolled: false,
                 scroll_free: false,
@@ -1440,6 +1444,8 @@ impl Window {
             self.caches.anim.redraw_motion(&mut frame, &mut self.caches.styles, vp);
         }
         let container_changed = self.caches.after_layout(&frame) | in_view;
+        // screens: their kit nodes go where their elements are (the kit reports what moves)
+        self.screens.after_layout(&frame, self.scale);
         // `data-stick="bottom"`: a scroll container that grew goes to its end
         // (`"bottom"`: only if it was at the end; `"always"`: whatever it showed)
         let mut stuck = false;
@@ -1746,6 +1752,10 @@ impl Window {
 
     fn dispatch(&mut self, ev: RawEvent, app: &mut App) {
         if !self.canvases.contains(&ev.node) {
+            if let Some(target) = self.screens.target(ev.node) {
+                self.screen_event(&target, &ev, app);
+                return;
+            }
             self.widget_event(ev, app);
             return;
         }
@@ -1977,6 +1987,25 @@ impl Window {
                 self.scrolled = true;
                 return;
             }
+        }
+    }
+
+    /// A screen's kit event: the layout changed, an area wants a window, a region was resized
+    /// (a `change` on its element), or areas and regions moved (the content follows: a render).
+    fn screen_event(&mut self, target: &crate::screen::Target, ev: &RawEvent, app: &mut App) {
+        if let Some((key, e)) = crate::screen::change_event(target, &self.screens, ev.node, ev.kind, ev.a, ev.b) {
+            self.emit(app, key, &e, |l| l.change.iter().collect());
+        }
+        self.dirty = true;
+    }
+
+    /// Syncs a `<bui-screen>` with its kit nodes and places its areas' elements (`screen.rs`).
+    pub(crate) fn sync_screen(&mut self, div: &mut crate::element::Div, spec: &crate::screen::Spec) {
+        if let Some(made) = self.screens.sync(self.canvas, self.scale, div, spec) {
+            // a new screen: its layout reaches `change` listeners as every later one does (the
+            // areas a JavaScript screen renders come from it)
+            queue_push(RawEvent { window: self.id, node: made, kind: sys::BK_EV_CHANGE, text: String::new(),
+                                  a: 0.0, b: 0.0 });
         }
     }
 

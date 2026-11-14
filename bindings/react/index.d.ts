@@ -108,3 +108,26 @@ export function TextArea (props: BlenderProps): ReactNode
 export function ColorSwatch (props: BlenderProps): ReactNode
 export function Dropdown (props: BlenderProps): ReactNode
 export function ProgressBar (props: BlenderProps): ReactNode
+
+// Blender's screen: areas the user splits, joins, docks and resizes, and their regions.
+import type { AreaInfo, AreaSplitLayout, AreaWindowEvent, RegionOptions, ScreenChangeEvent } from '@blender-ui/native/screen'
+export { AreaSplit } from '@blender-ui/native/screen'
+/** Areas the user rearranges as in Blender; `editors[name].render(area)` returns an `<Editor>`. */
+export function Screen (props: {
+  editors: Record<string, { icon?: string, render (area: AreaInfo): ReactNode }>
+  layout?: AreaSplitLayout
+  saved?: string
+  ops?: 'all' | 'resize'
+  onChange?: (e: ScreenChangeEvent) => void
+  onWindow?: (e: AreaWindowEvent) => void
+  className?: string
+  style?: unknown
+}): ReactNode
+/** What an area shows: `children` (the main view) and its regions, each an element or a `<Region>`. */
+export function Editor (props: {
+  children?: ReactNode
+  header?: ReactNode, toolHeader?: ReactNode, footer?: ReactNode, assetShelf?: ReactNode, channels?: ReactNode,
+  navBar?: ReactNode, toolbar?: ReactNode, sidebar?: ReactNode, execute?: ReactNode, hud?: ReactNode
+}): ReactNode
+/** A region of an `<Editor>` (its slot names the kind). */
+export function Region (props: RegionOptions & { children?: ReactNode }): ReactNode

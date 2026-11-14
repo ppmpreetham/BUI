@@ -48,3 +48,10 @@ export const ProgressBar: Component<BlenderProps>
 export { signal, effect, batch, untrack, createSignal, ref, isSignal, startTransition, Signal, Memo } from '@blender-ui/native'
 /** A derived, cached signal (`memo` in @blender-ui/native). */
 export { memo as computed } from '@blender-ui/native'
+
+// Blender's screen: <Screen {editors} {layout} {saved} onchange onwindow> (editors' `render`: a
+// snippet showing an <Editor>), <Editor> (regions as snippets or `{ content, size, ... }`), <Region>.
+export { AreaSplit } from '@blender-ui/native/screen'
+export const Screen: Component<Record<string, unknown>>
+export const Editor: Component<Record<string, unknown>>
+export const Region: Component<Record<string, unknown>>

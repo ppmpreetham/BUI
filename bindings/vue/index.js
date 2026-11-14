@@ -14,4 +14,5 @@ export {
   createApp, createRoot, render, addStyle,
   Button, Checkbox, Radio, NumberField, NumberSlider, TextField, TextArea, ColorSwatch, Dropdown, ProgressBar,
   signal, batch, untrack, createSignal, isSignal, Signal, Memo, memo,
+  Screen, Editor, Region, AreaSplit,
 } from './own.js'

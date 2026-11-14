@@ -525,7 +525,7 @@ const HTML_TAGS: &[&str] = &[
 /// Blender's widgets (`blenderui::components`): capitalized, used like elements.
 const BLENDER_COMPONENTS: &[&str] = &[
     "Button", "Checkbox", "Radio", "NumberField", "NumberSlider", "TextField", "TextArea", "ColorSwatch",
-    "Dropdown", "ProgressBar",
+    "Dropdown", "ProgressBar", "Screen",
 ];
 
 /// HTML boolean attributes: bare, they stay attributes even where a

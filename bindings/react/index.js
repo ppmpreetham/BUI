@@ -264,8 +264,66 @@ for (const k of Object.keys(React)) if (/^use([A-Z]|$)/.test(k)) reactHooks[k] =
 // lowercase HTML counterparts look like a browser's (Blender's inside `styled`).
 const blenderComponents = blenderWidgets((name) => (props) => React.createElement(name, props))
 
+// Blender's screen (@blender-ui/native/screen: the elements blenderui lays out):
+//   <Screen editors={{ '3D Viewport': { icon: 'VIEW3D', render: (area) =>
+//       <Editor header={<div>View</div>} sidebar={<Region size={280} hotkey="n">...</Region>}>...</Editor> } }}
+//     layout={AreaSplit.v(0.75, '3D Viewport', 'Properties')} saved={saved} onChange={(e) => save(e.layout)} />
+const screen = require('@blender-ui/native/screen')
+
+/** A region of an `<Editor>` (its slot names the kind): `size`, `hidden`, `side`, `overlap`,
+ *  `resizable`, `maxsize`, `hotkey`, `onResize({ size, hidden })`. */
+function Region ({ region, children, onResize, ...props }) {
+  const onChange = onResize && ((e) => {
+    if (e.target.localName === 'bui-region') onResize({ size: e.target.valueAsNumber, hidden: e.target.checked })
+  })
+  return React.createElement('bui-region', { region, ...screen.regionAttrs(props), onChange }, children)
+}
+
+/** What an area shows: `children` (the main view) and regions by slot (`header`, `toolHeader`,
+ *  `footer`, `assetShelf`, `channels`, `navBar`, `toolbar`, `sidebar`, `execute`, `hud`): each an
+ *  element or a `<Region>`. */
+function Editor ({ children, ...regions }) {
+  const out = []
+  for (const [slot, value] of Object.entries(regions)) {
+    const kind = screen.SLOT[slot]
+    if (kind === undefined) throw new TypeError(`<Editor>: no region '${slot}'`)
+    if (value == null) continue
+    out.push(React.isValidElement(value) && value.type === Region
+      ? React.cloneElement(value, { region: kind, key: kind })
+      : React.createElement(Region, { region: kind, key: kind }, value))
+  }
+  out.push(React.createElement('bui-main', { key: 'main' }, children))
+  return React.createElement('bui-area', null, out)
+}
+
+/** Areas the user splits, joins, docks and resizes as in Blender. `editors`: name ->
+ *  `{ icon, render(area) }` (`area`: `{ index, editor }`) returning an `<Editor>`; `layout`: the
+ *  first arrangement (`AreaSplit.v/h`, or an editor's name); `saved`: a layout `onChange` gave;
+ *  `onChange({ layout })`, `onWindow({ editor })`, `ops="resize"`. */
+function Screen ({ editors, layout, saved, onChange, onWindow, ops, children, ...rest }) {
+  const [areas, setAreas] = React.useState(() => [])
+  const handle = (e) => {
+    if (e.target.localName !== 'bui-screen') return
+    const c = screen.screenChange(e.target.value)
+    if (c === null) return
+    if (c.window !== undefined) {
+      onWindow?.({ editor: c.window })
+      return
+    }
+    setAreas(c.areas)
+    onChange?.({ layout: c.layout })
+  }
+  return React.createElement('bui-screen', { ...rest, layout: screen.layoutText(layout), saved, ops, onChange: handle },
+    areas.map((editor, index) => React.createElement(React.Fragment, { key: `${index}:${editor}` },
+      screen.editorFor(editors, editor).render({ index, editor }))))
+}
+
 module.exports = {
   ...blenderComponents,
+  Screen,
+  Editor,
+  Region,
+  AreaSplit: screen.AreaSplit,
   ...reactHooks,
   ...hooks,
   render,

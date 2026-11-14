@@ -52,6 +52,16 @@ pub const BK_EV_VIEW: c_int = 17;
 pub const BK_EV_SCROLL: c_int = 18;
 pub const BK_EV_CONFIGURE: c_int = 19;
 pub const BK_EV_KEYRELEASE: c_int = 20;
+/// A screen's areas: a = the area's child index, b = `BK_AREA_*`.
+pub const BK_EV_AREA: c_int = 21;
+/// A panel dragged to a new place: a = old index, b = new index.
+pub const BK_EV_MOVE: c_int = 22;
+/// An area's region resized, hidden or shown: a = size, b = hidden.
+pub const BK_EV_RESIZE: c_int = 23;
+/// `BK_EV_AREA`'s b: a new area (on the screen), one leaving or opened in a window (on the area).
+pub const BK_AREA_NEW: c_int = 1;
+pub const BK_AREA_CLOSE: c_int = 2;
+pub const BK_AREA_WINDOW: c_int = 3;
 
 // Modifier bits for input calls.
 pub const BK_SHIFT: c_int = 1;
@@ -269,6 +279,15 @@ unsafe extern "C" {
     pub fn BK_node_child(node: *const BKNode, i: c_int) -> *mut BKNode;
     pub fn BK_node_remove(parent: *mut BKNode, child: *mut BKNode);
     pub fn BK_node_rect(node: *const BKNode, r_rect: *mut c_int);
+    pub fn BK_node_child_count(node: *const BKNode) -> c_int;
+    pub fn BK_node_parent(node: *const BKNode) -> *mut BKNode;
+
+    // screens, areas and regions (Blender's editors/screen); axis: b'h' or b'v', where: BKDock
+    pub fn BK_area_split(area: *mut BKNode, axis: c_int, factor: c_float) -> *mut BKNode;
+    pub fn BK_area_join(keep: *mut BKNode, gone: *mut BKNode) -> c_int;
+    pub fn BK_area_dock(area: *mut BKNode, target: *mut BKNode, where_: c_int, factor: c_float) -> c_int;
+    pub fn BK_area_swap(a: *mut BKNode, b: *mut BKNode) -> c_int;
+    pub fn BK_area_close(area: *mut BKNode) -> c_int;
     pub fn BK_node_natural(node: *mut BKNode, r_size: *mut c_int);
     pub fn BK_node_set_image(node: *mut BKNode, rgba: *const c_uchar, w: c_int, h: c_int);
     pub fn BK_node_set_imbuf(node: *mut BKNode, ib: *const BKImBuf);

@@ -55,3 +55,10 @@ export const ProgressBar: DefineComponent<Record<string, unknown>>
 export { signal, batch, untrack, createSignal, isSignal, Signal, Memo } from '@blender-ui/native'
 /** A derived, cached BUI signal (`computed` stays Vue's). */
 export { memo } from '@blender-ui/native'
+
+// Blender's screen: <Screen :editors :layout :saved @change @window>, <Editor> (default slot: the
+// main view; named slots: the regions), <Region :size :hidden :side :hotkey @resize>.
+export { AreaSplit } from '@blender-ui/native/screen'
+export const Screen: DefineComponent<Record<string, unknown>>
+export const Editor: DefineComponent<Record<string, unknown>>
+export const Region: DefineComponent<Record<string, unknown>>
