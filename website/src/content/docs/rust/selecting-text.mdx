@@ -1,0 +1,116 @@
+---
+title: Selecting text
+description: Press and drag over text, double-click a word, copy it with Ctrl+C, and decide what can be selected with user-select.
+section: Rust
+order: 72
+languages: ["rust"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/selection.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/src/paint.rs", "bindings/rust/blenderui/src/style.rs", "bindings/rust/blenderui-tailwind/src/lib.rs", "bindings/rust/blenderui/tests/selection.rs", "bindings/rust/blenderui/examples/selectable.rs"]
+---
+
+Text in your elements is selectable, like on a web page. **Press and drag over a paragraph and it highlights; <Kbd keys="Ctrl+C" /> copies it.** You write nothing: every window does it, and `user-select` (or a Tailwind class) says where it should not.
+
+## What the user can do
+
+| Input | Result |
+| --- | --- |
+| Press and drag over text | Selects from the press to the pointer, across words, lines, elements and paragraphs |
+| Double-click | Selects the word (a run of letters and digits, of spaces, or of punctuation) |
+| Triple-click | Selects the whole block: the paragraph, list item or flex item |
+| <Kbd>Shift</Kbd> and click | Extends the selection to the click |
+| <Kbd keys="Ctrl+A" /> | Selects all the selectable text in the window |
+| <Kbd keys="Ctrl+C" /> | Copies the selection to the clipboard (Cmd on macOS, as everywhere in BUI) |
+| <Kbd>Esc</Kbd>, or a click on empty space | Clears the selection |
+
+The highlight uses the active theme's `selection` color, and the text keeps its color. Over text that can be selected the pointer is the I-beam, unless an element sets its own `cursor` (a link or a button keeps its hand).
+
+Some details that match a browser:
+
+- **A drag outside the text** maps to the nearest line: above the first line selects from its start, below the last selects to its end. The selection doesn't scroll the page by itself.
+- **A drag that selected text is not a click.** A press and release without moving still is, so `on_click` keeps working on text you can also select.
+- **Block boundaries are newlines** in the copied text. Whitespace is as rendered: runs of spaces collapse to one, and the line breaks of a `pre` stay.
+- **Text fields and other form controls** keep their own selection and their own <Kbd keys="Ctrl+C" />. Pressing on one never starts a page selection, and focusing one clears the page's. Their text is not part of the page's.
+
+## Choosing what can be selected
+
+`user-select` takes four values, and the Tailwind classes set them:
+
+| CSS | Tailwind | Meaning |
+| --- | --- | --- |
+| `user-select: auto` | `select-auto` | The default: selectable, unless an ancestor is `none` (then `none`) or `all` (then `all`) |
+| `user-select: text` | `select-text` | Selectable, even inside a `none` ancestor |
+| `user-select: none` | `select-none` | Not selectable: a drag passes over it, a press on it starts nothing, and it stays out of the copied text |
+| `user-select: all` | `select-all` | One click selects the whole element; a drag takes it whole |
+
+`-webkit-user-select` and `-moz-user-select` are accepted as aliases, and `contain` is read as `text`. The value follows CSS UI 4: `auto` takes `none` or `all` from the parent, so a `select-none` card keeps its children out.
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <div>
+        <p>"You can select this."</p>
+        <p select-none text-zinc-500>"Not this: a label."</p>
+        <p>"Order " <code select-all>"7f3a-91c2-b40e"</code> " ships today."</p>
+    </div>
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+div()
+    .child(p().child("You can select this."))
+    .child(p().class("select-none text-zinc-500").child("Not this: a label."))
+    .child(p().child("Order ").child(code().class("select-all").child("7f3a-91c2-b40e")).child(" ships today."))
+```
+
+</Tab>
+</Tabs>
+
+There is a runnable page of paragraphs in `examples/selectable.rs` (`cargo run --release --example selectable`).
+
+## Reading and driving it from code
+
+Every listener gets the `Window`, which has:
+
+| Method | What it does |
+| --- | --- |
+| `selected_text()` | The selected text, or `None`: block boundaries are newlines |
+| `select_all()` | Selects all the selectable text, like <Kbd keys="Ctrl+A" /> |
+| `clear_selection()` | Drops the selection, like <Kbd>Esc</Kbd> |
+| `on_selection_change(f)` | Calls `f(text, window, app)` when the user changes the selection (`text` is `None` once it is cleared). Calls from code do not fire it: the caller knows |
+| `read_clipboard()`, `write_clipboard(text)` | The clipboard's text, and put your own on it |
+
+```rust title="Show how much is selected"
+window.on_selection_change(|text, _, _| {
+    println!("{} characters selected", text.map_or(0, |t| t.chars().count()));
+});
+```
+
+The selection is two points, each a text box and a byte offset in its text, so it follows its text when the view renders again, and it is dropped when that text goes away. A window with nothing selected does no extra work: selection costs something only after the first press on text.
+
+## Limits
+
+- **Painted lists and canvases are not selectable.** [`vlist` and `chat_list`](../virtual-list/) draw their items on a canvas and a `canvas(...)` paints its own pixels, so there are no elements to select. A look can add selection through its `hit` hook as a next step.
+- **Text inside widgets** (inputs, textareas, buttons, dropdowns) uses the widget's own selection, as above.
+- **No autoscroll:** dragging past the edge of a scroll container doesn't scroll it.
+- **Right-to-left text** is copied in the order it is drawn.
+- **Keys reach the page while the pointer is over the window** (the kit sends them to the element under it): <Kbd keys="Ctrl+A" /> and <Kbd keys="Ctrl+C" /> do nothing with the pointer outside.
+- **A page selection stays highlighted** until the next key or pointer event after a text field takes the focus, then it clears.
+- **The selection isn't drawn through `::selection` rules** (`::selection { background: ... }` parses but isn't applied): the color is the theme's.
+
+## Next steps
+
+<CardGrid>
+  <Card title="Events" href="docs/rust/events/" icon="zap" kicker="Rust">
+    Clicks, keys and the `Window` API.
+  </Card>
+  <Card title="CSS and Tailwind" href="docs/rust/css-and-tailwind/" icon="layers" kicker="Rust">
+    Every property and class BUI understands.
+  </Card>
+  <Card title="Headless testing" href="docs/rust/headless-testing/" icon="check" kicker="Rust">
+    Drive a window from a test: press, drag, and read the text back.
+  </Card>
+</CardGrid>

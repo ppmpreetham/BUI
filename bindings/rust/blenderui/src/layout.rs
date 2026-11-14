@@ -298,6 +298,10 @@ pub(crate) struct BoxNode {
     pub fold: Option<usize>,
     /// This text run is laid out by its parent (`fold`), not by its own node.
     pub folded: bool,
+    /// Where layout placed this box in document order (text selection orders
+    /// text by it; words are built after the elements around them, so the
+    /// arena index is not that order).
+    pub seq: u32,
 }
 
 /// A laid-out frame. The arenas are reused by the next frame.
@@ -1120,6 +1124,7 @@ impl<'a> Builder<'a> {
             scroll_pos: (0.0, 0.0),
             fold: None,
             folded: false,
+            seq: 0,
         });
         if let (Some(p), true) = (parent, link) {
             if prev == NONE {
@@ -2398,7 +2403,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
             box_of[s] = i as u32;
         }
     }
-    let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text: tc };
+    let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text: tc, seq: 0 };
     walk.place(&mut frame.nodes, root_id, 0.0, 0.0, None, (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
     frame
@@ -2413,6 +2418,8 @@ struct Walk<'a> {
     vp: (f32, f32),
     styles: &'a StyleStore,
     text: &'a mut TextCache,
+    /// Boxes placed so far (`BoxNode::seq`).
+    seq: u32,
 }
 
 impl Walk<'_> {
@@ -2444,6 +2451,8 @@ impl Walk<'_> {
             }
             nodes[i].bounds = rect(x, y, w, h);
             nodes[i].clip = clip;
+            nodes[i].seq = self.seq;
+            self.seq += 1;
             if let Some(cr) = st.clip_rect.filter(|_| matches!(st.layout.position, Position::Absolute | Position::Fixed)) {
                 // edges from the border box's top-left corner; auto = that edge
                 let e = |k: usize, auto: f32, basis: f32| cr[k].map_or(auto, |l| l.resolve(&u, basis));
@@ -2482,6 +2491,8 @@ impl Walk<'_> {
                 place_folded_text(nodes, i, k, rect(x, y, w, h), &l, self.styles, self.text);
                 // the text is clipped by its container's `overflow`
                 nodes[k].clip = child_clip;
+                nodes[k].seq = self.seq;
+                self.seq += 1;
             }
         }
         let inner = (x - sx, y - sy);
@@ -2657,6 +2668,11 @@ impl Frame {
 
     /// Element boxes from the root down to the topmost box under (x, y).
     pub(crate) fn hit_path(&self, x: f32, y: f32, styles: &StyleStore) -> Vec<usize> {
+        self.path_to(self.hit_box(x, y, styles))
+    }
+
+    /// The topmost box under (x, y): a word, a text run, an element ...
+    pub(crate) fn hit_box(&self, x: f32, y: f32, styles: &StyleStore) -> Option<usize> {
         let mut best: Option<(i32, usize)> = None;
         for (i, n) in self.nodes.iter().enumerate() {
             if !n.visible || n.taffy.is_none() || !styles[n.style].pointer_events {
@@ -2671,8 +2687,13 @@ impl Frame {
                 best = Some((z, i));
             }
         }
+        best.map(|(_, b)| b)
+    }
+
+    /// The element boxes from the root down to the element that box `hit` belongs to.
+    pub(crate) fn path_to(&self, hit: Option<usize>) -> Vec<usize> {
         let mut path = Vec::new();
-        let mut cur = best.map(|(_, b)| self.nodes[b].owner);
+        let mut cur = hit.map(|b| self.nodes[b].owner);
         while let Some(i) = cur {
             if self.nodes[i].el != NONE {
                 path.push(i);

@@ -46,6 +46,19 @@ impl DisplayKind {
     }
 }
 
+/// `user-select`: whether, and how, the text of an element can be selected.
+/// `contain` is read as `text`; `auto` is resolved against the parent (see
+/// [`Computed::inherit`]) and is `text` for ordinary content.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UserSelect {
+    #[default]
+    Auto,
+    None,
+    Text,
+    /// One click selects the whole element.
+    All,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TextAlign {
     Left,
@@ -347,6 +360,8 @@ pub struct Computed {
     pub visible: bool,
     pub cursor: Option<i32>,
     pub pointer_events: bool,
+    /// `user-select` (not inherited; `auto` takes `none` / `all` from the parent, see `inherit`).
+    pub user_select: UserSelect,
     pub color: Rgba,
     pub accent: Option<Rgba>,
     pub font_size: f32,
@@ -457,6 +472,7 @@ impl Default for Computed {
             visible: true,
             cursor: None,
             pointer_events: true,
+            user_select: UserSelect::Auto,
             color: crate::color::rgb(0x000000), // initial: CanvasText
             accent: None,
             font_size: 13.0,
@@ -513,6 +529,12 @@ impl Computed {
             visible: parent.visible,
             cursor: parent.cursor,
             pointer_events: parent.pointer_events,
+            // CSS UI 4: `auto` computes to the parent's `none` / `all`, else `text`
+            user_select: match parent.user_select {
+                UserSelect::None => UserSelect::None,
+                UserSelect::All => UserSelect::All,
+                _ => UserSelect::Auto,
+            },
             color: parent.color,
             accent: parent.accent,
             font_size: parent.font_size,
@@ -657,7 +679,7 @@ pub(crate) fn prop_index(name: &str) -> Prop {
 /// renderer (floats, bidi, generated content, background images, animation ...).
 pub const ACCEPTED: &[&str] = &[
     "writing-mode", "will-change",
-    "user-select", "resize", "appearance", "caret-color", "scroll-behavior",
+    "resize", "appearance", "caret-color", "scroll-behavior",
     "overscroll-behavior", "touch-action", "hyphens",
     "font-feature-settings", "font-kerning",
     "font-stretch", "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
@@ -734,7 +756,7 @@ fn global_keyword(ctx: &mut Ctx, name: &str, keyword: &str) -> bool {
         "background-color" => background, "opacity" => opacity, "display" => display,
         "width" => layout.size.width, "height" => layout.size.height,
         "font-family" => font_family, "accent-color" => accent,
-        "-bui-font-id" => font_id,
+        "-bui-font-id" => font_id, "user-select" => user_select,
     }
 }
 
@@ -1426,8 +1448,11 @@ fn display(ctx: &mut Ctx, v: &[Tok]) -> bool {
     true
 }
 
+/// The kit's I-beam cursor (`cursor: text`, and the pointer over selectable text).
+pub(crate) const CURSOR_TEXT: i32 = 3;
+
 const CURSORS: &[(&str, i32)] = &[
-    ("auto", -1), ("default", 0), ("pointer", 5), ("text", 3), ("vertical-text", 3),
+    ("auto", -1), ("default", 0), ("pointer", 5), ("text", CURSOR_TEXT), ("vertical-text", CURSOR_TEXT),
     ("crosshair", 4), ("move", 6), ("all-scroll", 6), ("grab", 6), ("grabbing", 6),
     ("ew-resize", 1), ("e-resize", 1), ("w-resize", 1), ("col-resize", 1),
     ("ns-resize", 2), ("n-resize", 2), ("s-resize", 2), ("row-resize", 2),
@@ -3194,6 +3219,18 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             }
             true
         }),
+        h("user-select", |c, v| {
+            c.c.user_select = match kw(v) {
+                Some("auto") => UserSelect::Auto,
+                Some("none") => UserSelect::None,
+                Some("text" | "contain") => UserSelect::Text,
+                Some("all") => UserSelect::All,
+                _ => return false,
+            };
+            true
+        }),
+        h("-webkit-user-select", |c, v| delegate(c, "user-select", v)),
+        h("-moz-user-select", |c, v| delegate(c, "user-select", v)),
         h("pointer-events", |c, v| {
             c.c.pointer_events = kw(v) != Some("none");
             true

@@ -55,6 +55,8 @@ Run it with `cargo test`. Here's what each piece does:
 | --- | --- |
 | `simulate_mouse_move(window, x, y)` | Move the pointer, which triggers `:hover` styles and `on_hover` |
 | `simulate_click(window, x, y)` | Move, then press and release the left button |
+| `simulate_drag(window, from, to)` | Press at `from`, move to `to` in steps and release: select text, drag a slider. `simulate_press` and `simulate_release` hold the button yourself |
+| `simulate_click_with(window, x, y, ctrl, shift)`, `simulate_key_with(window, text, keysym, ctrl, shift)` | The same with modifier keys held (Shift+click, Ctrl+A) |
 | `simulate_scroll(window, x, y, lines)` | Turn the wheel at a point: positive `lines` scroll the content up, negative scroll down |
 | `simulate_key(window, text, keysym)` | Type text, or press a key by its X11 keysym name: `"Return"`, `"BackSpace"`, `"a"` … |
 

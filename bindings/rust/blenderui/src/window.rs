@@ -20,6 +20,7 @@ use crate::layout::{id_key, layout, Content, Frame, Key, LayoutCaches, UiState};
 use crate::prof::{self, span, Phase};
 use crate::window_kind::{WindowDecorations, WindowKind};
 use crate::paint::{paint_frame, Painter};
+use crate::selection::{Cx, Selector};
 use crate::widgets::{WKind, Widgets};
 use blenderui_sys as sys;
 
@@ -962,6 +963,11 @@ fn with_running_app(f: impl FnOnce(&mut App)) -> bool {
 
 unsafe extern "C" fn noop(_: *mut c_void) {}
 
+unsafe extern "C" {
+    /// The C runtime's `free`, for strings the kit allocates (the clipboard).
+    fn free(p: *mut c_void);
+}
+
 // ==========================================================================
 // Windows
 
@@ -1007,6 +1013,12 @@ pub struct Window {
     pointer: (f32, f32),
     pressed: Vec<Key>,
     press_button: MouseButton,
+    /// A scrollbar thumb being dragged: the container and where on the thumb it was grabbed.
+    sb_drag: Option<(Key, f32)>,
+    /// The text selection (see `selection`).
+    selector: Selector,
+    /// Called when the selection changes, with the selected text if any.
+    selection_hooks: Vec<Box<dyn FnMut(Option<&str>, &mut Window, &mut App)>>,
 }
 
 impl Window {
@@ -1066,6 +1078,9 @@ impl Window {
                 pointer: (-1.0, -1.0),
                 pressed: Vec::new(),
                 press_button: MouseButton::Left,
+                sb_drag: None,
+                selector: Selector::default(),
+                selection_hooks: Vec::new(),
             };
             if headless {
                 win.scale = sys::BK_scale().max(1.0);
@@ -1223,6 +1238,120 @@ impl Window {
         unsafe { sys::BK_clipboard_set(self.ctx, c.as_ptr()) };
     }
 
+    /// The clipboard's text (what [`write_clipboard`](Self::write_clipboard) and the user's copies put there).
+    pub fn read_clipboard(&self) -> Option<String> {
+        // SAFETY: a live context; the kit returns a malloc'd NUL-terminated string (or NULL) we free.
+        unsafe {
+            let p = sys::BK_clipboard_get(self.ctx);
+            if p.is_null() {
+                return None;
+            }
+            let s = CStr::from_ptr(p).to_string_lossy().into_owned();
+            free(p.cast());
+            Some(s)
+        }
+    }
+
+    // -- text selection ------------------------------------------------------------------------
+
+    /// The text selected in the window's elements (press and drag, double-click, `Ctrl+A`), if any:
+    /// block boundaries are newlines, whitespace is as rendered. Text fields keep their own selection.
+    pub fn selected_text(&mut self) -> Option<String> {
+        let f = self.frame.as_ref()?;
+        self.selector.text(f, &self.caches.styles)
+    }
+
+    /// Select all the selectable text (like `Ctrl+A` on a page).
+    pub fn select_all(&mut self) {
+        if let Some(f) = &self.frame {
+            if self.selector.select_all(f, &self.caches.styles) {
+                self.dirty = true;
+            }
+        }
+    }
+
+    /// Drop the selection (like `Escape`).
+    pub fn clear_selection(&mut self) {
+        if self.selector.clear() {
+            self.dirty = true;
+        }
+    }
+
+    /// Call `f` with the selected text (None: nothing selected) whenever the user changes the selection:
+    /// pressing, dragging, `Ctrl+A`, `Escape`, clicking away. Not for [`select_all`](Self::select_all)
+    /// and [`clear_selection`](Self::clear_selection): their caller knows.
+    pub fn on_selection_change(&mut self, f: impl FnMut(Option<&str>, &mut Window, &mut App) + 'static) {
+        self.selection_hooks.push(Box::new(f));
+    }
+
+    /// The cursor the window shows over its elements now (the kit's cursor id: 0 arrow, 3 I-beam ...).
+    #[doc(hidden)]
+    pub const fn cursor_style(&self) -> i32 {
+        self.cursor
+    }
+
+    /// A text field (the kit's editor) has the keyboard.
+    fn text_field_focused(&self) -> bool {
+        // SAFETY: a live context.
+        unsafe { !sys::BK_focus(self.ctx).is_null() }
+    }
+
+    /// The selection changed by the user: draw it (the frame again, no render) and tell the hooks.
+    fn selection_changed(&mut self, app: &mut App, repaint: bool) {
+        if repaint {
+            if let Some(frame) = self.frame.take() {
+                self.widgets.keep(); // no layout ran: the widgets are the last frame's
+                self.present(app, frame, None);
+            }
+        }
+        if self.selection_hooks.is_empty() {
+            return;
+        }
+        let text = self.selected_text();
+        let mut hooks = std::mem::take(&mut self.selection_hooks);
+        for h in &mut hooks {
+            h(text.as_deref(), self, app);
+        }
+        hooks.append(&mut self.selection_hooks);
+        self.selection_hooks = hooks;
+    }
+
+    fn select_press(&mut self, x: f32, y: f32, shift: bool) -> bool {
+        let Some(f) = &self.frame else { return false };
+        let hit = f.hit_box(x, y, &self.caches.styles);
+        let mut cx = Cx { frame: f, styles: &self.caches.styles, text: &mut self.caches.text };
+        self.selector.press(&mut cx, x, y, hit, shift)
+    }
+
+    fn select_drag(&mut self, x: f32, y: f32) -> bool {
+        let Some(f) = &self.frame else { return false };
+        let mut cx = Cx { frame: f, styles: &self.caches.styles, text: &mut self.caches.text };
+        self.selector.drag_to(&mut cx, x, y)
+    }
+
+    /// `Ctrl+A`, `Ctrl+C` and `Escape` on the document's selection: not while a text field has the
+    /// keyboard (it owns them). (`Ctrl` is the Command key on macOS: the kit maps it.)
+    fn selection_key(&mut self, ks: &Keystroke, app: &mut App) {
+        if self.text_field_focused() {
+            return;
+        }
+        let ctrl = ks.modifiers.control && !ks.modifiers.alt;
+        let changed = match ks.key.to_ascii_lowercase().as_str() {
+            "escape" => self.selector.clear(),
+            "a" if ctrl => self.frame.as_ref().is_some_and(|f| self.selector.select_all(f, &self.caches.styles)),
+            "c" if ctrl => {
+                if let Some(t) = self.selected_text() {
+                    self.write_clipboard(&t);
+                }
+                false
+            }
+            _ => false,
+        };
+        if changed {
+            self.selection_changed(app, true);
+        }
+    }
+
     /// One UI unit (Blender's `UI_UNIT_Y`, a row of widgets) in logical pixels.
     pub fn ui_unit(&self) -> f32 {
         // SAFETY: a constant query.
@@ -1329,6 +1458,9 @@ impl Window {
         FRAMES_PRESENTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let vp = self.viewport();
         let scale = self.scale;
+        // a selection follows its text into the new frame (and goes with it)
+        self.selector.invalidate();
+        self.painter.sel = self.selector.paint(&frame, &self.caches.styles);
         {
             let _s = span(Phase::Paint);
             let gpu = self.is_gpu();
@@ -1428,8 +1560,40 @@ impl Window {
         }
     }
 
+    /// The element keys under the pointer, and (when the pointer moved: `measure`) whether it is over
+    /// text that can be selected.
+    fn hover_target(&mut self, measure: bool) -> (Vec<Key>, Option<bool>) {
+        let Some(f) = &self.frame else { return (Vec::new(), Some(false)) };
+        let (x, y) = self.pointer;
+        let hit = f.hit_box(x, y, &self.caches.styles);
+        let path = f.path_to(hit).into_iter().map(|i| f.nodes[i].key).collect();
+        let over = measure.then(|| hit.is_some_and(|i| {
+            let mut cx = Cx { frame: f, styles: &self.caches.styles, text: &mut self.caches.text };
+            crate::selection::is_text(&mut cx, i, x, y)
+        }));
+        (path, over)
+    }
+
+    /// The pointer's cursor: that of the deepest element under it that sets one
+    /// (`cursor: auto` sets none), else the text cursor over selectable text.
+    /// `over_text` None: not measured (a frame, not a pointer move): keep the I-beam if it showed.
+    fn set_cursor(&mut self, path: &[Key], over_text: Option<bool>) {
+        let Some(f) = &self.frame else { return };
+        let text = over_text.unwrap_or(self.cursor == crate::style::CURSOR_TEXT);
+        let cursor = path.iter().rev()
+            .find_map(|k| f.by_key().get(k).and_then(|&i| self.caches.styles[f.nodes[i].style].cursor))
+            .unwrap_or(if text { crate::style::CURSOR_TEXT } else { 0 });
+        if cursor != self.cursor {
+            self.cursor = cursor;
+            for &c in &self.canvases {
+                unsafe { sys::BK_set_num(c, c"cursor".as_ptr(), cursor as f64) };
+            }
+        }
+    }
+
     fn update_hover(&mut self, app: &mut App, fire: bool) {
-        let path = self.path_at(self.pointer.0, self.pointer.1);
+        let (path, over_text) = self.hover_target(fire);
+        self.set_cursor(&path, over_text);
         let now: std::collections::HashSet<Key> = path.iter().copied().collect();
         if now == self.state.hovered {
             return;
@@ -1440,17 +1604,6 @@ impl Window {
             entered.iter().chain(&left).any(|k| f.by_key().get(k).is_some())
         });
         self.state.hovered = now;
-        // cursor of the deepest element that sets one
-        if let Some(f) = &self.frame {
-            let cursor = path.iter().rev()
-                .find_map(|k| f.by_key().get(k).and_then(|&i| self.caches.styles[f.nodes[i].style].cursor)).unwrap_or(0);
-            if cursor != self.cursor {
-                self.cursor = cursor;
-                for &c in &self.canvases {
-                    unsafe { sys::BK_set_num(c, c"cursor".as_ptr(), cursor as f64) };
-                }
-            }
-        }
         if fire {
             // hover listeners don't bubble: each element hears its own enter / leave
             for (keys, on) in [(left, false), (entered, true)] {
@@ -1499,6 +1652,10 @@ impl Window {
             self.widget_event(ev, app);
             return;
         }
+        // a text field took the focus: its own selection counts, the document's goes
+        if self.selector.has_selection() && self.text_field_focused() && self.selector.clear() {
+            self.selection_changed(app, true);
+        }
         let (x, y) = (ev.a as f32 / self.scale, ev.b as f32 / self.scale);
         match ev.kind {
             sys::BK_EV_CONFIGURE => {
@@ -1510,10 +1667,17 @@ impl Window {
             }
             sys::BK_EV_MOTION | sys::BK_EV_ENTER => {
                 self.pointer = (x, y);
+                if self.sb_drag.is_some() {
+                    self.drag_scrollbar(y);
+                    return;
+                }
                 if self.caches.anim.pointer_move(x, y) {
                     self.request_motion_frame(); // a drag: a redraw, no render
                 }
                 self.update_hover(app, true);
+                if self.select_drag(x, y) {
+                    self.selection_changed(app, true);
+                }
                 let (modifiers, _) = self.pointer_event(&ev.text);
                 let pressed = (!self.pressed.is_empty()).then_some(self.press_button);
                 let e = MouseMoveEvent { position: point(px(x), px(y)), pressed_button: pressed, modifiers };
@@ -1529,6 +1693,10 @@ impl Window {
                 self.pointer = (x, y);
                 let (modifiers, button) = self.pointer_event(&ev.text);
                 let path = self.path_at(x, y);
+                if button == MouseButton::Left && self.grab_scrollbar(&path, x, y) {
+                    return;
+                }
+                let selected = button == MouseButton::Left && self.select_press(x, y, modifiers.shift);
                 self.press_button = button;
                 self.state.active = path.iter().copied().collect();
                 self.set_focus(&path);
@@ -1541,8 +1709,14 @@ impl Window {
                     self.emit(app, deepest, &e, |l| l.mouse_down.iter()
                         .filter(|(b, _)| b.is_none_or(|b| b == button)).map(|(_, f)| f).collect());
                 }
+                if selected {
+                    self.selection_changed(app, false); // the press renders again: that draws it
+                }
             }
             sys::BK_EV_RELEASE => {
+                if self.sb_drag.take().is_some() {
+                    return;
+                }
                 let (modifiers, button) = self.pointer_event(&ev.text);
                 let path = self.path_at(x, y);
                 let up = MouseUpEvent { button, position: point(px(x), px(y)), modifiers };
@@ -1557,7 +1731,9 @@ impl Window {
                 self.state.active.clear();
                 self.dirty = true;
                 self.caches.anim.pointer_up();
-                if let (Some(target), MouseButton::Left) = (common, button) {
+                // a press that selected text is a selection, not a click (as in a browser)
+                let dragged = button == MouseButton::Left && self.selector.release();
+                if let (Some(target), MouseButton::Left, false) = (common, button, dragged) {
                     self.toggle_details(target);
                     let down = MouseDownEvent { button, position: point(px(x), px(y)), modifiers, click_count: 1 };
                     let e = ClickEvent { down, up };
@@ -1583,7 +1759,16 @@ impl Window {
                 let target = self.state.focused.or_else(|| self.state_deepest())
                     .unwrap_or(crate::layout::ROOT_KEY);
                 if ev.kind == sys::BK_EV_KEY {
+                    self.selection_key(&ks, app);
+                    let page = match ks.key.to_ascii_lowercase().as_str() {
+                        "pagedown" => 1.0,
+                        "pageup" => -1.0,
+                        _ => 0.0,
+                    };
                     self.emit(app, target, &KeyDownEvent { keystroke: ks }, |l| l.key_down.iter().collect());
+                    if page != 0.0 {
+                        self.scroll_page(page);
+                    }
                 } else {
                     self.emit(app, target, &KeyUpEvent { keystroke: ks }, |l| l.key_up.iter().collect());
                 }
@@ -1614,6 +1799,63 @@ impl Window {
             }
             cur = f.nodes[i].parent;
         }
+    }
+
+    /// PageUp / PageDown: a page of the innermost scroll container under the pointer.
+    fn scroll_page(&mut self, dir: f32) {
+        let path = self.path_at(self.pointer.0, self.pointer.1);
+        let Some(f) = &self.frame else { return };
+        let page = path.iter().rev()
+            .filter_map(|k| f.by_key().get(k))
+            .map(|&i| &f.nodes[i])
+            .find(|n| n.scroll_range.1 > 0.0)
+            .map(|n| n.bounds.size.height * 0.9);
+        if let Some(page) = page {
+            self.scroll_by(&path, dir * page, false);
+        }
+    }
+
+    /// The vertical scrollbar of a container along `path`: (key, thumb top, thumb height, track top, track height).
+    fn scrollbar_at(&self, path: &[Key], x: f32) -> Option<(Key, f32, f32, f32, f32)> {
+        let f = self.frame.as_ref()?;
+        for key in path.iter().rev() {
+            let Some(&i) = f.by_key().get(key) else { continue };
+            let n = &f.nodes[i];
+            let ry = n.scroll_range.1;
+            let b = n.bounds;
+            if ry <= 0.0 || x < b.origin.x + b.size.width - 10.0 || x > b.origin.x + b.size.width {
+                continue;
+            }
+            let h = b.size.height;
+            let th = (h * h / (h + ry)).max(16.0);
+            let ty = b.origin.y + (h - th) * (n.scroll_pos.1 / ry);
+            return Some((*key, ty, th, b.origin.y, h));
+        }
+        None
+    }
+
+    /// A press on a scrollbar starts a drag (on the track it first centers the thumb there).
+    fn grab_scrollbar(&mut self, path: &[Key], x: f32, y: f32) -> bool {
+        let Some((key, ty, th, _, _)) = self.scrollbar_at(path, x) else { return false };
+        let grab = if y >= ty && y <= ty + th { y - ty } else { th / 2.0 };
+        self.sb_drag = Some((key, grab));
+        self.drag_scrollbar(y);
+        true
+    }
+
+    fn drag_scrollbar(&mut self, y: f32) {
+        let Some((key, grab)) = self.sb_drag else { return };
+        let Some(f) = &self.frame else { return };
+        let Some(&i) = f.by_key().get(&key) else { return };
+        let n = &f.nodes[i];
+        let (rx, ry) = n.scroll_range;
+        let h = n.bounds.size.height;
+        let th = (h * h / (h + ry)).max(16.0);
+        let free = (h - th).max(1.0);
+        let sy = (((y - grab - n.bounds.origin.y) / free) * ry).clamp(0.0, ry);
+        let sx = n.scroll_pos.0.clamp(0.0, rx);
+        self.state.scroll.insert(key, (sx, sy));
+        self.dirty = true;
     }
 
     /// Scroll the innermost scroll container along `path` that can move.

@@ -119,6 +119,7 @@ pub mod shader;
 pub mod video;
 pub(crate) mod prof;
 mod selector;
+pub(crate) mod selection;
 pub mod hooks;
 pub mod style;
 pub use blenderui_tailwind as tailwind;

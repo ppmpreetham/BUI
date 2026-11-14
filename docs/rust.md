@@ -442,6 +442,28 @@ gets `on_click`.
 Positions are logical pixels. Clicking an element focuses it; key events go
 to the focused element and bubble up. `cx.stop_propagation()` stops bubbling.
 
+### Selecting text
+
+Text in elements is selectable like on a web page: press and drag (across words,
+lines, elements and paragraphs), double-click a word, triple-click a block,
+`Shift`+click to extend, `Ctrl+A` for all, `Ctrl+C` to copy (Cmd on macOS),
+`Esc` or a click on empty space to clear. The highlight is the theme's
+`selection` color; over selectable text the pointer is the I-beam unless an
+element sets its own `cursor`. A drag that selected text is not a click.
+`user-select: none | auto | text | all` (and `select-none`, `select-auto`,
+`select-text`, `select-all`; `-webkit-user-select` is an alias) decides what
+takes part: `none` is skipped and a press on it starts nothing, `all` is taken
+whole by one click, `auto` follows the parent as in CSS UI 4. Block boundaries
+are newlines in the copied text and whitespace is as rendered. Text fields and
+the other form controls keep their own selection and keys; canvases and the
+painted lists (`vlist`, `chat_list`) are not selectable, and a drag does not
+autoscroll.
+
+On the `Window` (listeners get it): `selected_text() -> Option<String>`,
+`select_all()`, `clear_selection()`, `on_selection_change(|text, window, app| ..)`
+(fires for the user's changes) and `read_clipboard()` / `write_clipboard(text)`.
+`examples/selectable.rs` is a page of paragraphs; `tests/selection.rs` drives it
+headlessly with `simulate_drag`, `simulate_click` and `simulate_key_with`.
 ## Images
 
 `<img src>` and CSS background images read every format the kit reads (PNG,
@@ -550,7 +572,7 @@ Application::headless().run(|cx| {
 });
 ```
 
-Also `simulate_mouse_move`, `simulate_scroll` and `simulate_key(text, keysym)`.
+Also `simulate_mouse_move`, `simulate_scroll`, `simulate_key(text, keysym)`, `simulate_key_with` (Ctrl, Shift), `simulate_click_with`, and `simulate_press`, `simulate_release` and `simulate_drag(from, to)` for a held button.
 The kit has global state, so one `Application` runs at a time per process
 (`run` takes a lock; parallel tests queue up).
 
@@ -561,7 +583,7 @@ From `cargo test --test parity -- --nocapture`:
 | Area                                  | Coverage                                                                         |
 | ------------------------------------- | -------------------------------------------------------------------------------- |
 | HTML elements (WHATWG index)          | **113 / 113** constructible, plus `svg` / `math` roots; 9 are Blender widgets     |
-| CSS properties                        | **271** change layout or rendering; **137** more parse but have no effect         |
+| CSS properties                        | **275** change layout or rendering; **135** more parse but have no effect         |
 | W3C property index (745 properties)   | **261** rendered (35%), **129** parsed without effect (17%), **355** not recognized (48%): most of these are drafts, speech, paged media and SVG |
 | CSS 2.1, screen properties            | **90 / 90** rendered, 90 / 90 parsed                                              |
 | Flexbox                               | **12 / 12**                                                                       |

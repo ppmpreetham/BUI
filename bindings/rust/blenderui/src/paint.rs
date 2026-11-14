@@ -330,6 +330,8 @@ pub struct Painter {
     over: Vec<Bounds<f32>>,
     /// The window draws on the GPU (set before each paint).
     gpu: bool,
+    /// The text selection to highlight (set before each paint; None: nothing is selected).
+    pub(crate) sel: Option<crate::selection::SelPaint>,
 }
 
 impl Painter {
@@ -462,6 +464,11 @@ impl Painter {
             self.push(Kind::Rect { radius: 0.0, outline: Rgba::TRANSPARENT, width: 0.0 },
                       Self::corners(bounds), c);
         }
+    }
+
+    /// A selection highlight: a rectangle that is pushed even when transparent (see `paint_selection`).
+    fn highlight(&mut self, bounds: Bounds<f32>, color: Rgba) {
+        self.push(Kind::Rect { radius: 0.0, outline: Rgba::TRANSPARENT, width: 0.0 }, Self::corners(bounds), color);
     }
 
     /// A rounded rectangle with an optional border (gpui's `quad`).
@@ -1239,41 +1246,21 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
             if owner.taffy.is_none() {
                 p.fill(b, styles[owner.style].background);
             }
-            paint_text_line(p, tc, c, frame.text(i), b.origin.x, b.origin.y, b.size.height, None);
+            let text = frame.text(i);
+            if let Some(sel) = p.sel {
+                let line = RunLine { text, x: b.origin.x, y: b.origin.y, lh: b.size.height, w: b.size.width, at: 0 };
+                paint_selection(p, tc, c, &sel, n.seq, text.len(), &line, true);
+            }
+            paint_text_line(p, tc, c, text, b.origin.x, b.origin.y, b.size.height, None);
         }
         // a text run as a flex/grid item (in line boxes its words paint instead)
         Content::Text(t) if n.taffy.is_some() || n.folded => {
-            let flags = text::flags(c);
-            let nowrap = matches!(c.white_space, WhiteSpace::NoWrap | WhiteSpace::Pre);
-            let ellipsis = c.ellipsizes();
-            if !ellipsis && !t.contains([' ', '\n']) && text::break_mode(c) == 0 {
-                // one word: one line (the common label case)
-                let lw = tc.width(t, c.font_size, flags);
-                let x = match c.text_align {
-                    TextAlign::Center => b.origin.x + (b.size.width - lw) / 2.0,
-                    TextAlign::Right => b.origin.x + b.size.width - lw,
-                    _ => b.origin.x,
-                };
-                paint_text_line(p, tc, c, t, x, b.origin.y, c.line_px(), Some(lw));
-                return;
-            }
-            let lines = if nowrap {
-                vec![t.clone()]
-            } else {
-                tc.wrap(t, c.font_size, flags, b.size.width + 0.5, text::break_mode(c))
-            };
-            let lh = c.line_px();
-            for (k, line) in lines.iter().enumerate() {
-                let line = if ellipsis { tc.ellipsize(line, c.font_size, flags, b.size.width + 0.5) }
-                           else { line.clone() };
-                let lw = tc.width(&line, c.font_size, flags);
-                let x = match c.text_align {
-                    TextAlign::Center => b.origin.x + (b.size.width - lw) / 2.0,
-                    TextAlign::Right => b.origin.x + b.size.width - lw,
-                    _ => b.origin.x,
-                };
-                paint_text_line(p, tc, c, &line, x, b.origin.y + lh * k as f32, lh, Some(lw));
-            }
+            each_run_line(tc, c, t, b, p.sel.is_some(), |tc, line| {
+                if let Some(sel) = p.sel {
+                    paint_selection(p, tc, c, &sel, n.seq, t.len(), line, false);
+                }
+                paint_text_line(p, tc, c, line.text, line.x, line.y, line.lh, Some(line.w));
+            });
         }
         Content::Element | Content::Replaced(_) if n.taffy.is_some() => {
             let hidden_cell = c.empty_cells_hide && c.display == DisplayKind::TableCell
@@ -1340,6 +1327,86 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
         }
         _ => {}
     }
+}
+
+/// One line of a text run (a flex / grid item, or text folded into its
+/// box) as it is drawn: what paint draws, and what text selection measures.
+pub(crate) struct RunLine<'a> {
+    pub text: &'a str,
+    pub x: f32,
+    pub y: f32,
+    pub lh: f32,
+    pub w: f32,
+    /// Byte offset of `text` in the run (only when asked for: 0 otherwise).
+    pub at: usize,
+}
+
+/// Call `f` with each line of text run `t` laid out in `b`: wrapped, cut with
+/// an ellipsis, aligned. `offsets`: find where each line starts in `t`.
+pub(crate) fn each_run_line(tc: &mut TextCache, c: &Computed, t: &str, b: Bounds<f32>, offsets: bool,
+                            mut f: impl FnMut(&mut TextCache, &RunLine)) {
+    let flags = text::flags(c);
+    let ellipsis = c.ellipsizes();
+    let align = |lw: f32| match c.text_align {
+        TextAlign::Center => b.origin.x + (b.size.width - lw) / 2.0,
+        TextAlign::Right => b.origin.x + b.size.width - lw,
+        _ => b.origin.x,
+    };
+    if !ellipsis && !t.contains([' ', '\n']) && text::break_mode(c) == 0 {
+        // one word: one line (the common label case)
+        let lw = tc.width(t, c.font_size, flags);
+        f(tc, &RunLine { text: t, x: align(lw), y: b.origin.y, lh: c.line_px(), w: lw, at: 0 });
+        return;
+    }
+    let nowrap = matches!(c.white_space, WhiteSpace::NoWrap | WhiteSpace::Pre);
+    let lines = if nowrap {
+        vec![t.to_owned()]
+    } else {
+        tc.wrap(t, c.font_size, flags, b.size.width + 0.5, text::break_mode(c))
+    };
+    let lh = c.line_px();
+    let mut from = 0;
+    for (k, line) in lines.iter().enumerate() {
+        let line: std::borrow::Cow<str> = if ellipsis {
+            tc.ellipsize(line, c.font_size, flags, b.size.width + 0.5).into()
+        } else {
+            line.as_str().into()
+        };
+        let lw = tc.width(&line, c.font_size, flags);
+        let mut at = 0;
+        if offsets {
+            // lines are pieces of the run, whitespace between them dropped
+            let shown = line.strip_suffix('\u{2026}').filter(|_| ellipsis).unwrap_or(&line);
+            at = from + (t[from..].len() - t[from..].trim_start().len());
+            if !t[at..].starts_with(shown) {
+                at = t[from..].find(shown).map_or(at, |k| from + k);
+            }
+            from = (at + shown.len()).min(t.len());
+        }
+        f(tc, &RunLine { text: &line, x: align(lw), y: b.origin.y + lh * k as f32, lh, w: lw, at });
+    }
+}
+
+/// The selection highlight behind one line of text: the selected part of
+/// the line (`word`: through the space after the word when the selection
+/// goes on). While anything is selected every line pushes one rectangle
+/// (transparent when not selected), so items keep their canvas slots and a
+/// selection change damages only the lines whose state changed.
+#[allow(clippy::too_many_arguments)]
+fn paint_selection(p: &mut Painter, tc: &mut TextCache, c: &Computed, sel: &crate::selection::SelPaint, seq: u32,
+                   len: usize, line: &RunLine, word: bool) {
+    let none = rect(line.x, line.y, 0.0, 0.0);
+    let Some((s, e, goes_on)) = sel.range(seq, len) else {
+        return p.highlight(none, Rgba::TRANSPARENT);
+    };
+    let (rs, re) = (s.saturating_sub(line.at).min(line.text.len()), e.saturating_sub(line.at).min(line.text.len()));
+    if re <= rs {
+        return p.highlight(none, Rgba::TRANSPARENT);
+    }
+    let x0 = line.x + crate::selection::advance(tc, c, line.text, rs);
+    let x1 = if word && goes_on && re == line.text.len() { line.x + line.w }
+             else { line.x + crate::selection::advance(tc, c, line.text, re) };
+    p.highlight(rect(x0, line.y, (x1 - x0).max(0.0), line.lh), sel.color);
 }
 
 pub(crate) fn content_box(c: &Computed, b: Bounds<f32>) -> Bounds<f32> {

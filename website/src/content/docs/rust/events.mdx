@@ -79,6 +79,7 @@ rsx! {
 - **Clicking an element focuses it.** Key events go to the focused element, then bubble up through its ancestors.
 - **Most events bubble**: a click on a `<span>` inside a `<button>` reaches the button's `on_click` too. `on_hover` doesn't bubble.
 - **`cx.stop_propagation()`** stops an event from reaching ancestors.
+- **Selecting text:** text in elements is selectable by default; see [Selecting text](../selecting-text/) for `user-select`, copying and `window.selected_text()`.
 - **Focus from code:** `window.focus_id("name")` focuses the element with that `.id(...)`, and `window.focused_id()` tells you which one has focus.
 
 ```rust
