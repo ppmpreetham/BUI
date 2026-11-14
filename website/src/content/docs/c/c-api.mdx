@@ -288,7 +288,7 @@ if (BK_version() != BUI_KIT_VERSION) {
 }
 ```
 
-The macros are `BUI_KIT_VERSION_MAJOR`, `_MINOR`, `_PATCH`, `BUI_KIT_VERSION_STRING` (`"0.4.0"`) and `BUI_KIT_VERSION` (one number: 0.4.0 is 400, 1.2.3 is 10203). The Python wheels, Rust crates and npm packages carry the same number, and a release is refused when any of them differs.
+The macros are `BUI_KIT_VERSION_MAJOR`, `_MINOR`, `_PATCH`, `BUI_KIT_VERSION_STRING` (`"0.5.1"`) and `BUI_KIT_VERSION` (one number: 0.5.1 is 501, 1.2.3 is 10203). The Python wheels, Rust crates and npm packages carry the same number, and a release is refused when any of them differs.
 
 **Before 1.0 there is no promise that the API stays the same.** Any release may add to it, and a release may change or remove a function. Every change that breaks existing code is listed under "C API changes" in `CHANGELOG.md`, with what to use instead. Pin a release number, not a commit.
 

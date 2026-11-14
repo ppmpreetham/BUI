@@ -17,14 +17,16 @@ Each row has a status: **Works** when it works and is tested, **Partial** when c
   rows={[
     ["C runtime (the kit)", "done", "Nodes, Tk-style geometry managers, input, Blender widget drawing, damage rendering, undo, animation, text areas, canvases, scroll views, Blender's string search, expression evaluator, text-edit undo and float precision"],
     ["Native windows", "done", "Windows (Win32) and Linux (X11; native Wayland is experimental): DPI-aware, frame-paced animation, clipboard, cursors"],
-    ["Themes", "done", "Blender's Dark (default) and Light presets, switchable at run time from every language, or with <code>BUI_THEME</code>"],
+    ["Themes", "done", "Blender's Dark (default) and Light presets, your own themes from a JSON file, switchable at run time from every language, or with <code>BUI_THEME</code>"],
     ["tkinter syntax", "done", "Every public tkinter and ttk name: 7,846 of 7,846"],
     ["Blender components", "done", "45 components, including the color ramp, curve and node editors"],
     ["Rust", "done", "All 113 HTML elements, flexbox, grid, CSS 2.1, modern CSS, animations, Tailwind v4, <code>rsx!</code> and gpui-style builders, <code>#[component]</code>, hooks, Blender components, headless testing"],
     ["Dear ImGui", "done", "The real Dear ImGui 1.93 on BUI (CPU, Direct3D 11, OpenGL); C++, C (399 of 399 functions), Python and Rust; the Blender-widgets build"],
     ["Rendering", "done", "Parallel, damage-tracked software raster; GPU renderer on Direct3D 11 (Windows) and OpenGL 3.3 (Linux)"],
     ["JavaScript and React", "done", "<code>@blender-ui/native</code> and <code>@blender-ui/react</code> on Node.js and Bun; <code>bui build</code> standalone executables"],
-    ["Packaging", "done", "<code>blenderui</code> on PyPI with wheels for every platform; <code>blenderui</code> on crates.io; <code>@blender-ui/react</code> and <code>@blender-ui/native</code> on npm"],
+    ["Lua", "done", "<code>bui-lua</code> and the <code>bui</code> module for Lua 5.4, on LuaRocks (<code>luarocks install blenderui</code>)"],
+    ["D", "done", "A DUB package in <code>bindings/d</code>: raw C declarations, D wrappers and an HTML, CSS and RSX layer (on <code>main</code>, in the next release)"],
+    ["Packaging", "done", "<code>blenderui</code> on PyPI with wheels for every platform; <code>blenderui</code> on crates.io; <code>@blender-ui/react</code> and <code>@blender-ui/native</code> on npm; <code>blenderui</code> on LuaRocks"],
   ]}
 />
 
@@ -54,7 +56,7 @@ Each row has a status: **Works** when it works and is tested, **Partial** when c
     ["Accessibility", "planned", "Screen-reader support through UI Automation (Windows), AT-SPI (Linux) and NSAccessibility (macOS)"],
     ["Vue", "done", "<code>@blender-ui/vue</code>: Vue 3 single-file components through Vue's own <code>createRenderer</code>, on <code>@blender-ui/native</code> (the layer React and Svelte share)"],
     ["More JavaScript frameworks", "planned", "Angular, Solid and Lit, as thin adapters over <code>@blender-ui/native</code>"],
-    ["More languages", "planned", "Lua (a community pull request is in review), Ruby, Go (through cgo), C#, Zig, Swift, Kotlin and MyGo over the same C header; Godot, Unity and Bevy; Flutter"],
+    ["More languages", "planned", "Ruby, Go (through cgo), C#, Zig, Swift, Kotlin and MyGo over the same C header; Godot, Unity and Bevy; Flutter"],
   ]}
 />
 

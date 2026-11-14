@@ -49,13 +49,13 @@ Yes, in the ways people notice. An idle window uses no CPU, because BUI redraws 
 
 Windows and Linux fully, and macOS too, with caveats. The macOS window host is checked by CI and has been tried by hand on three Macs, two Apple Silicon and one Intel (the bugs they found are fixed). JavaScript runs headless there, and there's no GPU renderer on macOS yet. See [Platforms](../../reference/platforms/).
 
-## Can I use BUI from Vue, Angular, Ruby, Go or Lua?
+## Can I use BUI from Vue, Lua, Angular, Ruby or Go?
 
-Vue, yes: it's [`@blender-ui/vue`](../../javascript/vue/). Angular, Ruby, Go and Lua not yet, but people have asked and they are on the [roadmap](../roadmap/). Angular, Solid or Lit would be thin adapters over `@blender-ui/native`, the layer React, Svelte and Vue share ([how to add a framework](../../javascript/native-api/)). Ruby and Go (through cgo) would call the C kit, `BUI_kit.h`, which has been versioned since 0.4.1. A Lua binding is in review as a community pull request. If you want one sooner, open an issue or a pull request; the [contributing guide](../contributing/) says how.
+Vue and Lua, yes: Vue is [`@blender-ui/vue`](../../javascript/vue/) and Lua is `luarocks install blenderui` ([Lua](../../lua/overview/)). There is also a [D package](../../d/overview/). Angular, Ruby and Go not yet, but people have asked and they are on the [roadmap](../roadmap/). Angular, Solid or Lit would be thin adapters over `@blender-ui/native`, the layer React, Svelte and Vue share ([how to add a framework](../../javascript/native-api/)). Ruby and Go (through cgo) would call the C kit, `BUI_kit.h`, which has been versioned since 0.4.1. If you want one sooner, open an issue or a pull request; the [contributing guide](../contributing/) says how.
 
 ## Can I change the colors?
 
-You can color individual elements in every API, and Rust and JavaScript give you full CSS on plain HTML elements. You also get Blender's Light theme as well as its default Dark one: `bui.set_theme("light")`, `blenderui::set_theme("light")`, `new App({ theme: "light" })` or `BUI_THEME=light`. Custom theme files aren't supported. See [Theming](../../concepts/theming/).
+You can color individual elements in every API, and Rust and JavaScript give you full CSS on plain HTML elements. You also get Blender's Light theme as well as its default Dark one: `bui.set_theme("light")`, `blenderui::set_theme("light")`, `new App({ theme: "light" })` or `BUI_THEME=light`. You can also load your own theme from a JSON file. See [Theming](../../concepts/theming/).
 
 ## Is it ready for production?
 

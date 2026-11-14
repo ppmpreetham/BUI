@@ -4,7 +4,7 @@ description: VS Code and Zed extensions for BUI's rsx! markup, with Tailwind-awa
 section: Rust
 order: 95
 languages: ["rust"]
-sources: ["addons/bui-vscode/README.md", "addons/bui-zed/README.md"]
+sources: ["addons/bui-vscode/README.md", "addons/bui-zed/README.md", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui-macros/src/lib.rs"]
 ---
 
 BUI ships two editor extensions in `addons/`. Both are GPL-3.0-or-later, like BUI.
@@ -29,3 +29,22 @@ Zed extensions can't extend the built-in Rust injections, which hardcode macro n
 - partial `view!` highlighting if you also install Zed's Leptos RSTML extension (its grammar errors on bare Tailwind attributes, so the highlighting degrades around them).
 
 Install it with `zed: install dev extension` and pick `addons/bui-zed`.
+
+## Language servers
+
+BUI has no language server of its own, and neither extension starts one.
+
+- **Rust code** is handled by rust-analyzer, as in any Rust project. How rust-analyzer treats the inside of an `rsx!` body is not something this page has checked, so don't rely on completion or hover there.
+- **Typos in Tailwind attributes are caught at build time.** `rsx!` is a procedural macro, so BUI's own compiler checks the markup when your program builds. A bare attribute that looks like a Tailwind utility but isn't one (`<div p-4>` is fine, a misspelling is a compile error that suggests the fix) and an unknown class in `tw!("...")` both fail the build. Plain HTML boolean attributes, `data-*` and `aria-*` pass through. The macro hands a `class="..."` string to `.class(...)` as it is and does not check each class, so a typo there is not reported at build time. See [CSS and Tailwind](../css-and-tailwind/#tailwind-attributes-in-rsx).
+- **Tailwind IntelliSense isn't configured** for `rsx!` in either editor. The VS Code extension completes common classes on its own, but it is a list, not the full Tailwind catalogue, and the compiler stays the validator. Zed has no class completion at all.
+
+## Next steps
+
+<CardGrid>
+  <Card title="rsx! and components" href="docs/rust/rsx-and-components/" icon="layers" kicker="Rust">
+    The markup these extensions highlight, rule by rule.
+  </Card>
+  <Card title="CSS and Tailwind" href="docs/rust/css-and-tailwind/" icon="sparkles" kicker="Rust">
+    Which classes exist and how the compiler checks them.
+  </Card>
+</CardGrid>

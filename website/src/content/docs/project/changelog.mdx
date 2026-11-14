@@ -1,17 +1,32 @@
 ---
 title: What's new
 sidebarLabel: Changelog
-description: A readable tour of what changed in BUI, from the first release to what's coming in the next one. The full list lives in CHANGELOG.md.
+description: A readable tour of what changed in BUI, from the first release to what is coming next. The full list lives in CHANGELOG.md.
 section: Project
 order: 50
-sources: ["CHANGELOG.md", "bindings/python/bui/_version.py", "bindings/node/package.json", "bindings/react/package.json"]
+sources: ["CHANGELOG.md", "addons/bui-vscode/README.md", "kit/include/BUI_kit.h", "bindings/python/bui/_version.py", "bindings/node/package.json", "bindings/react/package.json"]
 ---
 
-Here's the story of BUI so far, in plain words: what the first release gave you, and what's waiting in the next one. For every detail, read the full [CHANGELOG.md](https://github.com/ppmpreetham/BUI/blob/main/CHANGELOG.md); it follows [Keep a Changelog](https://keepachangelog.com), and versions follow [Semantic Versioning](https://semver.org).
+Here's the story of BUI so far, in plain words: what each release gave you, and what's waiting on `main` for the next one. For every detail, read the full [CHANGELOG.md](https://github.com/ppmpreetham/BUI/blob/main/CHANGELOG.md); it follows [Keep a Changelog](https://keepachangelog.com), and versions follow [Semantic Versioning](https://semver.org).
 
-## Coming in 0.5.1
+## Coming next
 
-Your own themes, windows that are see-through, panels and pie menus, and Lua on LuaRocks. Everything here is on `main`; the details are under **Unreleased** in the changelog.
+These are on `main` and will ship in the next release; the details are under **Unreleased** in the changelog. Nothing here is on PyPI, crates.io or npm yet.
+
+- **Animation.** One animation engine in the C kit runs GSAP-style timelines (position strings such as `"<"` and `"+=1"`, stagger, repeat, yoyo) and Motion-style springs, for Rust, JavaScript, React, Python, Lua and C. Rust gets `<motion.div>` in `rsx!`; see [Motion](../../rust/motion/) and [Effects and animations](../../rust/effects-and-animations/).
+- **Vue.** `@blender-ui/vue` renders Vue 3 single-file components in native windows. See [Vue](../../javascript/vue/).
+- **D.** A DUB package with the whole C API, idiomatic wrappers and an HTML, CSS and RSX layer. See [D](../../d/overview/).
+- **Video with sound.** A `<video>` now plays its audio track. This changes a default: videos used to be silent, so set `muted` to keep one quiet.
+- **Rust conditionals.** An `Option` is an element: `None` draws nothing and `Some(x)` draws `x`, so `{ cond.then(|| <p>"hi"</p>) }` replaces an empty placeholder.
+- **Controls in node-editor nodes.** A node can hold a button, a checkbox and a dropdown, as Blender's nodes do.
+- **More Qt syntax.** Dock widgets, toolbars, model/view, real dialogs, `QSettings`, dates and a calendar: about 57% of the core widget classes' methods, up from 21%.
+- **Windows.** Resizing a window is smoother and renders far fewer frames, and a window that animates for ever no longer ignores the mouse and keyboard.
+- **Fixes.** Tailwind `text-sm` line heights and `truncate` now show the `…`; form widgets and overlays paint in the right order in Rust.
+- **Editor extensions** for `rsx!` in VS Code and Zed. See [Editor support](../../rust/editor-support/).
+
+## In 0.5.1
+
+Released on 13 November 2026: your own themes, windows that are see-through, panels and pie menus, and Lua on LuaRocks. The details are under **0.5.1** in the changelog.
 
 ### Your own themes
 

@@ -33,7 +33,7 @@ capitalized Blender components.
 cargo add blenderui
 ```
 
-or, by hand, `blenderui = "0.2"` under `[dependencies]`. (The Dear ImGui crate is
+or, by hand, `blenderui = "0.5"` under `[dependencies]`. (The Dear ImGui crate is
 [`blenderui-imgui`](https://crates.io/crates/blenderui-imgui): `cargo add blenderui-imgui`.)
 
 Building needs **CMake** and a **C compiler**: `blenderui-sys` compiles the C
