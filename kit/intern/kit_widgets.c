@@ -639,6 +639,11 @@ static BKNode *panel_hit(BKNode *n, int x, int y)
   return bk_hit(PANEL_BODY(n), x, y);
 }
 
+static bool y_in_header(const BKNode *n, int y)
+{
+  return y < n->y + panel_header_h(n);
+}
+
 static bool panel_on_grip(const BKNode *n, int x, int y)
 {
   return panel_grip_w(n) && x >= n->x + n->w - panel_grip_w(n) && y < n->y + panel_header_h(n);
@@ -669,10 +674,49 @@ static void panel_set_open(BKNode *n, bool open)
   bk_emit(n, BK_EV_CHANGE, NULL, open, 0);
 }
 
+static int panel_index(const BKNode *n)
+{
+  for (int i = 0; n->parent && i < n->parent->nkids; i++) {
+    if (n->parent->kids[i] == n) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/* Pinning: panels in a sidebar with category tabs (panel_category_tabs_is_visible). */
+static bool panel_use_pin(const BKNode *n)
+{
+  return !panel_is_sub(n) && bk_sidebar_tabs_visible(n->parent);
+}
+
+/* The pin icon of a pinned panel: 2.2 units in from the header's right end. */
+static bool panel_on_pin(const BKNode *n, int x, int y)
+{
+  const float uu = (float)u();
+  return panel_use_pin(n) && (n->flags & NF_PINNED) && y < n->y + panel_header_h(n) &&
+         x >= n->x + n->w - 2.2f * uu && x < n->x + n->w - 1.2f * uu;
+}
+
+static void panel_toggle_pin(BKNode *n)
+{
+  n->flags ^= NF_PINNED;
+  bk_relayout(n->parent);
+  bk_invalidate(n->parent);
+  bk_emit(n, BK_EV_TOGGLE, NULL, -1, (n->flags & NF_PINNED) != 0);
+}
+
 static int panel_press(BKNode *n, BKEvent *e)
 {
+  /* Shift+click pins, a click on the pin unpins (ui_handle_panel_header) */
+  if (panel_use_pin(n) && y_in_header(n, e->y) && (EV_SHIFT(e) || panel_on_pin(n, e->x, e->y))) {
+    panel_toggle_pin(n);
+    n->dragmode = 0;
+    return 1;
+  }
   n->dragmode = panel_on_grip(n, e->x, e->y) ? 1 : 0;
   if (n->dragmode) {
+    n->drag_orig = panel_index(n); /* where it was, for BK_EV_MOVE */
     return 1;
   }
   if (EV_CTRL(e) && n->parent) { /* Ctrl+click: collapse all others */
@@ -703,8 +747,8 @@ static int panel_drag(BKNode *n, BKEvent *e)
       self = i;
       continue;
     }
-    if (s->cls != &bk_cls_panel) {
-      continue;
+    if (s->cls != &bk_cls_panel || !NODE_VISIBLE(s)) {
+      continue; /* only the panels shown take part (another sidebar category's don't) */
     }
     last_panel = i;
     if (before < 0 && e->y < s->y + s->h / 2) {
@@ -731,6 +775,13 @@ static int panel_drag(BKNode *n, BKEvent *e)
 
 static int panel_release(BKNode *n, BKEvent *e)
 {
+  (void)e;
+  if (n->dragmode == 1) {
+    const int from = (int)n->drag_orig, to = panel_index(n);
+    if (from >= 0 && to >= 0 && from != to) {
+      bk_emit(n, BK_EV_MOVE, NULL, from, to); /* instanced panels reorder their data */
+    }
+  }
   n->dragmode = 0;
   return 1;
 }
@@ -793,6 +844,11 @@ static void panel_draw(BKNode *n)
   bk_text_shadow = sub ? 1 : 3;
   bk_text_in(&tr, n->text, bk_theme.text, BK_ALIGN_LEFT, false);
   bk_text_shadow = shadow;
+  if ((n->flags & NF_PINNED) && panel_use_pin(n)) {
+    /* the pin icon: xmax - 2.2 units (panel_draw_aligned_widgets) */
+    bk_icon(bk_icons_lookup("PINNED"), n->x + n->w - 2.2f * uu + isz * 0.5f, n->y + hh * 0.5f,
+            bk_theme.text, 1.0f, 0);
+  }
   if (!sub) {
     /* the grip: x = xmax - 1.15 units, alpha 0.5, the title color */
     float ga = 0.5f;

@@ -983,15 +983,15 @@
             },
             "editor.border": {
               "$ref": "#/$defs/Rgba",
-              "description": "Blender's key; BUI has no use for it yet and ignores it."
+              "description": "Used by BUI."
             },
             "editor.outline": {
               "$ref": "#/$defs/Rgba",
-              "description": "Blender's key; BUI has no use for it yet and ignores it."
+              "description": "Used by BUI."
             },
             "editor.outline.active": {
               "$ref": "#/$defs/Rgba",
-              "description": "Blender's key; BUI has no use for it yet and ignores it."
+              "description": "Used by BUI."
             },
             "file_browser.row_alternate": {
               "$ref": "#/$defs/Rgba",

@@ -112,7 +112,10 @@ enum {
   BK_EV_VIEW,   /* scrolled view changed (nodes with "viewevents") */
   BK_EV_SCROLL, /* scrollbar request: a = 0 moveto (b = fraction), 1 units, 2 pages (b = count) */
   BK_EV_CONFIGURE, /* geometry changed ("events" nodes): a = width, b = height */
-  BK_EV_KEYRELEASE /* ref = "\tkeysym", a = mods */
+  BK_EV_KEYRELEASE, /* ref = "\tkeysym", a = mods */
+  BK_EV_AREA,  /* a screen's areas: a = the area's child index, b = BK_AREA_* (see "screen") */
+  BK_EV_MOVE,  /* a panel was dragged to a new place: a = old index, b = new index */
+  BK_EV_RESIZE /* an area's region was resized, hidden or shown: a = size, b = hidden */
 };
 
 typedef struct BKHost {
@@ -215,7 +218,8 @@ const char *BK_icon_list_name(int i);
 /* Types: column row grid box panel tabs sidetabs scroll label separator
  * progress button toggle checkbox decorator text search hotkey number slider
  * dropdown enum swatch popover menubutton menubar list tree gridview ramp
- * curve normal histogram radio textarea meter custom (see "custom nodes" below) */
+ * curve normal histogram radio textarea meter custom (see "custom nodes" below)
+ * screen area areaheader sidebar (see "screens, areas and regions" below) */
 BKNode *BK_node_new(const char *type);
 void BK_node_free(BKNode *node);
 const char *BK_node_type(const BKNode *node);
@@ -341,6 +345,68 @@ void BK_geom_set(BKNode *child, const char *key, double value);
 double BK_geom_get(const BKNode *child, const char *key);
 /* Frame grid weights (Tk columnconfigure / Qt setColumnStretch). */
 void BK_frame_grid_weight(BKNode *frame, int column_axis, int index, double weight, int minsize);
+
+/* -- screens, areas and regions (Blender's editors/screen) ------------------------------
+ * "screen" (bScreen): areas on a graph of shared vertices and edges. The user drags an edge
+ * between areas to resize them (Shift: move every aligned edge; Ctrl: snap to fractions and
+ * other edges; Escape or right-click cancels), and drags an area's corner to split it (inside
+ * the area), join it into a neighbor, dock it beside or into any other area (left, right, top,
+ * bottom, or center to replace it), or out of the window (BK_AREA_WINDOW). Ctrl-drag on a
+ * corner swaps two areas. Right-click on an edge or a header offers the same as a menu, with
+ * Maximize Area (Ctrl+Space) and Focus Mode (Ctrl+Alt+Space).
+ *
+ * Its children are "area" nodes. The first is added with BK_node_add and fills the screen; the
+ * others come from BK_area_split, BK_area_dock and the user. Removing an area (BK_node_remove)
+ * closes it: a neighbor takes its place.
+ *  screen properties: "layout" (string: the arrangement, to save and restore; set it after the
+ *                     areas exist: it applies to them in child order), "ops" (string: "all", or
+ *                     "resize" for edges only), "transparent" (number: 1 = the host draws what
+ *                     is inside the regions, the screen only edges and handles; the screen then
+ *                     sends BK_EV_CONFIGURE whenever an area or region moved, so the host lays
+ *                     its content out again, and leaves the pointer to the host's content)
+ *  screen events:     BK_EV_AREA with BK_AREA_NEW (a = the new area's child index; the screen
+ *                     made it, the host fills it) and BK_EV_CHANGE (the layout changed: save
+ *                     "layout"). Areas get BK_EV_AREA with BK_AREA_CLOSE and BK_AREA_WINDOW
+ *                     themselves (a = their child index), so a host that handles events later
+ *                     still knows which.
+ *
+ * "area" (ScrArea): "editor" (string, which editor it shows: new areas copy it, the host fills
+ * them on BK_AREA_NEW), "full" (string: "", "maximized" or "focus"). An area also works on its
+ * own, outside a screen. Its children are regions and one main view: a child is a region when
+ * it is an "areaheader" (a header), a "sidebar" (the sidebar) or has the "region" property:
+ * "header", "tool_header", "footer", "asset_shelf", "channels", "nav_bar", "toolbar",
+ * "sidebar", "execute" or "hud" (floating, the Adjust Last Operation panel). One of each.
+ *  region properties: "size" (unscaled pixels across the area), "hidden", "overlap" (drawn over
+ *                     the main view, the default for toolbars, sidebars, tool headers, footers),
+ *                     "resizable", "maxsize", "side" ("left", "right", "top", "bottom": the
+ *                     ones its type allows), "hotkey" (toggles it while the pointer is over the
+ *                     area: "n", "t", "ctrl+]" ...)
+ *  region events:     BK_EV_RESIZE (a = size, b = hidden) when the user resizes, hides, shows
+ *                     or flips it
+ *
+ * Setters return 0 for a value they don't take (a second region of a type, a side the type
+ * can't be on, an unknown name).
+ *
+ * Panels ("panel") in a region: drag one by its grip to reorder (BK_EV_MOVE when it lands
+ * elsewhere: lists of panels reorder their data); in a sidebar with category tabs Shift+click
+ * on a header pins the panel ("pinned": shown in every category; BK_EV_TOGGLE, a = -1, b =
+ * pinned), and a click on the pin unpins it. */
+typedef enum { BK_AXIS_H = 'h', BK_AXIS_V = 'v' } BKScreenAxis; /* the new edge's direction */
+typedef enum { BK_DOCK_LEFT, BK_DOCK_RIGHT, BK_DOCK_TOP, BK_DOCK_BOTTOM, BK_DOCK_CENTER } BKDock;
+enum {
+  BK_AREA_NEW = 1, /* a new area (a split): fill it for its "editor" */
+  BK_AREA_CLOSE,   /* the area is about to leave the screen (joined, closed, docked away) */
+  BK_AREA_WINDOW   /* the user dragged the area out of the window: open it in one */
+};
+/* Splits `area` at `factor` (0..1, from the left or bottom): the new area (the side past 0.5) or
+ * NULL when the area is too small. */
+BKNode *BK_area_split(BKNode *area, BKScreenAxis axis, float factor);
+/* `gone` joins into `keep`, neighbors along an edge (trimming what overhangs). 0: not neighbors. */
+int BK_area_join(BKNode *keep, BKNode *gone);
+/* Moves `area` beside `target` (taking `factor` of it) or into its place (BK_DOCK_CENTER). */
+int BK_area_dock(BKNode *area, BKNode *target, BKDock where, float factor);
+int BK_area_swap(BKNode *a, BKNode *b);
+int BK_area_close(BKNode *area); /* 0: no neighbor to take its place */
 
 /* -- images (kit/intern/image: Blender's imbuf design) ----------------------------------
  * One decoder per format for every binding: PNG, GIF (animated), BMP, TGA, QOI, PNM

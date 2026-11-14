@@ -132,7 +132,14 @@ static int sidebar_tabs_w(const BKNode *n)
 
 static bool in_active(const BKNode *n, const BKNode *c, const char *active)
 {
-  return strcmp(c->category ? c->category : "", active) == 0;
+  (void)n;
+  /* a pinned panel shows whichever category is active (panel_add_check: PNL_PIN) */
+  return (c->flags & NF_PINNED) || strcmp(c->category ? c->category : "", active) == 0;
+}
+
+bool bk_sidebar_tabs_visible(const BKNode *n)
+{
+  return n && n->cls == &bk_cls_sidebar && sidebar_tabs_w(n) > 0;
 }
 
 static void sidebar_measure(BKNode *n, int *rw, int *rh)
@@ -256,7 +263,9 @@ static int sidebar_wheel(BKNode *n, BKEvent *e)
 
 static void sidebar_draw(BKNode *n)
 {
-  bk_fill(n->x, n->y, n->w, n->h, bk_theme.region_bg);
+  if (!bk_region_overlaps(n)) { /* over the main region it has no background (region overlap) */
+    bk_fill(n->x, n->y, n->w, n->h, bk_theme.region_bg);
+  }
   const char *cats[MAX_CATEGORIES];
   BKRect r[MAX_CATEGORIES];
   const int count = sidebar_tab_rects(n, r, cats);

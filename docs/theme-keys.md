@@ -42,9 +42,9 @@ These fill in several keys at once. A key the theme sets itself always wins over
 | `icon.alpha` | `user_interface.icon_alpha` | no (ignored) |
 | `icon_saturation` | `user_interface.icon_saturation` | no (ignored) |
 | `widget.emboss` | `user_interface.widget_emboss` | yes |
-| `editor.border` | `user_interface.editor_border` | no (ignored) |
-| `editor.outline` | `user_interface.editor_outline` | no (ignored) |
-| `editor.outline.active` | `user_interface.editor_outline_active` | no (ignored) |
+| `editor.border` | `user_interface.editor_border` | yes |
+| `editor.outline` | `user_interface.editor_outline` | yes |
+| `editor.outline.active` | `user_interface.editor_outline_active` | yes |
 | `caret` | `user_interface.widget_text_cursor` | yes |
 | `panel.roundness` | `user_interface.panel_roundness` | yes |
 | `panel.header` | `user_interface.panel_header` | yes |

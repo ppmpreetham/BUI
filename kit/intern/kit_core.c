@@ -160,6 +160,7 @@ static const BKClass *const g_classes[] = {
     &bk_cls_gridview, &bk_cls_ramp,      &bk_cls_curve,      &bk_cls_normal,
     &bk_cls_histogram, &bk_cls_frame,     &bk_cls_radio,      &bk_cls_canvas,
     &bk_cls_textarea,  &bk_cls_image,     &bk_cls_meter,      &bk_cls_custom,      &bk_cls_video,
+    &bk_cls_screen,    &bk_cls_area,
 #ifdef BUI_FILEBROWSER
     &bk_cls_filebrowser,
 #endif
@@ -215,6 +216,9 @@ static void node_detach(BKNode *child)
   BKNode *p = child->parent;
   if (!p) {
     return;
+  }
+  if (p->cls->detach) {
+    p->cls->detach(p, child);
   }
   BKContext *ctx = bk_ctx(child);
   if (ctx) {
@@ -272,6 +276,7 @@ void BK_node_free(BKNode *n)
   free(n->linked_start);
   bk_te_free(n->edit);
   free(n->geom);
+  free(n->rgn);
   bk_image_ref_clear(&n->image);
   free(n);
 }
@@ -293,6 +298,9 @@ void bk_node_add(BKNode *parent, BKNode *child)
 int BK_node_add(BKNode *parent, BKNode *child, int index)
 {
   if (!parent || !child || child == parent) {
+    return 0;
+  }
+  if (parent->cls->accept && child->parent != parent && !parent->cls->accept(parent, child)) {
     return 0;
   }
   if (child->parent) {
@@ -801,6 +809,7 @@ static const struct {
     {"align", NF_ALIGN, true},         {"emboss", NF_EMBOSS, false},
     {"vertical", NF_VERTICAL, true},   {"icon_only", NF_ICON_ONLY, true},
     {"collapsed", NF_COLLAPSED, true}, {"integer", NF_INTEGER, false},
+    {"pinned", NF_PINNED, true},
     {"live", NF_LIVE, false},          {"alpha", NF_ALPHA, false},
     {"square", NF_SQUARE, false},      {"directory", NF_DIRECTORY, false},
     {"line", NF_LINE, false},          {"bold", NF_BOLD, true},
@@ -934,6 +943,10 @@ int BK_set_num(BKNode *n, const char *key, double v)
 {
   if (n->cls->set_num && n->cls->set_num(n, key, v)) {
     return 1;
+  }
+  const int region = bk_region_set_num(n, key, v); /* an area's region: size, hidden ... */
+  if (region != 0) {
+    return region > 0;
   }
   if ((key[0] == 'x' || key[0] == 'y') && view_set_num(n, key, v)) {
     return 1;
@@ -1119,6 +1132,9 @@ double BK_get_num(BKNode *n, const char *key)
   if (n->cls->get_num && n->cls->get_num(n, key, &cv)) {
     return cv;
   }
+  if (bk_region_get_num(n, key, &cv)) {
+    return cv;
+  }
   for (size_t i = 0; i < sizeof(g_flag_props) / sizeof(g_flag_props[0]); i++) {
     if (strcmp(key, g_flag_props[i].key) == 0) {
       return (n->flags & g_flag_props[i].flag) ? 1.0 : 0.0;
@@ -1207,6 +1223,10 @@ int BK_set_str(BKNode *n, const char *key, const char *v)
   if (n->cls->set_str && n->cls->set_str(n, key, v)) {
     return 1;
   }
+  const int region = bk_region_set_str(n, key, v); /* region, side, hotkey */
+  if (region != 0) {
+    return region > 0;
+  }
   if (strcmp(key, "text") == 0 || strcmp(key, "title") == 0) {
     bk_set_text(&n->text, v);
     bk_relayout(n);
@@ -1292,6 +1312,10 @@ const char *BK_get_str(BKNode *n, const char *key)
     if (s) {
       return s;
     }
+  }
+  const char *region = bk_region_get_str(n, key);
+  if (region) {
+    return region;
   }
   if (strcmp(key, "value") == 0 && n->cls == &bk_cls_textarea) {
     return bk_textarea_text(n);
@@ -2768,6 +2792,11 @@ static int in_BK_context_menu(BKContext *ctx, int x, int y, int mods)
   if (custom_extra_button(ctx, x, y, 3, 0, mods | BK_BUTTON3)) {
     return 1;
   }
+  if (ctx->grab && ctx->dragging && ctx->grab->cls->cancel) {
+    ctx->grab->cls->cancel(ctx->grab); /* Blender: the right button cancels a drag, as Escape */
+    ctx->has_ungrab = false;
+    return 1;
+  }
   if (buttons_target(ctx, x, y) && !ctx->grab) { /* an editor takes the right button */
     ctx->next_button = 3;
     const int r = in_BK_press(ctx, x, y, mods | BK_BUTTON3);
@@ -2835,6 +2864,8 @@ static int undo_key(BKContext *ctx, const char *keysym, int mods)
   return 0;
 }
 
+static BKNode *deepest(BKNode *n, int x, int y);
+
 static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int mods)
 {
   hide_tooltip(ctx);
@@ -2881,7 +2912,13 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
     }
     return 0;
   }
-  for (BKNode *n = ctx->hover; n; n = n->parent) { /* bubble up to a handler */
+  /* bubble up to a handler: from the hovered widget, or over none from what is under the pointer
+   * (Blender's region and area keymaps: Ctrl+Space anywhere in an editor) */
+  BKNode *start = ctx->hover;
+  if (!start && ctx->root && ctx->pointer_y >= ctx->header_h) {
+    start = deepest(ctx->root, ctx->pointer_x, ctx->pointer_y);
+  }
+  for (BKNode *n = start; n; n = n->parent) {
     if (!NODE_ENABLED(n)) {
       continue;
     }
@@ -2964,27 +3001,41 @@ void BK_bind(BKContext *ctx, const char *combo, void *ref)
   }
   BKKeyBinding *k = &ctx->keys[ctx->nkeys++];
   memset(k, 0, sizeof(*k));
+  k->mods = bk_combo_parse(combo, k->keysym, sizeof(k->keysym));
+  k->ref = ref;
+  bk_retain(ref);
+}
+
+int bk_combo_parse(const char *combo, char *r_keysym, int size)
+{
+  int mods = 0;
   const char *s = combo;
   while (1) {
     const char *plus = strchr(s, '+');
-    if (!plus) {
+    if (!plus || plus[1] == '\0') { /* "ctrl++": the key is '+' */
       break;
     }
     const int len = (int)(plus - s);
     if (len == 4 && strncmp(s, "ctrl", 4) == 0) {
-      k->mods |= BK_CTRL;
+      mods |= BK_CTRL;
     }
     else if (len == 5 && strncmp(s, "shift", 5) == 0) {
-      k->mods |= BK_SHIFT;
+      mods |= BK_SHIFT;
     }
     else if (len == 3 && strncmp(s, "alt", 3) == 0) {
-      k->mods |= BK_ALT;
+      mods |= BK_ALT;
     }
     s = plus + 1;
   }
-  strncpy(k->keysym, s, sizeof(k->keysym) - 1);
-  k->ref = ref;
-  bk_retain(ref);
+  snprintf(r_keysym, (size_t)size, "%s", s);
+  return mods;
+}
+
+bool bk_combo_matches(const char *combo, int mods, const char *keysym)
+{
+  char key[32];
+  const int want = bk_combo_parse(combo, key, sizeof(key));
+  return key[0] && (mods & (BK_SHIFT | BK_CTRL | BK_ALT)) == want && bk_keysym_is(keysym, key);
 }
 
 int BK_cursor(BKContext *ctx)
@@ -3734,11 +3785,19 @@ int BK_animating(BKContext *ctx)
   return ctx->nanim > 0 || bk_custom_animating(ctx) || (!BK_anim_host_clock() && BK_anim_active());
 }
 
+static float anim_target(const BKNode *n)
+{
+  if (n->cls->anim_target) {
+    return n->cls->anim_target(n);
+  }
+  return (n->flags & NF_COLLAPSED) ? 0.0f : 1.0f;
+}
+
 void bk_anim_start(BKNode *n)
 {
   BKContext *ctx = bk_ctx(n);
   if (!ctx || !g_animations) {
-    n->anim = (n->flags & NF_COLLAPSED) ? 0.0f : 1.0f;
+    n->anim = anim_target(n);
     return;
   }
   const double now = bk_time();
@@ -3771,7 +3830,7 @@ static void anim_step(BKContext *ctx)
   ctx->anim_t = now;
   for (int i = ctx->nanim - 1; i >= 0; i--) {
     BKNode *n = ctx->anim[i];
-    const float target = (n->flags & NF_COLLAPSED) ? 0.0f : 1.0f;
+    const float target = anim_target(n);
     const double time = n->cls->anim_time;
     /* do_animate: fac = (now - starttime) / ANIMATION_TIME; fac = min(sqrt(fac), 1) */
     float fac = (float)((now - ctx->anim_start[i]) / (time > 0.0 ? time : ANIMATION_TIME));

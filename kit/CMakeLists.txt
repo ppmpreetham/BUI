@@ -24,6 +24,14 @@ add_library(bui_kit STATIC
   intern/kit_window_null.c
   intern/kit_icons_svg.c
   intern/kit_regions.c
+  # screens, areas and regions (Blender's editors/screen): see intern/screen/screen_intern.h
+  intern/screen/area.c
+  intern/screen/screen_draw.c
+  intern/screen/screen_edit.c
+  intern/screen/screen_geometry.c
+  intern/screen/screen_layout.c
+  intern/screen/screen_node.c
+  intern/screen/screen_ops.c
   intern/kit_nodes.c
   intern/kit_custom.c
   intern/kit_filebrowser.c # without BUI_FILEBROWSER: BK_file_dialog's stub only

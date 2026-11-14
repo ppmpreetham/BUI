@@ -189,6 +189,9 @@ GLOBALS = [
     ("node_selected", "color", "node_editor.node_selected", None),
     ("node_active", "color", "node_editor.node_active", None),
     ("area_header", "color", None, "area_header.background"),
+    ("editor_border", "color", "user_interface.editor_border", None),
+    ("editor_outline", "color", "user_interface.editor_outline", None),
+    ("editor_outline_active", "color", "user_interface.editor_outline_active", None),
 ]
 CORNERS = [("top_left", "CNR_TL"), ("top_right", "CNR_TR"), ("bottom_right", "CNR_BR"),
            ("bottom_left", "CNR_BL")]
