@@ -867,11 +867,6 @@ class Panedwindow(Widget, _widgets.PanedWindow):
         self.sash_place(index, newpos, newpos)
         return newpos
 
-    def _weight(self, child):
-        if not any(float(o.get("weight", 0)) for o in self._pane_opts.values()):
-            return 1.0 if child is self._panes[-1] else 0.0
-        return float(self._pane_opts.get(child, {}).get("weight", 0))
-
 
 PanedWindow = Panedwindow
 

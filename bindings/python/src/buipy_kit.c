@@ -388,6 +388,92 @@ static PyObject *kitnode_on_event(PyObject *self, PyObject *args)
   Py_RETURN_NONE; /* overridden by Python components */
 }
 
+/* self._take(node): `self` (made with __new__, no node yet) becomes the owner of a node the kit
+ * made (a screen's new area), which `node` (a borrowed wrapper) refers to. */
+static PyObject *kitnode_take(KitNodeObject *self, PyObject *other)
+{
+  if (!PyObject_TypeCheck(other, &KitNode_Type)) {
+    PyErr_SetString(PyExc_TypeError, "_take expects a KitNode");
+    return NULL;
+  }
+  KitNodeObject *o = (KitNodeObject *)other;
+  if (self->node || !o->node || !o->borrowed || BK_node_ref(o->node)) {
+    PyErr_SetString(PyExc_ValueError, "_take: only a kit-made node, into an empty KitNode");
+    return NULL;
+  }
+  self->node = o->node;
+  self->borrowed = 0;
+  o->node = NULL;
+  BK_node_set_ref(self->node, self);
+  if (BK_node_parent(self->node)) {
+    Py_INCREF(self); /* the parent's hold (BK_node_add retains the ref of what it adds) */
+  }
+  Py_RETURN_NONE;
+}
+
+/* Screen operations on an area (BK_area_*): the new area, or a bool. */
+static PyObject *kitnode_area_split(KitNodeObject *self, PyObject *args)
+{
+  const char *axis;
+  float factor;
+  if (!PyArg_ParseTuple(args, "sf:area_split", &axis, &factor) || !self->node) {
+    return NULL;
+  }
+  if ((axis[0] != 'h' && axis[0] != 'v') || axis[1]) {
+    PyErr_SetString(PyExc_ValueError, "axis must be 'h' or 'v'");
+    return NULL;
+  }
+  BKNode *n = BK_area_split(self->node, (BKScreenAxis)axis[0], factor);
+  if (buipy_restore_error()) {
+    return NULL;
+  }
+  return node_wrap(n);
+}
+
+static PyObject *kitnode_area_join(KitNodeObject *self, PyObject *other)
+{
+  BKNode *o = node_of(other);
+  if (!o || !self->node) {
+    return NULL;
+  }
+  const int ok = BK_area_join(self->node, o);
+  return buipy_restore_error() ? NULL : PyBool_FromLong(ok);
+}
+
+static PyObject *kitnode_area_dock(KitNodeObject *self, PyObject *args)
+{
+  PyObject *target;
+  int where;
+  float factor = 0.5f;
+  if (!PyArg_ParseTuple(args, "Oi|f:area_dock", &target, &where, &factor) || !self->node) {
+    return NULL;
+  }
+  BKNode *t = node_of(target);
+  if (!t) {
+    return NULL;
+  }
+  const int ok = BK_area_dock(self->node, t, (BKDock)where, factor);
+  return buipy_restore_error() ? NULL : PyBool_FromLong(ok);
+}
+
+static PyObject *kitnode_area_swap(KitNodeObject *self, PyObject *other)
+{
+  BKNode *o = node_of(other);
+  if (!o || !self->node) {
+    return NULL;
+  }
+  return PyBool_FromLong(BK_area_swap(self->node, o));
+}
+
+static PyObject *kitnode_area_close(KitNodeObject *self, PyObject *unused)
+{
+  if (!self->node) {
+    return NULL;
+  }
+  const int ok = BK_area_close(self->node);
+  return buipy_restore_error() ? NULL : PyBool_FromLong(ok);
+}
+
 /* -- data: ramp / curve / histogram / grid ------------------------------------ */
 
 static PyObject *kitnode_ramp(KitNodeObject *self, PyObject *unused)
@@ -1078,6 +1164,14 @@ static PyMethodDef kitnode_methods[] = {
     {"invalidate", (PyCFunction)kitnode_invalidate, METH_NOARGS, "Redraw this node."},
     {"relayout", (PyCFunction)kitnode_relayout, METH_NOARGS, "Re-layout the window."},
     {"_on_event", (PyCFunction)kitnode_on_event, METH_VARARGS, "Callback hook."},
+    {"_take", (PyCFunction)kitnode_take, METH_O, "Own a node the kit made (a new area)."},
+    {"area_split", (PyCFunction)kitnode_area_split, METH_VARARGS,
+     "area_split(axis 'h'|'v', factor) -> the new area or None"},
+    {"area_join", (PyCFunction)kitnode_area_join, METH_O, "area_join(gone) -> bool"},
+    {"area_dock", (PyCFunction)kitnode_area_dock, METH_VARARGS,
+     "area_dock(target, where 0 left 1 right 2 top 3 bottom 4 center, factor=0.5) -> bool"},
+    {"area_swap", (PyCFunction)kitnode_area_swap, METH_O, "area_swap(other) -> bool"},
+    {"area_close", (PyCFunction)kitnode_area_close, METH_NOARGS, "area_close() -> bool"},
     {"ramp", (PyCFunction)kitnode_ramp, METH_NOARGS, "ramp() -> [(pos, rgba)]"},
     {"set_ramp", (PyCFunction)kitnode_set_ramp, METH_O, "set_ramp([(pos, rgba)])"},
     {"ramp_eval", (PyCFunction)kitnode_ramp_eval, METH_O, "ramp_eval(t) -> rgba"},
@@ -1406,6 +1500,22 @@ static void host_schedule(void *data, int ms, int timer)
   Py_XDECREF(a);
 }
 
+/* The screen's events go to methods of their own: a screen's areas (_on_area), a panel moved
+ * (_on_move) and a region resized (_on_resize), each with its two numbers. NULL for the rest. */
+static const char *event_method(int kind)
+{
+  switch (kind) {
+    case BK_EV_AREA:
+      return "_on_area";
+    case BK_EV_MOVE:
+      return "_on_move";
+    case BK_EV_RESIZE:
+      return "_on_resize";
+    default:
+      return NULL;
+  }
+}
+
 static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, double b)
 {
   if (kind == BK_EV_CALL && ref) {
@@ -1417,7 +1527,14 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
     return;
   }
   PyObject *r;
-  if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE) {
+  const char *method = event_method(kind);
+  if (method) {
+    if (!PyObject_HasAttrString(target, method)) {
+      return;
+    }
+    r = PyObject_CallMethod(target, method, "ii", (int)a, (int)b);
+  }
+  else if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE) {
     /* raw events: ref is a C string */
     r = PyObject_CallMethod(target, "_on_event", "isdd", kind, ref ? (const char *)ref : "", a,
                             b);
@@ -1483,8 +1600,17 @@ static void defer_emit(BKNode *node, int kind, void *ref, double a, double b)
     return;
   }
   PyObject *target = node ? (PyObject *)BK_node_ref(node) : NULL;
-  PyObject *fn = target ? PyObject_GetAttrString(target, "_on_event") : NULL;
+  const char *method = event_method(kind);
+  PyObject *fn = target ? PyObject_GetAttrString(target, method ? method : "_on_event") : NULL;
   if (!fn) {
+    PyErr_Clear();
+    return;
+  }
+  if (method) {
+    PyObject *args = Py_BuildValue("(ii)", (int)a, (int)b);
+    defer_call(fn, args);
+    Py_XDECREF(args);
+    Py_DECREF(fn);
     PyErr_Clear();
     return;
   }

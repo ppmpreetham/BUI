@@ -15,7 +15,9 @@ import sys
 
 import buipy
 
-from bui.components.core import EV_CHANGE, EV_CLICK, EV_MOTION, EV_PRESS, EV_SCROLL, EV_SUBMIT
+from bui.components.core import (EV_CHANGE, EV_CLICK, EV_CONFIGURE, EV_MOTION, EV_PRESS, EV_SCROLL,
+                                 EV_SUBMIT)
+from bui.components.screen import Panes
 from bui.components.menus import MenuItem
 
 from ._core import (BaseWidget, Event, EventType, IntVar, StringVar, TclError, Variable, Widget,
@@ -3260,35 +3262,11 @@ class OptionMenu(Menubutton):
 # PanedWindow
 
 
-class _Sash(buipy.KitNode):
-    """The divider between two panes (Blender's region edge)."""
-
-    def __init__(self, paned, index):
-        super().__init__("frame")
-        self.paned, self.index = paned, index
-        self.set("events", True)
-        self.set("bg", (0.11, 0.11, 0.11, 1.0))
-
-    def _on_event(self, kind, ref, a, b):
-        p = self.paned
-        horizontal = p._horizontal()
-        if kind == EV_PRESS:
-            pane = p._panes[self.index]
-            r = pane._node.rect
-            self._start = (r[2] if horizontal else r[3], self.rect[0] + int(a),
-                           self.rect[1] + int(b))
-        elif kind == EV_MOTION and getattr(self, "_start", None):
-            size, x0, y0 = self._start
-            pos = self.rect[0] + int(a) if horizontal else self.rect[1] + int(b)
-            p._set_pane_size(self.index, size + pos - (x0 if horizontal else y0))
-        elif kind == 9:  # release
-            self._start = None
-
-
 class PanedWindow(Widget):
-    """panedwindow widget: panes side by side with draggable sashes."""
+    """panedwindow widget: panes side by side with Blender's area edges between them to drag
+    (bui.components.screen.Panes: a screen whose only operation is moving its edges)."""
 
-    _KIND = "frame"
+    _KIND = "screen"
     _DEFAULTS = {"orient": "horizontal", "sashwidth": 4, "showhandle": 0, "handlesize": 8,
                  "opaqueresize": 1, "sashrelief": "flat"}
 
@@ -3297,29 +3275,36 @@ class PanedWindow(Widget):
 
     def _setup(self):
         self._panes = []
-        self._sashes = []
         self._pane_opts = {}
+        self._split = Panes(self._node, "v")
 
     def _horizontal(self):
         return str(self.cget("orient")).startswith("h")
 
     def _apply(self, key, value):
-        if key in ("orient", "sashwidth"):
-            self._relayout()
+        if key == "orient":
+            sizes = self._split.sizes()
+            self._split.axis = "v" if self._horizontal() else "h"
+            if self._panes:
+                self._split.set_sizes(sizes)
+        elif key == "sashwidth":
+            pass  # Blender's area edges are the theme's width
         elif key in ("width", "height"):
             self._node.geom(int(self._node.geom_get("manager")),
                             **{"req" + key: int(_pixels(value))})
         else:
             super()._apply(key, value)
 
+    def _on_node_event(self, kind, ref, a, b):
+        if kind == EV_CONFIGURE:
+            self._split.on_configure()
+        elif kind == EV_CHANGE:
+            self._split.on_change()
+        super()._on_node_event(kind, ref, a, b)
+
     def add(self, child, **kw):
         """Add a child widget to the panedwindow in a new pane."""
-        if child in self._panes:
-            self.paneconfigure(child, **kw)
-            return
-        self._panes.append(child)
-        self._pane_opts[child] = dict(kw)
-        self._relayout()
+        self.insert("end", child, **kw)
 
     def insert(self, pos, child, **kw):
         if child in self._panes:
@@ -3328,66 +3313,33 @@ class PanedWindow(Widget):
             pos if isinstance(pos, int) else self._panes.index(pos))
         self._panes.insert(i, child)
         self._pane_opts.setdefault(child, {}).update(kw)
-        self._relayout()
+        child._ginfo = {"manager": "panedwindow", "in": self}
+        self._split.insert(i, child._node)
+        self._sizes_from_options()
+
+    def _sizes_from_options(self):
+        key = "width" if self._horizontal() else "height"
+        if any(key in self._pane_opts.get(c, {}) for c in self._panes):
+            sizes = self._split.sizes()
+            for i, c in enumerate(self._panes):
+                size = self._pane_opts.get(c, {}).get(key)
+                if size and i < len(sizes):
+                    sizes[i] = int(_pixels(size))
+            self._split.set_sizes(sizes)
 
     def remove(self, child):
         """Remove the pane containing child from the panedwindow."""
         if child in self._panes:
             self._panes.remove(child)
             self._pane_opts.pop(child, None)
-            child._node.geom(0)
+            self._split.remove(child._node)
             child._ginfo = {}
-            self._relayout()
 
     forget = remove
 
     def panes(self):
         """Returns an ordered list of the child panes."""
         return tuple(self._panes)
-
-    def _weight(self, child):
-        o = self._pane_opts.get(child, {})
-        if "weight" in o:
-            return float(o["weight"])
-        stretch = str(o.get("stretch", "last"))
-        i = self._panes.index(child)
-        last = len(self._panes) - 1
-        return 1.0 if (stretch == "always" or (stretch == "last" and i == last) or
-                       (stretch == "first" and i == 0) or
-                       (stretch == "middle" and 0 < i < last)) else 0.0
-
-    def _relayout(self):
-        node = self._node
-        for s in self._sashes:
-            node.remove(s)
-        self._sashes = []
-        h = self._horizontal()
-        side = 2 if h else 0
-        sw = int(_pixels(self.cget("sashwidth")))
-        for i, child in enumerate(self._panes):
-            if i:
-                sash = _Sash(self, i - 1)
-                sash.set("cursor", 1.0 if h else 2.0)
-                node.add(sash)
-                sash.geom(1, side=side, fill=2 if h else 1,
-                          **{"reqwidth" if h else "reqheight": sw})
-                self._sashes.append(sash)
-            node.add(child._node)
-            o = self._pane_opts.get(child, {})
-            px, py = _pads(o.get("padx", 0)), _pads(o.get("pady", 0))
-            size = o.get("width" if h else "height")
-            params = {"reqwidth" if h else "reqheight": int(_pixels(size)) if size else 0}
-            child._node.geom(1, side=side, fill=3, expand=1 if self._weight(child) else 0,
-                             padx0=px[0], padx1=px[1], pady0=py[0], pady1=py[1], **params)
-            child._ginfo = {"manager": "panedwindow", "in": self}
-
-    def _set_pane_size(self, index, size):
-        child = self._panes[index]
-        o = self._pane_opts.setdefault(child, {})
-        minsize = int(_pixels(o.get("minsize", 0) or 0))
-        size = max(minsize, int(size))
-        o["width" if self._horizontal() else "height"] = size
-        child._node.geom(1, **{"reqwidth" if self._horizontal() else "reqheight": size})
 
     def paneconfigure(self, tagOrId, cnf=None, **kw):
         """Query or modify the configuration options of the pane."""
@@ -3396,7 +3348,7 @@ class PanedWindow(Widget):
         if not kw:
             return {k: (k, "", "", "", v) for k, v in o.items()}
         o.update(kw)
-        self._relayout()
+        self._sizes_from_options()
         return None
 
     paneconfig = paneconfigure
@@ -3407,9 +3359,8 @@ class PanedWindow(Widget):
 
     def sash_coord(self, index):
         """Return the current x and y pair for the sash given by index."""
-        r = self._sashes[int(index)].rect
-        own = self._node.rect
-        return (r[0] - own[0], r[1] - own[1])
+        edge = self._split.edge(int(index))
+        return (edge, 0) if self._horizontal() else (0, edge)
 
     def sash_mark(self, index):
         self._mark = self.sash_coord(index)
@@ -3417,13 +3368,7 @@ class PanedWindow(Widget):
 
     def sash_place(self, index, x, y):
         """Place the sash given by index at the given coordinates."""
-        child = self._panes[int(index)]
-        own = self._node.rect
-        r = child._node.rect
-        if self._horizontal():
-            self._set_pane_size(int(index), int(x) - (r[0] - own[0]))
-        else:
-            self._set_pane_size(int(index), int(y) - (r[1] - own[1]))
+        self._split.place_edge(int(index), int(x) if self._horizontal() else int(y))
 
     def sash(self, *args):
         return getattr(self, "sash_" + args[0])(*args[1:])
@@ -3442,10 +3387,9 @@ class PanedWindow(Widget):
 
     def identify(self, x, y):
         """Identify the panedwindow component at point x, y."""
-        own = self._node.rect
-        for i, s in enumerate(self._sashes):
-            r = s.rect
-            if r[0] - own[0] <= int(x) < r[0] - own[0] + r[2] and \
-                    r[1] - own[1] <= int(y) < r[1] - own[1] + r[3]:
+        at = int(x) if self._horizontal() else int(y)
+        for i in range(len(self._panes) - 1):
+            edge = self._split.edge(i)
+            if edge <= at < edge + self._split.handle:
                 return (i, "sash")
         return ""

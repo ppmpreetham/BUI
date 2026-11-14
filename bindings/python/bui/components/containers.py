@@ -5,7 +5,7 @@
   width by ``weight`` (``weight=0`` keeps the natural width).
 * :class:`Split` (property split), :class:`Grid`, :class:`Box`.
 * :class:`Panel` — collapsible (Ctrl+click solo, drag over headers,
-  drag the grip to reorder, header components, sub-panels).
+  drag the grip to reorder, header components, sub-panels, pinned in a sidebar).
 * :class:`Tabs`, :class:`SideTabs` (properties-editor icon tabs),
   :class:`ScrollView`, :class:`VectorField`.
 
@@ -18,7 +18,7 @@ from typing import Callable, Optional, Sequence
 
 import buipy
 
-from bui.components.core import EV_CHANGE, Component
+from bui.components.core import EV_CHANGE, EV_TOGGLE, Component
 from bui.components.widgets import Label, NumberField
 
 
@@ -78,12 +78,16 @@ class Panel(Component):
 
     def __init__(self, title: str, *children: Component, collapsed: bool = False,
                  icon: str = None, header: Sequence[Component] = (),
-                 on_toggle: Optional[Callable[[bool], None]] = None, category: str = None, **kw):
+                 on_toggle: Optional[Callable[[bool], None]] = None, category: str = None,
+                 pinned: bool = False, on_move: Optional[Callable[[int, int], None]] = None,
+                 on_pin: Optional[Callable[[bool], None]] = None, **kw):
         super().__init__(**kw)
-        self.on_toggle = on_toggle
+        self.on_toggle, self.on_move, self.on_pin = on_toggle, on_move, on_pin
         self.set("text", title)
         if category:  # in a Sidebar: the tab it shows under
             self.set("category", category)
+        if pinned:  # in a Sidebar: shown under every tab (Shift+click a header toggles it)
+            self.set("pinned", True)
         if icon:
             self.set("icon", icon)
         if collapsed:
@@ -116,9 +120,25 @@ class Panel(Component):
     def toggle(self) -> None:
         self.collapsed = not self.collapsed
 
+    @property
+    def pinned(self) -> bool:
+        return bool(self.get("pinned"))
+
+    @pinned.setter
+    def pinned(self, v: bool) -> None:
+        self.set("pinned", bool(v))
+
     def _on_event(self, kind, ref, a, b):
         if kind == EV_CHANGE and self.on_toggle is not None:
             self.on_toggle(bool(a))
+        elif kind == EV_TOGGLE and a < 0 and self.on_pin is not None:
+            self.on_pin(bool(b))
+
+    def _on_move(self, frm: int, to: int) -> None:
+        """Dragged by its grip from child index ``frm`` to ``to`` (lists of panels reorder
+        their data)."""
+        if self.on_move is not None:
+            self.on_move(frm, to)
 
 
 class Tabs(Component):
@@ -253,71 +273,3 @@ class VectorField(Column):
     def _field_changed(self, _v):
         if self.on_change is not None:
             self.on_change(self.value)
-
-
-# Blender's editor-type menu (ED_area_type_hud / space_type_menu): groups of (name, icon).
-EDITOR_TYPES = [
-    [("3D Viewport", "VIEW3D"), ("Image Editor", "IMAGE"), ("UV Editor", "UV"),
-     ("Compositor", "NODE_COMPOSITING"), ("Texture Node Editor", "NODE_TEXTURE"),
-     ("Geometry Node Editor", "GEOMETRY_NODES"), ("Shader Editor", "NODE_MATERIAL"),
-     ("Video Sequencer", "SEQUENCE"), ("Movie Clip Editor", "TRACKER")],
-    [("Dope Sheet", "ACTION"), ("Timeline", "TIME"), ("Graph Editor", "GRAPH"),
-     ("Drivers", "DRIVER"), ("Nonlinear Animation", "NLA")],
-    [("Text Editor", "TEXT"), ("Python Console", "CONSOLE"), ("Info", "INFO")],
-    [("Outliner", "OUTLINER"), ("Properties", "PROPERTIES"), ("File Browser", "FILEBROWSER"),
-     ("Asset Browser", "ASSET_MANAGER"), ("Spreadsheet", "SPREADSHEET"),
-     ("Preferences", "PREFERENCES")],
-]
-
-
-class AreaHeader(Component):
-    """An editor's header region (``ED_region_header_layout``): 1.3 units tall,
-    items left to right from the corner offset; a ``Spacer()`` pushes the rest
-    to the right (``layout.separator_spacer()``)."""
-
-    TYPE = "areaheader"
-
-    def __init__(self, *children: Component, **kw):
-        super().__init__(**kw)
-        for c in children:
-            c.weight = 0 if not isinstance(c, _spacer_type()) else c.weight
-        self.add(*children)
-
-
-def _spacer_type():
-    from .widgets import Spacer
-    return Spacer
-
-
-class Area(Column):
-    """A Blender area: the header with the editor-type menu, then the editor.
-
-        Area("Geometry Node Editor", NodeEditor(...), header=[MenuButton("View", [...])],
-             on_editor=lambda name: ...)
-    """
-
-    def __init__(self, editor: str, body: Component, *, header: Sequence[Component] = (),
-                 on_editor: Optional[Callable[[str], None]] = None, **kw):
-        from .menus import MenuButton, MenuItem
-        self.editor, self.on_editor = editor, on_editor
-        icon = next((i for group in EDITOR_TYPES for n, i in group if n == editor), "QUESTION")
-        items = []
-        for g, group in enumerate(EDITOR_TYPES):
-            if g:
-                items.append(None)
-            for name, ic in group:
-                items.append(MenuItem(name, (lambda n=name: self._pick(n)), icon=ic,
-                                      checked=None))
-        self.editor_button = MenuButton("", items, icon=icon, description="Editor Type")
-        self.header = AreaHeader(self.editor_button, *header)
-        body.set("fill", True)
-        kw.setdefault("fill", True)  # an area fills its place in the screen
-        super().__init__(self.header, body, spacing=0, **kw)
-        self.body = body
-
-    def _pick(self, name: str) -> None:
-        self.editor = name
-        icon = next((i for group in EDITOR_TYPES for n, i in group if n == name), "QUESTION")
-        self.editor_button.set("icon", icon)
-        if self.on_editor is not None:
-            self.on_editor(name)

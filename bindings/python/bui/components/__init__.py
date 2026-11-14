@@ -19,19 +19,21 @@ damage-driven rendering — an idle UI costs nothing, a hover or a scrub
 redraws only the touched widget. Python builds the tree and receives
 callbacks.
 
-Modules: ``core`` (base classes), ``widgets``, ``containers``, ``views``,
-``menus``, ``editors``, ``templates``, ``app``.
+Modules: ``core`` (base classes), ``widgets``, ``containers``, ``screen``
+(Blender's screen: areas and regions), ``views``, ``menus``, ``editors``,
+``templates``, ``app``.
 
 SPDX-License-Identifier: GPL-2.0-or-later
 """
 
 from bui.components.app import App
-from bui.components.containers import (Area, AreaHeader, Box, Column, Grid, Panel, Row, ScrollView, Sidebar, SideTabs,
-                                       Split, Tabs, VectorField)
+from bui.components.containers import (Box, Column, Grid, Panel, Row, ScrollView, Sidebar, SideTabs, Split, Tabs,
+                                       VectorField)
 from bui.components.core import Component, ValueComponent, unit
 from bui.components.editors import (ColorRamp, ColorStop, CurveMapping, Histogram, NormalBall,
                                     Popover)
 from bui.components.nodes import Node, NodeEditor
+from bui.components.screen import EDITOR_TYPES, Area, AreaHeader, AreaSplit, Editor, Region, Screen
 from bui.components.menus import Menu, MenuBar, MenuButton, MenuItem, PieMenu
 from bui.components.templates import IDSelector, PathField
 from bui.components.views import FileBrowser, GridView, ListView, TreeItem, TreeView
@@ -43,8 +45,10 @@ from bui.components.widgets import (Button, Checkbox, ColorSwatch, Decorator, Dr
 __all__ = [
     "App", "Component", "ValueComponent", "unit",
     # layout
-    "Column", "Row", "Split", "Grid", "Box", "Panel", "Tabs", "SideTabs", "Sidebar", "ScrollView", "Area", "AreaHeader",
+    "Column", "Row", "Split", "Grid", "Box", "Panel", "Tabs", "SideTabs", "Sidebar", "ScrollView",
     "VectorField",
+    # screens: areas and regions
+    "Screen", "Area", "AreaSplit", "Editor", "Region", "AreaHeader", "EDITOR_TYPES",
     # widgets
     "Label", "Image", "Video", "Separator", "Spacer", "ProgressBar", "Button", "IconButton", "Toggle",
     "Checkbox", "Decorator", "TextField", "TextArea", "SearchField", "HotkeyField", "NumberField",
