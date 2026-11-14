@@ -349,7 +349,8 @@ impl AnimSpec {
 }
 
 fn spec<'c>(c: &'c mut Ctx) -> &'c mut AnimSpec {
-    c.c.anim.get_or_insert_with(Default::default)
+    // shared with the clones of the style (animation samples copy it per frame): copied on a write only
+    std::sync::Arc::make_mut(c.c.anim.get_or_insert_with(Default::default))
 }
 
 fn items(v: &[Tok]) -> impl Iterator<Item = &[Tok]> {
@@ -1332,6 +1333,12 @@ impl Animations {
     /// Motion's values: [`crate::motion::active`]).
     pub(crate) fn any(&self) -> bool {
         !self.els.is_empty()
+    }
+
+    /// Whether anything follows where boxes are placed (so a scroll moves it): CSS animation
+    /// state, Motion's elements, a followed scroll.
+    pub(crate) fn tracks_placement(&self) -> bool {
+        !self.els.is_empty() || self.motion.any() || crate::motion::used() || crate::motion::follows_scroll()
     }
 
     /// Whether element `key` with cascaded style `base` needs [`apply`](Self::apply).

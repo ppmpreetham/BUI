@@ -1781,12 +1781,15 @@ impl<'a> Builder<'a> {
         let (tt, ws, tab) = (self.styles[c].text_transform, self.styles[c].white_space, self.styles[c].tab_size);
         let (rtl, ovr) = (self.styles[c].layout.direction == taffy::style::Direction::Rtl, self.styles[c].bidi_override);
         if let Content::Text(t) = &self.nodes[k].content {
-            let t = match transform(t, tt, ws, tab) {
-                std::borrow::Cow::Owned(s) => s,
-                std::borrow::Cow::Borrowed(s) => s.to_owned(),
+            // the stored text stays as it is unless a transform or the bidi order changes it
+            let changed = match transform(t, tt, ws, tab) {
+                std::borrow::Cow::Owned(s) => Some(s),
+                std::borrow::Cow::Borrowed(_) => None,
             };
-            let t = text::bidi_visual(&t, rtl, ovr).unwrap_or(t);
-            self.nodes[k].content = Content::Text(t);
+            let changed = text::bidi_visual(changed.as_deref().unwrap_or(t), rtl, ovr).or(changed);
+            if let Some(t) = changed {
+                self.nodes[k].content = Content::Text(t);
+            }
         }
     }
 
@@ -2291,6 +2294,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         load_font_faces(&caches.author.sheet);
     }
     caches.styles.begin_frame();
+    caches.text.begin_frame();
     caches.styles.seed_properties(&caches.author.sheet, caches.author.hash);
     // the taffy tree persists: drop last frame's duplicates, start a new stamp
     for id in caches.recon.extra.drain(..) {
@@ -2395,10 +2399,9 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
                         AvailableSpace::MinContent => 0.0,
                         AvailableSpace::MaxContent => f32::INFINITY,
                     });
-                    let lines = tc.wrap(text, *size, *flags, if *nowrap { f32::INFINITY } else { max_w }, *brk);
-                    let w = lines.iter().map(|l| tc.width(l, *size, *flags)).fold(0.0, f32::max);
-                    Size { width: known.width.unwrap_or(w.ceil()),
-                           height: known.height.unwrap_or(*line * lines.len().max(1) as f32) }
+                    let wrapped = tc.wrap(text, *size, *flags, if *nowrap { f32::INFINITY } else { max_w }, *brk);
+                    Size { width: known.width.unwrap_or(wrapped.width.ceil()),
+                           height: known.height.unwrap_or(*line * wrapped.lines.len().max(1) as f32) }
                 }
             }
         });
@@ -2419,6 +2422,19 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     walk.place(&mut frame.nodes, root_id, 0.0, 0.0, None, (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
     frame
+}
+
+/// Place `frame` again where only the scroll offsets (`state.scroll`) changed
+/// since it was laid out: the taffy tree and the boxes are the ones of that
+/// layout, so only positions, clips and the scroll positions are redone.
+/// False when the frame has no root to place from.
+pub(crate) fn replace(frame: &mut Frame, viewport: (f32, f32), state: &UiState, caches: &mut LayoutCaches) -> bool {
+    let Some(root) = frame.nodes.first().and_then(|n| n.taffy) else { return false };
+    let LayoutCaches { styles, text, taffy, box_of, acc, .. } = caches;
+    let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text, seq: 0 };
+    walk.place(&mut frame.nodes, root, 0.0, 0.0, None, (0.0, 0.0));
+    finish(&mut frame.nodes, styles, acc);
+    true
 }
 
 /// Positions follow the taffy tree (words live in line containers, which may
@@ -2537,9 +2553,8 @@ fn place_folded_text(nodes: &mut [BoxNode], i: usize, k: usize, b: Bounds<f32>, 
         (tc.width(t, c.font_size, flags).ceil(), line)
     } else {
         let max = if c.white_space == WhiteSpace::NoWrap { f32::INFINITY } else { cb.size.width + 0.5 };
-        let lines = tc.wrap(t, c.font_size, flags, max, brk);
-        let w = lines.iter().map(|s| tc.width(s, c.font_size, flags)).fold(0.0, f32::max);
-        (w.ceil(), line * lines.len().max(1) as f32)
+        let wrapped = tc.wrap(t, c.font_size, flags, max, brk);
+        (wrapped.width.ceil(), line * wrapped.lines.len().max(1) as f32)
     };
     // nowrap text overflows its container, unless that container ellipsizes
     // it: then the text is cut to the content box (paint adds the `…`)

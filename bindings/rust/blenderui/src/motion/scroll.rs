@@ -57,6 +57,16 @@ pub fn use_element_scroll(id: &str) -> Scroll {
     follow(crate::layout::id_key(id))
 }
 
+/// Whether any scroll position is followed (`use_scroll`): a scroll moves values.
+pub(crate) fn followed() -> bool {
+    FOLLOWED.with(|f| {
+        let v = f.take();
+        let any = !v.is_empty();
+        f.set(v);
+        any
+    })
+}
+
 /// After a layout: the followed scroll positions from `frame`; true when one
 /// changed (elements bound to them draw again).
 pub(crate) fn update(frame: &Frame) -> bool {

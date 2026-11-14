@@ -425,7 +425,7 @@ pub struct Computed {
     /// `content` (for `::before` / `::after`): None = `normal` / `none`.
     pub content: Option<Box<[ContentPart]>>,
     /// `animation-*` / `transition-*` (None: none). Not inherited.
-    pub anim: Option<Box<crate::anim::AnimSpec>>,
+    pub anim: Option<std::sync::Arc<crate::anim::AnimSpec>>,
 }
 
 /// One piece of generated content.

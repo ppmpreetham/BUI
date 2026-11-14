@@ -1359,10 +1359,13 @@ pub(crate) fn each_run_line(tc: &mut TextCache, c: &Computed, t: &str, b: Bounds
         return;
     }
     let nowrap = matches!(c.white_space, WhiteSpace::NoWrap | WhiteSpace::Pre);
-    let lines = if nowrap {
-        vec![t.to_owned()]
+    let (wrapped, wrapped_run);
+    let lines: &[String] = if nowrap {
+        wrapped = [t.to_owned()];
+        &wrapped
     } else {
-        tc.wrap(t, c.font_size, flags, b.size.width + 0.5, text::break_mode(c))
+        wrapped_run = tc.wrap(t, c.font_size, flags, b.size.width + 0.5, text::break_mode(c));
+        &wrapped_run.lines
     };
     let lh = c.line_px();
     let mut from = 0;

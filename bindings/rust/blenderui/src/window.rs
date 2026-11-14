@@ -610,7 +610,7 @@ impl App {
         }
         for id in 0..self.windows.len() {
             let Some(w) = self.windows[id].as_deref_mut() else { continue };
-            if !w.dirty && !w.motion_frame && !w.sel_repaint {
+            if !w.dirty && !w.scrolled && !w.motion_frame && !w.sel_repaint {
                 continue;
             }
             match w.native {
@@ -999,6 +999,14 @@ pub struct Window {
     state: UiState,
     widgets: Widgets,
     dirty: bool,
+    /// Only scroll offsets changed since the last frame: it is placed again, not rendered
+    /// (when [`scroll_free`](Self::scroll_free)).
+    scrolled: bool,
+    /// The last render did not depend on scroll positions: nothing read them (`scroll_offset`,
+    /// `bounds_of`), nothing animates and no container sticks to its end.
+    scroll_free: bool,
+    /// A view read a scroll position or a placement this render (it must render again to follow it).
+    scroll_read: std::cell::Cell<bool>,
     timer_pending: bool,
     frame_pending: bool,
     animation_frame: bool,
@@ -1076,6 +1084,9 @@ impl Window {
                 state: UiState::default(),
                 widgets: Widgets::new(),
                 dirty: true,
+                scrolled: false,
+                scroll_free: false,
+                scroll_read: std::cell::Cell::new(false),
                 timer_pending: false,
                 frame_pending: false,
                 animation_frame: false,
@@ -1159,7 +1170,7 @@ impl Window {
     /// Whether the window will render again (something changed or is
     /// animating). False for an idle window.
     pub fn needs_render(&self) -> bool {
-        self.dirty
+        self.dirty || self.scrolled
     }
 
     /// Frames presented to the native window so far.
@@ -1228,6 +1239,7 @@ impl Window {
 
     /// Scroll offset of a scroll container with `.id(id)`.
     pub fn scroll_offset(&self, id: &str) -> (f32, f32) {
+        self.scroll_read.set(true);
         self.state.scroll.get(&id_key(id)).copied().unwrap_or((0.0, 0.0))
     }
 
@@ -1241,6 +1253,7 @@ impl Window {
     /// placed); inside an event listener the frame is lent out, so a view
     /// keeps what it read while rendering.
     pub fn bounds_of(&self, id: &str) -> Option<Bounds<f32>> {
+        self.scroll_read.set(true); // placements move with scroll
         let f = self.frame.as_ref()?;
         f.by_key().get(&id_key(id)).map(|&i| f.nodes[i].bounds)
     }
@@ -1391,6 +1404,8 @@ impl Window {
         // the view is moved out while it renders (it gets `&mut Window`)
         let Some(view) = self.view.take() else { return };
         self.dirty = false;
+        self.scrolled = false;
+        self.scroll_read.set(false);
         let root = {
             let _s = span(Phase::Render);
             crate::hooks::begin(self.id);
@@ -1428,8 +1443,10 @@ impl Window {
         // `data-stick="bottom"`: a scroll container that grew goes to its end
         // (`"bottom"`: only if it was at the end; `"always"`: whatever it showed)
         let mut stuck = false;
+        let mut sticks = false;
         for i in 0..frame.nodes.len() {
             let Some(mode) = frame.attr(i, "data-stick") else { continue };
+            sticks = true;
             let always = mode == "always";
             let n = &frame.nodes[i];
             let (key, range, pos) = (n.key, n.scroll_range.1, n.scroll_pos.1);
@@ -1439,6 +1456,7 @@ impl Window {
                 stuck = true;
             }
         }
+        self.scroll_free = !sticks && !self.scroll_read.get() && !self.caches.anim.tracks_placement();
         self.present(app, frame, None);
         if stuck {
             self.dirty = true;
@@ -1477,6 +1495,29 @@ impl Window {
         }
     }
 
+    /// A frame after scrolling alone: the last frame placed again with the new offsets and painted
+    /// (no render, cascade or layout), unless something follows the scroll positions: then a render.
+    fn scroll_frame(&mut self, app: &mut App) {
+        self.scrolled = false;
+        let vp = self.viewport();
+        let placed = self.scroll_free && match self.frame.take() {
+            Some(mut frame) => {
+                let ok = crate::layout::replace(&mut frame, vp, &self.state, &mut self.caches);
+                self.frame = Some(frame);
+                ok
+            }
+            None => false,
+        };
+        if !placed {
+            self.dirty = true;
+            return self.rebuild(app);
+        }
+        let Some(frame) = self.frame.take() else { return };
+        self.widgets.keep(); // no layout ran: the widgets are the last frame's
+        self.same_frame = true; // the same boxes: the selection's index of them stays
+        self.present(app, frame, None);
+    }
+
     /// Draw again on the next display refresh, for Motion's values alone.
     fn request_motion_frame(&mut self) {
         self.motion_frame = true;
@@ -1487,6 +1528,8 @@ impl Window {
     fn update(&mut self, app: &mut App) {
         if self.dirty {
             self.rebuild(app);
+        } else if self.scrolled {
+            self.scroll_frame(app);
         } else if self.sel_repaint {
             // the selection alone: the frame again, painted
             if let Some(frame) = self.frame.take() {
@@ -1912,7 +1955,7 @@ impl Window {
         let sy = (((y - grab - n.bounds.origin.y) / free) * ry).clamp(0.0, ry);
         let sx = n.scroll_pos.0.clamp(0.0, rx);
         self.state.scroll.insert(key, (sx, sy));
-        self.dirty = true;
+        self.scrolled = true;
     }
 
     /// Scroll the innermost scroll container along `path` that can move.
@@ -1931,7 +1974,7 @@ impl Window {
             let (nx, ny) = snap(f, &self.caches.styles, i, (sx, sy), (nx, ny));
             if (nx, ny) != (sx, sy) {
                 self.state.scroll.insert(*key, (nx, ny));
-                self.dirty = true;
+                self.scrolled = true;
                 return;
             }
         }

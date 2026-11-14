@@ -39,7 +39,7 @@ mod vars;
 pub use ease::{Ease, ease};
 pub use presence::{exit_done, exiting_scope, presence, presence_id};
 pub use scroll::{Scroll, use_element_scroll, use_scroll};
-pub(crate) use scroll::update as update_scroll;
+pub(crate) use scroll::{followed as follows_scroll, update as update_scroll};
 pub use spec::{Drag, DragConstraints, InView, Layout, Spec, Target, Variants, When};
 pub(crate) use element::{Elements, Gestures};
 pub use pending::unmatched_selectors;
@@ -115,6 +115,11 @@ pub(crate) fn sync() {
     if unsafe { sys::BK_anim_active() } == 0 {
         tick();
     }
+}
+
+/// Whether Motion was ever used on this thread (no motion exists before).
+pub(crate) fn used() -> bool {
+    USED.get()
 }
 
 /// Whether anything is animating (windows keep rendering frames).

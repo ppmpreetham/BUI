@@ -1,6 +1,8 @@
 //! Text measuring and wrapping with the kit's font engine (the same one that
 //! draws, so layout and paint agree).
 
+use std::rc::Rc;
+
 use crate::style::{Computed, KeyMap};
 use blenderui_sys as sys;
 
@@ -121,6 +123,19 @@ pub(crate) const fn item_top(baseline: f32, size: f32) -> f32 {
 
 type Widths = KeyMap<Box<str>, f32>;
 
+/// Wrapped runs by text, each with the layout frame that last used it.
+type WrappedRuns = KeyMap<Box<str>, (Rc<Wrapped>, u32)>;
+
+/// Wrapped runs ([`TextCache::wrap`]) kept however long unused; past it, a new frame drops the
+/// ones the last frame did not use.
+const WRAPS_MAX: usize = 8192;
+
+/// A wrapped text run: its lines, and the width of the widest.
+pub(crate) struct Wrapped {
+    pub lines: Vec<String>,
+    pub width: f32,
+}
+
 /// Text widths by (size, flags) then text: looked up by `&str`, no
 /// allocation on a hit. Owned by the window, kept across frames.
 ///
@@ -131,13 +146,20 @@ type Widths = KeyMap<Box<str>, f32>;
 /// logical size would not match the drawn text.
 pub(crate) struct TextCache {
     fonts: KeyMap<(u32, i32), Widths>,
+    /// Wrapped runs by (size, flags, max width, break mode) then text, with the layout frame that
+    /// last used each.
+    wraps: KeyMap<(u32, i32, u32, u8), WrappedRuns>,
+    /// Runs in `wraps`.
+    wrapped: usize,
+    /// Layout frames so far ([`begin_frame`](Self::begin_frame)).
+    frame: u32,
     /// Device pixels per logical pixel (the window's resolution scale).
     scale: f32,
 }
 
 impl Default for TextCache {
     fn default() -> Self {
-        TextCache { fonts: KeyMap::default(), scale: 1.0 }
+        TextCache { fonts: KeyMap::default(), wraps: KeyMap::default(), wrapped: 0, frame: 0, scale: 1.0 }
     }
 }
 
@@ -145,7 +167,23 @@ impl TextCache {
     /// Measure for a window drawn at `scale` device pixels per logical pixel.
     pub(crate) fn set_scale(&mut self, scale: f32) {
         self.fonts.clear();
+        self.wraps.clear();
+        self.wrapped = 0;
         self.scale = scale;
+    }
+
+    /// A layout frame starts: when the wrapped runs piled up (a resize asks for each run at new
+    /// widths), those the last frame did not use go.
+    pub(crate) fn begin_frame(&mut self) {
+        self.frame = self.frame.wrapping_add(1);
+        if self.wrapped > WRAPS_MAX {
+            let frame = self.frame;
+            for m in self.wraps.values_mut() {
+                m.retain(|_, e| frame.wrapping_sub(e.1) <= 1);
+            }
+            self.wraps.retain(|_, m| !m.is_empty());
+            self.wrapped = self.wraps.values().map(KeyMap::len).sum();
+        }
     }
 
     /// Advance width of `s` at `size` px.
@@ -179,16 +217,40 @@ impl TextCache {
     /// newlines kept). `brk` ([`break_mode`]) allows breaks inside words:
     /// anywhere only for a word too wide for a line of its own, break-all
     /// between any two characters.
-    pub(crate) fn wrap(&mut self, s: &str, size: f32, flags: i32, max: f32, brk: u8) -> Vec<String> {
+    ///
+    /// Remembered by (text, size, flags, max, brk): layout measures a text
+    /// run, places it and paints it with the same arguments, and a frame
+    /// that changed something else asks again for every unchanged run.
+    pub(crate) fn wrap(&mut self, s: &str, size: f32, flags: i32, max: f32, brk: u8) -> Rc<Wrapped> {
+        let key = (size.to_bits(), flags, max.to_bits(), brk);
+        if let Some(e) = self.wraps.get_mut(&key).and_then(|m| m.get_mut(s)) {
+            e.1 = self.frame;
+            return Rc::clone(&e.0);
+        }
+        let lines = self.wrap_lines(s, size, flags, max, brk);
+        let width = lines.iter().map(|l| self.width(l, size, flags)).fold(0.0, f32::max);
+        let w = Rc::new(Wrapped { lines, width });
+        self.wrapped += 1;
+        self.wraps.entry(key).or_default().insert(s.into(), (Rc::clone(&w), self.frame));
+        w
+    }
+
+    fn wrap_lines(&mut self, s: &str, size: f32, flags: i32, max: f32, brk: u8) -> Vec<String> {
         let mut out = Vec::new();
+        // the line being built, grown in place: a candidate is the line plus a word
+        let mut line = String::new();
         for para in s.split('\n') {
-            let mut line = String::new();
+            line.clear();
             for word in para.split(' ').filter(|w| !w.is_empty()) {
-                let candidate = if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
-                if self.width(&candidate, size, flags) <= max || (line.is_empty() && brk == 0) {
-                    line = candidate;
+                let kept = line.len();
+                if kept > 0 {
+                    line.push(' ');
+                }
+                line.push_str(word);
+                if self.width(&line, size, flags) <= max || (kept == 0 && brk == 0) {
                     continue;
                 }
+                line.truncate(kept);
                 if brk == BREAK_ALL {
                     // fill the current line with as much of the word as fits
                     let mut cur = if line.is_empty() { String::new() } else { format!("{line} ") };
@@ -222,7 +284,7 @@ impl TextCache {
                     line = word.to_owned();
                 }
             }
-            out.push(line);
+            out.push(std::mem::take(&mut line));
         }
         out
     }
@@ -280,6 +342,9 @@ fn class(c: char) -> Class {
 pub(crate) fn bidi_visual(s: &str, rtl: bool, override_: bool) -> Option<String> {
     if override_ {
         return rtl.then(|| s.chars().rev().collect());
+    }
+    if !rtl && s.is_ascii() {
+        return None; // no right-to-left character: nothing moves
     }
     let chars: Vec<char> = s.chars().collect();
     let classes: Vec<Class> = chars.iter().map(|&c| class(c)).collect();

@@ -324,6 +324,11 @@ impl Elements {
         self.els.keys.contains_key(&key)
     }
 
+    /// Whether any element has motion state.
+    pub(crate) fn any(&self) -> bool {
+        !self.els.live.is_empty()
+    }
+
     /// Element `el` (`key`) with motion `spec` and style `base` this frame:
     /// start the motions its targets (and imperative motions for it) need, and
     /// lay the moving values over `out`.
