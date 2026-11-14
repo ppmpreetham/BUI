@@ -74,7 +74,8 @@ ctx:key("a", "a", 0)
 
 | Group | Prefix | Examples |
 |-------|--------|---------|
-| Events | `EV_` | `EV_CLICK`, `EV_CHANGE`, `EV_CALL`, `EV_KEY`, `EV_WHEEL` |
+| Events | `EV_` | `EV_CLICK`, `EV_CHANGE`, `EV_CALL`, `EV_KEY`, `EV_WHEEL`, `EV_AREA`, `EV_MOVE`, `EV_RESIZE` |
+| Screen areas | `AREA_` | `AREA_NEW`, `AREA_CLOSE`, `AREA_WINDOW` |
 | Cursors | `CURSOR_` | `CURSOR_DEFAULT`, `CURSOR_HAND`, `CURSOR_TEXT` |
 | Geometry | `GEOM_` | `GEOM_PACK`, `GEOM_GRID`, `GEOM_PLACE` |
 | Modifiers | `MOD_` | `MOD_SHIFT`, `MOD_CTRL`, `MOD_ALT` |
@@ -92,7 +93,36 @@ ctx:key("a", "a", 0)
 `text`, `search`, `hotkey`, `number`, `slider`, `dropdown`, `enum`, `swatch`,
 `popover`, `menubutton`, `menubar`, `image`, `video`, `textarea`, `custom`,
 `canvas`, `list`, `tree`, `gridview`, `ramp`, `curve`, `normal`, `histogram`,
-`radio`, `meter`, `filebrowser`
+`radio`, `meter`, `filebrowser`, `screen`, `area`, `areaheader`, `sidebar`
+
+`node:set` returns false for a key or value the node refuses.
+
+## Screens, areas and regions
+
+Blender's editor layout: a `screen` of `area`s the user resizes by dragging the edges between
+them, splits, joins and docks by dragging a corner, maximizes with Ctrl+Space. An area's children
+are its regions (`areaheader`, `sidebar`, or any node with a `region` property: `toolbar`,
+`footer`, `hud` ...) and one main view.
+
+```lua
+local screen = bui.Node("screen")
+local view = bui.Node("area")
+view:set("editor", "3D Viewport")
+screen:add(view)                          -- the first area fills the screen
+local props = view:split("v", 0.75)       -- the right quarter (nil when too small)
+props:dock(view, "left", 0.3)             -- "left", "right", "top", "bottom", "center"
+-- also: area:join(other), area:swap(other), area:close(); area:set("full", "maximized")
+screen:on(bui.EV_AREA, function(self, index, what)
+  if what == bui.AREA_NEW then fill(self:child(index)) end   -- areas the user makes
+end)
+local side = bui.Node("sidebar")
+side:set("size", 280)                     -- also: hidden, side, overlap, resizable, maxsize
+side:set("hotkey", "n")
+side:on(bui.EV_RESIZE, function(self, size, hidden) end)
+local saved = screen:get("layout")        -- JSON; screen:set("layout", saved) restores
+```
+
+A closed area's wrapper becomes stale (`node:type()` returns `"(freed)"`).
 
 ## Menus
 
@@ -184,6 +214,8 @@ gsap.registerEase("myEase", {0.2, 0.8, 0.4, 1}); gsap.parseEase("back.out(2)")(0
 
 ```sh
 ./bui-lua bindings/lua/examples/hello.lua         # minimal button (entry point)
+./bui-lua bindings/lua/examples/split.lua         # Blender's screen: areas to resize, split,
+                                                   #   join and dock; sidebars (N)
 ./bui-lua bindings/lua/examples/counter.lua       # counter with increment/decrement/reset
 ./bui-lua bindings/lua/examples/todos.lua         # todo list manager
 ./bui-lua bindings/lua/examples/gallery.lua       # widget gallery (button, toggle, checkbox,

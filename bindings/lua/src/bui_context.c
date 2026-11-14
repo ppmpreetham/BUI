@@ -115,6 +115,9 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
     }
   }
   lua_settop(L, top);
+  if (kind == BK_EV_AREA && (int)b == BK_AREA_CLOSE) {
+    luabui_invalidate_subtree(L, node); /* the screen frees a closed area after this */
+  }
 }
 
 /* ------------------------------------------------------------------ */

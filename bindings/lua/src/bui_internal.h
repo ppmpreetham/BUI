@@ -100,6 +100,8 @@ int luabui_lookup_node(lua_State *L, BKNode *node);
 
 /* Remove a node from the map. */
 void luabui_unmap_node(lua_State *L, BKNode *node);
+/* The wrappers of a subtree the kit freed (or is about to) no longer point at it. */
+void luabui_invalidate_subtree(lua_State *L, BKNode *n);
 
 /* ------------------------------------------------------------------ */
 /* Tree item map helpers (BKTreeItem* <-> Lua userdata)               */
