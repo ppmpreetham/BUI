@@ -188,6 +188,9 @@ int BK_theme_load_json(const char *json);
 int BK_theme_load_file(const char *path);
 const char *BK_theme_error(void);
 int BK_theme_ignored(void);        /* keys of the last load that BUI has no use for */
+/* Those keys are not lost: a color ("#rrggbb") or a number a theme lists that BUI has no field for
+ * is the theme's own, and BK_theme_color / BK_theme_num read it by that key while the theme is in
+ * use ("muted.foreground": "#8696A0"; the application decides what it means). */
 int BK_theme_count(void);          /* registered themes */
 const char *BK_theme_at(int index); /* their names, NULL past the end */
 /* Set one value of the active theme now (until the next BK_set_theme): a color by key as above, or

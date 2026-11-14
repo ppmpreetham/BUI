@@ -1639,7 +1639,8 @@ int BK_theme_color(const char *key, float r_rgba[4])
     }
   }
   if (!c) {
-    return bk_theme_key_color(key, r_rgba); /* "button.background", "user_interface.wcol_regular.inner" */
+    /* "button.background", "user_interface.wcol_regular.inner", then the theme's own keys */
+    return bk_theme_key_color(key, r_rgba) || bk_theme_custom_color(key, r_rgba);
   }
   if (r_rgba) {
     bk_rgba(c, r_rgba);

@@ -85,6 +85,8 @@ bool bk_theme_is_light(void);
 void bk_theme_mark_set(void);             /* a theme was chosen: BUI_THEME no longer applies */
 void bk_theme_changed(void);              /* bk_theme changed: every context redraws */
 int bk_theme_key_color(const char *key, float r_rgba[4]);
+int bk_theme_custom_color(const char *key, float r_rgba[4]); /* kit_theme.c: the theme's own keys */
+int bk_theme_custom_num(const char *key, double *r_value);
 
 /* Metrics (U.widget_unit, U.pixelsize, UI text size). */
 extern float bk_scale_fac;

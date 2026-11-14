@@ -111,6 +111,17 @@ A file with a mistake raises (Python `ValueError`, Rust `Err`, JavaScript a reje
 `BK_theme_error()`) with the line and column, and none of its themes is added. Keys BUI doesn't know are
 not errors; `BK_theme_ignored()` counts them (Python's `buipy.kit_theme_load_file` returns `(added, ignored)`).
 
+## Your own keys
+
+A color (`"#rrggbb"`, with an optional alpha) or a number in `colors` whose key BUI has no field for is not lost: it is the theme's own, and you read it back by that key while the theme is in use. An app can carry the colors it needs next to the ones BUI draws with:
+
+```json
+{ "name": "Chat", "mode": "dark",
+  "colors": { "background": "#111b21", "muted.foreground": "#8696A0", "list.hover.background": "#2a3942", "bubble.radius": 14 } }
+```
+
+`theme_color("muted.foreground")` (Rust), `BK_theme_color("muted.foreground", rgba)` (C) and the same call in the other bindings return the color, and `theme_value("bubble.radius")` / `BK_theme_num` the number. Keys are matched without regard to case, and switching to another theme (or a built-in one) drops them. BUI itself uses none of them, so `BK_theme_ignored()` still counts them, and a misspelled BUI key is a custom key rather than an error. Own keys are read-only: `set_theme_color` is for BUI's keys.
+
 ## What a theme does not reach
 
 - **Browser-look controls.** Plain HTML inputs and buttons draw like Chrome's, with Chrome's colors, outside
@@ -120,7 +131,7 @@ not errors; `BK_theme_ignored()` counts them (Python's `buipy.kit_theme_load_fil
 - **One theme for the whole process**, as in Blender. Two windows cannot differ.
 - **Corners are all-or-nothing, not different radii.** A corner is round or square; the radius is one
   per widget. Blender draws it this way too.
-- **Blender keys BUI has no widget for** (the 3D view, the bone colors, ...) are accepted and ignored.
+- **Blender keys BUI has no widget for** (the 3D view, the bone colors, ...) are accepted and not drawn; like any other key BUI doesn't know, they can be read back as the theme's own.
 
 ## Where the keys come from
 

@@ -217,7 +217,10 @@ int BK_theme_num(const char *key, double *r_value)
   bk_theme_env_init();
   const TKey *k = find_key(key);
   double v;
-  if (!k || !key_get_num(k, &v)) {
+  if (!k) {
+    return bk_theme_custom_num(key, r_value);
+  }
+  if (!key_get_num(k, &v)) {
     return 0;
   }
   if (r_value) {
@@ -284,12 +287,15 @@ typedef struct ThemeDef {
   float radius;      /* < 0: not set */
   Entry *entries;
   int n;
+  Entry *custom; /* keys of the file that BUI has no field for: the application's own (read by key) */
+  int ncustom;
 } ThemeDef;
 
 static ThemeDef g_defs[MAX_THEMES];
 static int g_ndefs = 0;
 static char g_error[256] = "";
 static int g_ignored = 0;
+static const ThemeDef *g_cur = NULL; /* the registered theme in use (NULL: a built-in one) */
 static char g_active[64] = ""; /* the registered theme in use; "" for a built-in one */
 /** Which text properties the active theme set (and so which to undo when it is left). */
 static struct {
@@ -318,9 +324,16 @@ const char *BK_theme_at(int i)
 
 static void def_free(ThemeDef *d)
 {
+  if (g_cur == d) {
+    g_cur = NULL;
+  }
   for (int i = 0; i < d->n; i++) {
     free(d->entries[i].name);
   }
+  for (int i = 0; i < d->ncustom; i++) {
+    free(d->custom[i].name);
+  }
+  free(d->custom);
   free(d->entries);
   free(d->name);
   free(d->font_family);
@@ -352,6 +365,46 @@ static void set_error(const char *fmt, const char *a, const char *b)
   snprintf(g_error, sizeof(g_error), fmt, a ? a : "", b ? b : "");
 }
 
+/* A key BUI has no field for is kept as the theme's own: a color ("#rrggbb") or a number, read back
+ * by key with BK_theme_color / BK_theme_num while the theme is in use. */
+static bool add_custom(ThemeDef *d, const BKJson *m)
+{
+  Entry e;
+  memset(&e, 0, sizeof(e));
+  if (m->type == BK_JSON_STRING) {
+    if (!parse_color(m->string, e.color)) {
+      return true;
+    }
+    e.is_color = true;
+  }
+  else if (m->type == BK_JSON_NUMBER || m->type == BK_JSON_BOOL) {
+    e.num = m->type == BK_JSON_BOOL ? (m->boolean ? 1.0 : 0.0) : m->number;
+  }
+  else {
+    return true;
+  }
+  for (int i = 0; i < d->ncustom; i++) { /* the later one wins */
+    if (names_equal(d->custom[i].name, m->key)) {
+      e.name = d->custom[i].name;
+      d->custom[i] = e;
+      return true;
+    }
+  }
+  if (d->ncustom >= MAX_ENTRIES) {
+    set_error("theme \"%s\" has too many keys", d->name, NULL);
+    return false;
+  }
+  Entry *grown = (Entry *)realloc(d->custom, sizeof(Entry) * (size_t)(d->ncustom + 1));
+  if (!grown) {
+    set_error("out of memory", NULL, NULL);
+    return false;
+  }
+  d->custom = grown;
+  e.name = dup(m->key);
+  d->custom[d->ncustom++] = e;
+  return true;
+}
+
 /* One member of "colors" into a theme definition. */
 static bool add_entry(ThemeDef *d, const BKJson *m)
 {
@@ -362,7 +415,7 @@ static bool add_entry(ThemeDef *d, const BKJson *m)
   const char *const *alias = k ? NULL : find_alias(m->key);
   if (!k && !alias) {
     g_ignored++;
-    return true;
+    return add_custom(d, m);
   }
   Entry e;
   memset(&e, 0, sizeof(e));
@@ -635,6 +688,7 @@ int BK_set_theme(const char *name)
   for (int i = 0; i < g_ndefs; i++) {
     if (names_equal(g_defs[i].name, name)) {
       apply_def(&g_defs[i]);
+      g_cur = &g_defs[i];
       snprintf(g_active, sizeof(g_active), "%s", g_defs[i].name);
       bk_theme_changed();
       return 1;
@@ -645,9 +699,48 @@ int BK_set_theme(const char *name)
     return 0;
   }
   reset_applied_text(); /* leaving a custom theme that set the text */
+  g_cur = NULL;
   g_active[0] = '\0';
   bk_theme_load_preset(t);
   bk_theme_changed();
+  return 1;
+}
+
+/* The active theme's own keys (those of its file that BUI has no field for). */
+static const Entry *custom_find(const char *key)
+{
+  if (!g_cur || !key) {
+    return NULL;
+  }
+  for (int i = 0; i < g_cur->ncustom; i++) {
+    if (names_equal(g_cur->custom[i].name, key)) {
+      return &g_cur->custom[i];
+    }
+  }
+  return NULL;
+}
+
+int bk_theme_custom_color(const char *key, float r_rgba[4])
+{
+  const Entry *e = custom_find(key);
+  if (!e || !e->is_color) {
+    return 0;
+  }
+  if (r_rgba) {
+    bk_rgba(e->color, r_rgba);
+  }
+  return 1;
+}
+
+int bk_theme_custom_num(const char *key, double *r_value)
+{
+  const Entry *e = custom_find(key);
+  if (!e || e->is_color) {
+    return 0;
+  }
+  if (r_value) {
+    *r_value = e->num;
+  }
   return 1;
 }
 

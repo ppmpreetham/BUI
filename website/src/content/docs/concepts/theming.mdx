@@ -276,6 +276,17 @@ BK_theme_set_num("button.border.width", 3);
 
 The full list is in [`docs/theme-keys.md`](https://github.com/ppmpreetham/BUI/blob/main/docs/theme-keys.md), generated from Blender's own theme file so the names cannot drift.
 
+### Keys of your own
+
+A color or a number in `colors` whose key BUI has no field for is kept as the theme's own, and you read it back by that key while the theme is in use. Your app can carry the colors it needs next to the ones BUI draws with:
+
+```json
+{ "name": "Chat", "mode": "dark",
+  "colors": { "background": "#111b21", "muted.foreground": "#8696A0", "bubble.radius": 14 } }
+```
+
+`theme_color("muted.foreground")` in Rust, `BK_theme_color("muted.foreground", rgba)` in C and the same call in the other bindings return the color; `theme_value("bubble.radius")` or `BK_theme_num` returns the number. Keys match without regard to case, and another theme drops them. BUI uses none of them, so `BK_theme_ignored()` still counts them, and a misspelled BUI key becomes a custom key instead of an error. They are read-only.
+
 ### What you can change about a widget
 
 Every widget set takes, besides its colors:

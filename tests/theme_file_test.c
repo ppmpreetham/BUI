@@ -92,7 +92,7 @@ int main(void)
   CHECK(BK_theme_num("slider.roundness", &v) && fabs(v - 0.9) < 1e-6); /* "radius" */
   CHECK(fabsf(BK_font_size_points() - 12.0f) < 1e-6f);
   CHECK(BK_theme_num("panel.roundness", &v) && fabs(v - 0.4) < 1e-6); /* "radius" is for widgets */
-  CHECK(BK_theme_num("viewport_3d.vertex.size", &v) == 0);
+  CHECK(BK_theme_num("viewport_3d.vertex.size", &v) && v == 5.0); /* no field: the theme's own key */
 
   /* the second theme starts from the light preset */
   CHECK(BK_set_theme("Paper") == 1);
@@ -105,10 +105,24 @@ int main(void)
   CHECK(BK_set_theme("dark") == 1 && strcmp(BK_theme_name(), "dark") == 0);
   CHECK(color_is("button.background", 0x545454));
 
+  /* ---- a theme's own keys: what BUI has no field for is read back by key while it is in use ---- */
+  CHECK(BK_theme_load_json("{ \"themes\": [ { \"name\": \"Own\", \"colors\": { \"muted.foreground\": \"#8696A0\", "
+                           "\"bubble.radius\": 14, \"flag\": true, \"junk\": [1] } } ] }") == 1);
+  CHECK(BK_theme_ignored() == 4); /* BUI itself uses none of them */
+  CHECK(!BK_theme_color("muted.foreground", c)); /* not the active theme's yet */
+  CHECK(BK_set_theme("Own") == 1);
+  CHECK(color_is("muted.foreground", 0x8696a0) && color_is("Muted.Foreground", 0x8696a0));
+  CHECK(BK_theme_num("bubble.radius", &v) && v == 14.0);
+  CHECK(BK_theme_num("flag", &v) && v == 1.0);
+  CHECK(!BK_theme_color("bubble.radius", c) && !BK_theme_num("muted.foreground", &v)); /* kind matters */
+  CHECK(!BK_theme_color("junk", c)); /* an array is neither */
+  CHECK(color_is("button.background", 0x545454)); /* the keys BUI knows are still the preset's */
+  CHECK(BK_set_theme("dark") == 1 && !BK_theme_color("muted.foreground", c)); /* gone with the theme */
+
   /* ---- bad files add nothing and say where ---- */
   CHECK(BK_theme_load_json("{ \"name\": \"x\", \"themes\": [ { \"name\": \"Ok\" }, { } ] }") == -1);
   CHECK(strstr(BK_theme_error(), "themes[1]") != NULL);
-  CHECK(BK_theme_count() == 2); /* "Ok" was not added either */
+  CHECK(BK_theme_count() == 3); /* "Ok" was not added either */
   CHECK(BK_theme_load_json("{ \"themes\": [ ") == -1);
   CHECK(strstr(BK_theme_error(), "line 1") != NULL);
   CHECK(BK_theme_load_json("[1, 2]") == -1);
@@ -126,7 +140,7 @@ int main(void)
 
   /* the same name replaces an older theme */
   CHECK(BK_theme_load_json("{\"name\":\"s\",\"themes\":[{\"name\":\"PLUM\",\"colors\":{\"text\":\"#010203\"}}]}") == 1);
-  CHECK(BK_theme_count() == 3);
+  CHECK(BK_theme_count() == 4);
   CHECK(BK_set_theme("Plum") == 1 && color_is("text", 0x010203));
   CHECK(BK_set_theme("dark") == 1);
 
