@@ -208,6 +208,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 - **Ctrl+Z / Ctrl+Shift+Z** on every UI edit, and inside a text field while you type; Tab between fields.
 - Blender's float display precision, multi-field vertical drags, and panels that collapse with Blender's animation.
 - The HSV color wheel, color ramps, curves, trees, lists, text areas, canvases, a node editor and Blender's File Browser.
+- **Blender's screen layout**: areas you resize by dragging the edges between them (Shift moves aligned edges, Ctrl snaps), split, join and dock by dragging a corner, swap with Ctrl, maximize with Ctrl+Space; headers, toolbars and sidebars that resize, hide and flip; panels that reorder and pin; the arrangement saved and restored as JSON ([Screens, areas and regions](https://bui.preetham.top/docs/concepts/screens/)).
 - **Blender's Dark and Light themes**, switchable at run time, and **your own themes** from a JSON file (gpui-kit's format, Blender's color names, per-widget corners and borders; [docs/theming.md](docs/theming.md)).
 
 ### Python
@@ -1103,7 +1104,16 @@ Blender-widgets build, and every C kit widget.
   collect them, then sideways to change them together. Drag across checkboxes
   (or panel headers) to set them all in one stroke.
 - **Panels** collapse with Blender's animation; Ctrl+click opens one and
-  closes the others; drag the grip to reorder.
+  closes the others; drag the grip to reorder; Shift+click pins one in a
+  tabbed sidebar.
+- **Screens** (Blender's `editors/screen`): drag the edge between two areas
+  to resize them (Shift: every aligned edge, Ctrl: snap, Esc or right-click:
+  cancel); drag an area's corner inward to split it, into a neighbor to join,
+  into any other area to dock beside it or replace it, out of the window to
+  open it there; Ctrl-drag swaps two areas; Ctrl+Space maximizes and
+  Ctrl+Alt+Space is focus mode; right-click an edge or a header for the same
+  as menus. Regions resize from their inner edge, hide when dragged closed,
+  come back from their tab or hotkey, and flip sides.
 - **Menus** work press-drag-release or click; hover switches menu-bar menus;
   **pie menus** open around the pointer.
 - **Menu search** is Blender's string search: start typing in any open menu.
@@ -2066,6 +2076,7 @@ How each was counted: [Coverage](https://bui.preetham.top/docs/reference/coverag
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`examples/tk_unchanged_app.py`](examples/tk_unchanged_app.py)                                                                                                                                                                | A plain tkinter app: menus, notebook, form, table, text, canvas                                                                                                                                                                                                 |
 | [`examples/components_demo.py`](examples/components_demo.py)                                                                                                                                                                  | Every Blender component in a properties-editor layout                                                                                                                                                                                                           |
+| [`examples/screen_demo.py`](examples/screen_demo.py) | Blender's screen: seven editors whose areas you resize, split, join, dock and maximize, with toolbars, sidebars and pinned panels; the layout is kept between runs |
 | [`examples/qt_syntax_demo.py`](examples/qt_syntax_demo.py)                                                                                                                                                                    | Qt syntax: layouts, form widgets, signals                                                                                                                                                                                                                       |
 | [`examples/tk_syntax_demo.py`](examples/tk_syntax_demo.py)                                                                                                                                                                    | tkinter syntax laid out like a Blender properties editor                                                                                                                                                                                                        |
 | [`examples/kit_hello.c`](examples/kit_hello.c)                                                                                                                                                                                | The C kit: a slider and a button in a native window                                                                                                                                                                                                             |

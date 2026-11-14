@@ -1,0 +1,218 @@
+---
+title: Screens, areas and regions
+description: Blender's resizable, splittable, dockable editor layout in every language. Drag the edges between areas, drag a corner to split, join or dock, maximize with Ctrl+Space; regions (headers, toolbars, sidebars) resize, hide and flip; panels reorder and pin. Ported from Blender's editors/screen.
+section: Concepts
+order: 68
+sources: ["kit/intern/screen/screen_intern.h", "kit/intern/screen/screen_geometry.c", "kit/intern/screen/screen_edit.c", "kit/intern/screen/area.c", "kit/intern/screen/screen_ops.c", "kit/intern/screen/screen_draw.c", "kit/intern/screen/screen_layout.c", "kit/intern/screen/screen_node.c", "kit/include/BUI_kit.h", "bindings/python/bui/components/screen.py", "bindings/python/bui/qtcontainers.py", "bindings/python/bui/tksyntax/_widgets.py", "bindings/lua/src/bui_node.c", "bindings/d/source/bui/node.d", "tests/screen_test.c", "bindings/python/tests/test_screen.py", "bindings/lua/tests/test_screen.lua", "bindings/rust/blenderui/src/screen.rs", "bindings/rust/blenderui/tests/screen.rs", "bindings/node/screen.js", "bindings/react/index.js"]
+---
+
+Blender's window is a **screen** of **areas**, each showing one editor, and each area is made of **regions**: a header, a toolbar, a sidebar, the main view. BUI has the same thing, ported from Blender's `editors/screen` (`screen_geometry.cc`, `screen_edit.cc`, `area.cc`, `screen_ops.cc`, `screen_draw.cc`), so it behaves like Blender in every language.
+
+The layout lives on Blender's graph of shared vertices and edges, not on nested boxes. That is what makes joining, docking and moving several aligned edges at once possible.
+
+## What the user can do
+
+| Do this | And this happens | Blender's operator |
+|---|---|---|
+| Drag the edge between two areas | Both resize; the edge snaps near its limits | `SCREEN_OT_area_move` |
+| … with Shift | Every edge aligned with it moves too | the same, extending |
+| … with Ctrl | It snaps to 24ths of the screen and to other areas' edges | the same, `SNAP_FRACTION_AND_ADJACENT` |
+| Escape or right-click while dragging | The edge goes back | the same, cancel |
+| Drag an area's corner inward | The area splits (Ctrl snaps to 12ths and other edges) | `SCREEN_OT_area_join` (split) |
+| Drag a corner into a neighbor | The two areas join | the same (join) |
+| Drag a corner into any other area | The area docks beside it (left, right, top, bottom) or replaces it (center), with a preview; Ctrl and Alt adjust the size | the same (dock) |
+| Drag a corner out of the window | The host is asked to open the area in a window of its own | the same (new window) |
+| Ctrl-drag a corner | Two areas swap places | `SCREEN_OT_area_swap` |
+| Shift-drag a corner | The host is asked to open a copy in a new window | `SCREEN_OT_area_dupli` |
+| Right-click an edge | Vertical/Horizontal Split, Join, Swap Areas, Merge Edge | `SCREEN_OT_area_options` |
+| Right-click a header | Hide Header, Flip to Bottom, Move/Split Area, Maximize Area, Focus Mode, Duplicate Area into New Window, Close Area | the header context menu |
+| Click the header's left corner | The same area options | the touch menu |
+| Ctrl+Space / Ctrl+Alt+Space | Maximize the area under the pointer / focus mode (regions hidden); again restores | `SCREEN_OT_screen_full_area` |
+| Drag a region's inner edge | The region resizes (toolbars snap to their columns, sidebars to their tabs) | `SCREEN_OT_region_scale` |
+| … all the way to the side | The region hides, leaving a small tab; click the tab or drag it out to show it again | the same |
+| Press a region's hotkey | The region toggles (N for a sidebar, T for a toolbar, as you set them) | `SCREEN_OT_region_toggle` |
+| Drag a panel's grip | Panels reorder (the host hears where it went) | panel dragging |
+| Shift+click a panel header in a tabbed sidebar | The panel is pinned: it shows under every tab | `PNL_PIN` |
+
+Areas are drawn as in Blender: rounded corners, the theme's editor border (`editor_border`, `editor_outline`, `editor_outline_active`), the highlight on the edge being dragged, and Blender's previews for splitting, joining and docking.
+
+## Regions
+
+An area's children are its regions and one main view. A region is a `header`, `tool_header`, `footer`, `asset_shelf`, `channels`, `nav_bar`, `toolbar`, `sidebar`, `execute` or `hud` (the floating Adjust Last Operation panel), one of each, laid out in Blender's order with Blender's defaults:
+
+| Region | Side | Default size | Notes |
+|---|---|---|---|
+| header, tool_header, footer, execute | top/bottom | the header height | can't be resized, only hidden and flipped |
+| toolbar | left/right | one toolbar column | snaps to 1, 2 or 2.7 columns; drawn over the main view |
+| sidebar | left/right | 280 | tabs for panel categories; drawn over the main view; narrow, it keeps only its tabs |
+| channels, nav_bar | left/right | 200 / 160 | |
+| asset_shelf | top/bottom | 120 | drawn over the main view |
+| hud | floating | its content's size | at the lower left of the main view |
+
+Each region takes these properties: `size` (unscaled pixels across the area), `hidden`, `side`, `overlap` (drawn over the main view or beside it), `resizable` (false: only hides), `maxsize` and `hotkey`. The user resizing, hiding or flipping it is reported to the region (`BK_EV_RESIZE`: the size and whether it is hidden).
+
+An area works on its own too, outside a screen: a panel with a header and sidebars that resize and hide.
+
+## Areas the user makes
+
+Splitting, docking and restoring a layout make areas. Each area has an editor name; a new area shows the editor of the one it came from, and the screen asks the host to fill it (`BK_AREA_NEW`). The bindings do this for you from a table of editors: one factory per editor name, which also lists the header's editor-type menu.
+
+## Saving and restoring
+
+The screen's `layout` property is its arrangement as JSON: the vertices, each area's corners and editor, and each region's side, size and hidden state. Store it when the screen reports a change and set it back to restore: the screen makes or closes areas to match, and the vertices scale to the screen's size.
+
+## In your language
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust
+use blenderui::screen::{AreaRef, AreaSplit, Editor, Editors, Region, Screen, Side};
+
+let editors = Editors::new()
+    .editor("3D Viewport", "VIEW3D", |area: &AreaRef| {
+        Editor::new(div().child("viewport"))
+            .header(div().child("View"))
+            .toolbar(div())
+            .sidebar(Region::new(div().child("Item")).size(280).hotkey("n")
+                .on_resize(|e, _, _| println!("{} {}", e.size, e.hidden)))
+    })
+    .editor("Outliner", "OUTLINER", |area| Editor::new(div().child(area.editor().to_owned())));
+
+rsx! {
+    <Screen editors={editors}
+            layout={AreaSplit::v(0.75, "3D Viewport", "Outliner")}
+            saved={saved.as_deref()}
+            on_change={|e: &ScreenEvent, _, _| save(e.layout())} />
+}
+// gpui style: Screen().editors(editors).layout(AreaSplit::v(0.75, "3D Viewport", "Outliner"))
+```
+
+Region contents are your HTML elements: the kit lays the areas and regions out, and each region's elements are placed at its rect (they follow one render behind, as container queries do, and live during a drag). `AreaRef` (passed to each editor's factory) has `editor()`, `split`, `join`, `dock`, `swap`, `close`, `maximize`, `focus` and `restore`. `on_window` gets the editor's name of an area dragged out of the window.
+</Tab>
+<Tab label="JavaScript">
+
+```jsx
+import { Screen, Editor, Region, AreaSplit } from '@blender-ui/react' // Vue and Svelte: the same components
+
+const editors = {
+  '3D Viewport': { icon: 'VIEW3D', render: area =>
+    <Editor header={<div>View</div>} toolbar={<div />}
+            sidebar={<Region size={280} hotkey="n" onResize={e => console.log(e)}><div>Item</div></Region>}>
+      <div>viewport</div>
+    </Editor> },
+  Outliner: { icon: 'OUTLINER', render: area => <Editor><div>{area.editor}</div></Editor> },
+}
+
+<Screen editors={editors} layout={AreaSplit.v(0.75, '3D Viewport', 'Outliner')}
+        saved={saved} onChange={e => save(e.layout)} onWindow={e => openWindow(e.editor)} />
+```
+
+The native DOM API has `createScreen(document, { editors, layout, saved, onChange, onWindow })` and `editorElement(document, { main, header, sidebar: { element, size, hotkey, onResize } })`. JavaScript has no area operations (split, join, dock) yet: the user does them.
+</Tab>
+<Tab label="Python">
+
+```python
+from bui.components import (App, AreaSplit, Column, Editor, Label, MenuButton, NodeEditor,
+                            NumberSlider, Panel, Region, Screen, Sidebar)
+
+def viewport(area):
+    return Editor(NodeEditor(),                     # the main view: any component
+                  header=[MenuButton("View", ["Frame All"])],
+                  toolbar=Column(),
+                  sidebar=Region(Sidebar(Panel("Transform", NumberSlider("X", 0.0),
+                                               category="Item")),
+                                 size=280, hotkey="n",
+                                 on_resize=lambda size, hidden: print(size, hidden)))
+
+def outliner(area):
+    return Editor(Column(Label(area.editor)), header=[])
+
+screen = Screen({"3D Viewport": viewport, "Outliner": outliner, "Properties": outliner},
+                AreaSplit("v", 0.75, "3D Viewport", AreaSplit("h", 0.4, "Outliner", "Properties")),
+                saved=load(), on_change=save, on_window=lambda area: open_window(area.editor))
+App("Blender-like", (1280, 800), screen, padding=0).run()
+
+view = screen.areas[0]
+right = view.split("v", 0.3)          # the screen fills it with view's editor
+right.dock(view, "left", 0.25)        # "left", "right", "top", "bottom", "center"
+view.maximize(); view.restore()
+```
+
+`AreaSplit(axis, factor, first, second)`: `"v"` puts `first` on the left, `"h"` puts it on top, `first` taking `factor`. An `Area("Outliner", body, header=[...], sidebar=...)` also works on its own. `Panel(..., pinned=True, on_move=lambda old, new: ..., on_pin=...)`.
+
+Qt's `QSplitter` and tkinter's `PanedWindow` are screens that only let the user move their edges, so they drag like Blender's areas; `setSizes`, `sizes`, `splitterMoved`, `sash_coord` and `sash_place` work as before.
+</Tab>
+<Tab label="C">
+
+```c
+BKNode *screen = BK_node_new("screen");
+BKNode *view = BK_node_new("area");
+BK_set_str(view, "editor", "3D Viewport");
+BK_node_add(screen, view, -1);             /* the first area fills the screen */
+
+BKNode *props = BK_area_split(view, BK_AXIS_V, 0.75f);   /* the right quarter */
+BKNode *outliner = BK_area_split(props, BK_AXIS_H, 0.6f); /* its top part */
+
+/* an area's regions and its main view */
+BKNode *side = BK_node_new("sidebar");
+BK_set_num(side, "size", 280);
+BK_set_str(side, "hotkey", "n");
+BK_node_add(view, BK_node_new("areaheader"), -1);
+BK_node_add(view, side, -1);
+BKNode *tools = BK_node_new("column");
+BK_set_str(tools, "region", "toolbar");
+BK_node_add(view, tools, -1);
+BK_node_add(view, viewport, -1);          /* the one child that isn't a region */
+
+BK_area_dock(outliner, view, BK_DOCK_LEFT, 0.25f);
+BK_set_str(view, "full", "maximized");    /* "", "maximized", "focus" */
+const char *saved = BK_get_str(screen, "layout");
+BK_set_str(screen, "layout", saved);
+```
+
+Events: `BK_EV_AREA` with `BK_AREA_NEW` on the screen (`a` = the new area's index: fill it for its `"editor"`), `BK_AREA_CLOSE` and `BK_AREA_WINDOW` on the area; `BK_EV_CHANGE` on the screen; `BK_EV_RESIZE` on regions; `BK_EV_MOVE` on panels. Setters return 0 for what they refuse: a second region of a type, a side the type can't be on, a second main view, a malformed layout.
+</Tab>
+<Tab label="Lua">
+
+```lua
+local screen = bui.Node("screen")
+local view = bui.Node("area")
+view:set("editor", "3D Viewport")
+screen:add(view)
+local props = view:split("v", 0.75)
+screen:on(bui.EV_AREA, function(self, index, what)
+  if what == bui.AREA_NEW then fill(self:child(index)) end
+end)
+local side = bui.Node("sidebar")
+side:set("size", 280)
+assert(not side:set("side", "top"))      -- set returns false for what it refuses
+props:dock(view, "left", 0.3)
+local saved = screen:get("layout")
+```
+
+A closed area's wrapper becomes stale (`node:type()` is `"(freed)"`), never dangling.
+</Tab>
+<Tab label="D">
+
+```d
+auto screen = new Node("screen");
+auto view = new Node("area");
+view.set("editor", "3D Viewport");
+screen.add(view);
+auto props = view.split('v', 0.75f);
+screen.onArea((NodeEvent e) { if (cast(int) e.b == BK_AREA_NEW) fill(screen.child(cast(int) e.a)); });
+props.dock(view, BK_DOCK_LEFT, 0.3f);
+auto side = new Node("sidebar").set("size", 280.0).set("hotkey", "n");
+```
+</Tab>
+</LangTabs>
+
+## What isn't there
+
+- **Workspaces**: several screens with tabs above them.
+- **Global areas**: Blender's top bar and status bar that snap between two sizes.
+- **Moving the HUD**: the floating region stays at its corner.
+- **Header-less panels** and Blender's floating panel drag (the dragged panel follows the pointer while the others slide): panels reorder as the grip crosses them.
+- **JavaScript area operations** (split, join, dock from code), and in Rust and JavaScript the header's right-click menu (the corner and edge menus work).
+- Blender's dedicated cursors (split, swap, the arrows) show as the nearest kit cursor.

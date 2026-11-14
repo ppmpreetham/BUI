@@ -13,6 +13,7 @@ Here's the story of BUI so far, in plain words: what each release gave you, and 
 
 These are on `main` and will ship in the next release; the details are under **Unreleased** in the changelog. Nothing here is on PyPI, crates.io or npm yet.
 
+- **Blender's screen layout.** Areas you resize by dragging the edges between them, split, join and dock by dragging a corner, swap, maximize and drag out of the window; headers, toolbars and sidebars that resize, hide and flip; panels that pin and reorder; the layout saved as JSON. `QSplitter` and tkinter's `PanedWindow` drag Blender's area edges too. See [Screens, areas and regions](../../concepts/screens/).
 - **Animation.** One animation engine in the C kit runs GSAP-style timelines (position strings such as `"<"` and `"+=1"`, stagger, repeat, yoyo) and Motion-style springs, for Rust, JavaScript, React, Python, Lua and C. Rust gets `<motion.div>` in `rsx!`; see [Motion](../../rust/motion/) and [Effects and animations](../../rust/effects-and-animations/).
 - **Vue.** `@blender-ui/vue` renders Vue 3 single-file components in native windows. See [Vue](../../javascript/vue/).
 - **D.** A DUB package with the whole C API, idiomatic wrappers and an HTML, CSS and RSX layer. See [D](../../d/overview/).
@@ -21,6 +22,7 @@ These are on `main` and will ship in the next release; the details are under **U
 - **Controls in node-editor nodes.** A node can hold a button, a checkbox and a dropdown, as Blender's nodes do.
 - **More Qt syntax.** Dock widgets, toolbars, model/view, real dialogs, `QSettings`, dates and a calendar: about 57% of the core widget classes' methods, up from 21%.
 - **Windows.** Resizing a window is smoother and renders far fewer frames, and a window that animates for ever no longer ignores the mouse and keyboard.
+- **Faster frames in Rust.** Text wraps once per size and width instead of once per use, scrolling a page that nothing follows places the last frame again instead of rendering the view, and CSS animations copy less: a page of 400 paragraphs renders again in half the time, and scrolling 1,500 rows takes 5.0 ms instead of 17.9.
 - **Fixes.** Tailwind `text-sm` line heights and `truncate` now show the `…`; form widgets and overlays paint in the right order in Rust.
 - **Editor extensions** for `rsx!` in VS Code and Zed. See [Editor support](../../rust/editor-support/).
 

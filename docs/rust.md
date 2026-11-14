@@ -464,6 +464,30 @@ On the `Window` (listeners get it): `selected_text() -> Option<String>`,
 (fires for the user's changes) and `read_clipboard()` / `write_clipboard(text)`.
 `examples/selectable.rs` is a page of paragraphs; `tests/selection.rs` drives it
 headlessly with `simulate_drag`, `simulate_click` and `simulate_key_with`.
+## Screens, areas and regions
+
+Blender's editor layout (`blenderui::screen`): areas the user resizes, splits, joins and docks,
+with headers, toolbars and sidebars that resize and hide. The kit lays them out; your HTML goes in
+the regions.
+
+```rust
+use blenderui::screen::{AreaRef, AreaSplit, Editor, Editors, Region, Screen};
+
+let editors = Editors::new()
+    .editor("3D Viewport", "VIEW3D", |_: &AreaRef| {
+        Editor::new(div().child("viewport"))
+            .header(div().child("View"))
+            .sidebar(Region::new(div().child("Item")).size(280).hotkey("n"))
+    })
+    .editor("Outliner", "OUTLINER", |a| Editor::new(div().child(a.editor().to_owned())));
+Screen().editors(editors).layout(AreaSplit::v(0.75, "3D Viewport", "Outliner"))
+    .on_change(|e, _, _| println!("{}", e.layout()))
+```
+
+`Region` takes `size`, `hidden`, `side`, `overlap`, `resizable`, `maxsize`, `hotkey`, `on_resize`;
+`AreaRef` has `split`, `join`, `dock`, `swap`, `close`, `maximize`, `focus`, `restore`. See
+[Screens, areas and regions](https://bui.preetham.top/docs/concepts/screens/).
+
 ## Images
 
 `<img src>` and CSS background images read every format the kit reads (PNG,

@@ -166,6 +166,39 @@ BK_video_free(v);                           /* after nodes / items let go */
 video, the GPU renderers, the file browser) are CMake options from
 `features.json`; see [Binary size](https://bui.preetham.top/docs/reference/binary-size/).
 
+## Screens, areas and regions
+
+Blender's editor layout (`kit/intern/screen`, ported from `editors/screen`). A `"screen"` holds
+`"area"` nodes on Blender's graph of shared edges; the user drags edges, corners and region
+edges as in Blender, and so can you:
+
+```c
+BKNode *screen = BK_node_new("screen");
+BKNode *view = BK_node_new("area");
+BK_set_str(view, "editor", "3D Viewport");
+BK_node_add(screen, view, -1);                          /* the first area fills the screen */
+BKNode *props = BK_area_split(view, BK_AXIS_V, 0.75f);  /* the right quarter; NULL if too small */
+
+BKNode *side = BK_node_new("sidebar");                  /* a region: areaheader, sidebar, or */
+BK_set_num(side, "size", 280);                          /* any node with a "region" property */
+BK_set_str(side, "hotkey", "n");
+BK_node_add(view, side, -1);
+BK_node_add(view, main_view, -1);                       /* the one child that isn't a region */
+
+BK_area_dock(props, view, BK_DOCK_LEFT, 0.3f);           /* or BK_area_join / _swap / _close */
+BK_set_str(view, "full", "maximized");                  /* "", "maximized", "focus" */
+const char *saved = BK_get_str(screen, "layout");       /* JSON: set it back to restore */
+```
+
+Areas the screen makes (a split, a dock, a restored layout) copy their source's `"editor"` and
+are announced with `BK_EV_AREA` / `BK_AREA_NEW` on the screen (`a`: the child index): fill them.
+`BK_AREA_CLOSE` and `BK_AREA_WINDOW` (dragged out of the window) arrive on the area itself;
+`BK_EV_CHANGE` on the screen after every change, `BK_EV_RESIZE` on a region the user resized,
+hid or flipped, `BK_EV_MOVE` on a panel dragged to a new place. Region properties: `"region"`
+(header, tool_header, footer, asset_shelf, channels, nav_bar, toolbar, sidebar, execute, hud),
+`"size"`, `"hidden"`, `"side"`, `"overlap"`, `"resizable"`, `"maxsize"`, `"hotkey"`. Setters
+return 0 for what they refuse. See [Screens, areas and regions](https://bui.preetham.top/docs/concepts/screens/).
+
 ## Versioning and stability
 
 The C API is versioned with BUI itself, as `MAJOR.MINOR.PATCH`. `BUI_kit.h` says which version it is, and the library reports its own:

@@ -146,7 +146,8 @@ the software raster.
   clicks. `Treeview` has sortable headings (`heading(command=...)`),
   `show="headings"` tables, `<<TreeviewOpen>>` / `<<TreeviewClose>>`, and
   `move` / `detach` / `reattach`. Also included: `Notebook`, `PanedWindow`
-  with draggable sashes, `OptionMenu` (a Blender enum dropdown),
+  (Blender's area edges as sashes: `sash_coord`, `sash_place`, `paneconfigure(width=)`; `sashwidth`
+  and `minsize` are Blender's border and minimum), `OptionMenu` (a Blender enum dropdown),
   `Menubutton`, and `Message`.
 - **Canvas.**
   - Items: all types, including `window`, smoothed lines and arrowheads.

@@ -139,7 +139,7 @@ tree.setModel(model)                             # redraws when the model change
 dock = QDockWidget("Outliner")
 dock.setWidget(tree)
 win.addDockWidget(Qt.LeftDockWidgetArea, dock)   # a Blender panel left of the central widget
-split = QSplitter(Qt.Vertical)                   # Blender's region edges, dragged
+split = QSplitter(Qt.Vertical)                   # Blender's area edges, dragged
 win.setCentralWidget(split)
 if QMessageBox.question(win, "Quit", "Save changes?") == QMessageBox.Yes:
     QSettings("Studio", "App").setValue("geometry/width", win.width())
@@ -147,7 +147,10 @@ if QMessageBox.question(win, "Quit", "Save changes?") == QMessageBox.Yes:
 
 - **Containers:** `QStackedWidget`, `QToolBox` (Blender panels: the Qt API keeps one open,
   while a click on a header opens or closes that panel on its own, as in Blender), `QSplitter`
-  (region edges you drag), `QToolBar`, `QDockWidget`, `QTabBar`, and `QMainWindow.addToolBar`,
+  (a screen whose areas you resize by dragging Blender's area edges: rounded corners and the
+  theme's editor border; `setSizes` places the panes exactly once the splitter has a size, the
+  last one taking the rest; after that edges move as Blender's, proportionally; `handleWidth()`
+  is the border, `setHandleWidth` and stretch factors are kept but don't change it), `QToolBar`, `QDockWidget`, `QTabBar`, and `QMainWindow.addToolBar`,
   `addDockWidget`, `setStatusBar`, `takeCentralWidget`.
 - **Model/view:** `QStandardItemModel`, `QStringListModel`, the abstract models to subclass
   (`QAbstractItemModel`, `QAbstractListModel`, `QAbstractTableModel`), `QModelIndex`,

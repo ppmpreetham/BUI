@@ -236,7 +236,46 @@ area = Area("Geometry Node Editor", editor,
   - dragging from a socket links; dragging a linked input picks its link up;
   - Ctrl+RMB drag cuts links.
 - **View:** MMB pans, Ctrl+MMB and the wheel zoom, Ctrl/Shift+wheel pan, and Home frames everything.
-- **`Area`**: a 1.3-unit header with the editor-type menu, then the editor filling the rest. A `Spacer()` in `header` pushes the items after it to the right.
+- **`Area`**: a 1.3-unit header with the editor-type menu, then the editor filling the rest. A `Spacer()` in `header` pushes the items after it to the right. Its regions (`toolbar=`, `sidebar=`, `footer=` ... below) resize and hide as in Blender.
+
+## Screens, areas and regions
+
+Blender's editor layout (`editors/screen`, in C: `kit/intern/screen`): areas the user resizes by
+dragging the edges between them (Shift moves every aligned edge, Ctrl snaps, Escape or right-click
+cancels), splits, joins and docks by dragging a corner (Ctrl-drag swaps, dragging out of the window
+calls `on_window`), maximizes with Ctrl+Space (Ctrl+Alt+Space: focus mode); right-click an edge or a
+header for the same as a menu.
+
+```python
+from bui.components import (App, AreaSplit, Column, Editor, Label, MenuButton, NodeEditor,
+                            Panel, Region, Screen, Sidebar)
+
+def viewport(area):
+    return Editor(NodeEditor(),
+                  header=[MenuButton("View", ["Frame All"])],
+                  toolbar=Column(),
+                  sidebar=Region(Sidebar(Panel("Item", Label("x"), category="Item")),
+                                 size=280, hotkey="n", on_resize=print))
+
+def text(area):
+    return Editor(Column(Label(area.editor)), header=[])
+
+screen = Screen({"3D Viewport": viewport, "Outliner": text, "Properties": text},
+                AreaSplit("v", 0.75, "3D Viewport", AreaSplit("h", 0.4, "Outliner", "Properties")),
+                saved=None, on_change=lambda layout: print(len(layout)), on_window=print)
+App("Screen", (1200, 760), screen, padding=0).run()
+```
+
+| Class | |
+|---|---|
+| `Screen(editors, layout=None, *, saved=None, on_change=None, on_window=None, ops="all", transparent=False)` | `editors`: name -> `factory(area) -> Editor` (or `(icon, factory)`); they fill every area, the ones the user makes too, and list the editor-type menu. `layout`: an editor name or an `AreaSplit`, used when `saved` is None. `on_change(layout)`: the arrangement as JSON after every change; set `screen.layout` to restore it. `ops="resize"`: only edges move. `screen.areas`. |
+| `AreaSplit(axis, factor, first, second)` | `"v"`: `first` on the left; `"h"`: `first` on top; `first` takes `factor`. `first` / `second`: an editor name or another `AreaSplit`. |
+| `Editor(body, *, header=(), tool_header=, toolbar=, sidebar=, footer=, hud=, asset_shelf=, channels=, nav_bar=, execute=)` | What an editor shows: the main view and its regions (a component, or a `Region`). `header` is a list after the editor-type menu, or a component of your own. |
+| `Region(component, *, size=None, hidden=False, side=None, overlap=None, resizable=True, maxsize=None, hotkey=None, on_resize=None)` | `size`: unscaled pixels across the area. `side`: `"left"`, `"right"`, `"top"`, `"bottom"` (as the kind allows). `overlap=False`: beside the main view instead of over it. `on_resize(size, hidden)`. Values the region refuses raise. |
+| `Area(editor, body=None, *, header=(), on_editor=None, **regions)` | One editor; on its own, a panel whose regions resize and hide. In a screen: `split(axis, factor)`, `join(other)`, `dock(target, where, factor)`, `swap(other)`, `close()`, `maximize()`, `focus()`, `restore()`, `full`. |
+
+Panels in a sidebar: `Panel(..., pinned=False, on_pin=None, on_move=None)`; Shift+click a header
+pins it (shown under every tab), dragging the grip reorders (`on_move(old, new)`).
 
 ## Interactions
 

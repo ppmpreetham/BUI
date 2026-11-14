@@ -284,6 +284,26 @@ method calls `check()` on both sides of the call. A throwing `Host.request`,
 for example, surfaces on the next `render`, `press` or other input call.
 `Custom` and `Video` use the same `pendingError` / `check` pattern.
 
+## Screens, areas and regions
+
+Blender's editor layout (see [Screens, areas and regions](https://bui.preetham.top/docs/concepts/screens/)):
+
+```d
+auto screen = new Node("screen");
+auto view = new Node("area").set("editor", "3D Viewport");
+screen.add(view);                                  // the first area fills the screen
+auto props = view.split('v', 0.75f);               // null when too small; a borrowed wrapper
+props.dock(view, BK_DOCK_LEFT, 0.3f);              // also join, swap, close
+screen.onArea((NodeEvent e) {
+    if (cast(int) e.b == BK_AREA_NEW) fill(screen.child(cast(int) e.a));
+});
+auto side = new Node("sidebar").set("size", 280.0).set("hotkey", "n");
+side.onResize((NodeEvent e) { /* e.a: size, e.b: hidden */ });
+```
+
+Areas the screen makes are C-owned: their borrowed wrappers must not be used after
+`BK_AREA_CLOSE`.
+
 ## Ownership and lifetimes
 
 The binding follows the Python binding's reference model. A `Node` created in
