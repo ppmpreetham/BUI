@@ -1073,6 +1073,15 @@ int BK_set_num(BKNode *n, const char *key, double v)
     bk_invalidate(n);
     return 1;
   }
+  if (strcmp(key, "field_bg") == 0) { /* 0xAARRGGBB */
+    const uint32_t argb = (uint32_t)v;
+    n->field_bg[0] = (uchar)(argb >> 16);
+    n->field_bg[1] = (uchar)(argb >> 8);
+    n->field_bg[2] = (uchar)argb;
+    n->field_bg[3] = (uchar)(argb >> 24);
+    bk_invalidate(n);
+    return 1;
+  }
   if (strcmp(key, "text_color") == 0) { /* 0xAARRGGBB */
     const uint32_t argb = (uint32_t)v;
     n->text_color[0] = (uchar)(argb >> 16);

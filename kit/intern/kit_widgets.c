@@ -3674,13 +3674,15 @@ static void html_check_measure(BKNode *n, int *rw, int *rh)
 
 /* -- text fields -- */
 
-static void html_field_frame(const BKRect *r, int hs, bool focused)
+/* `bg`: the CSS background-color of the field (NULL or alpha 0: the browser's Field white) */
+static void html_field_frame(const BKRect *r, int hs, bool focused, const uchar *bg)
 {
   const float rad = hp(2.0f), bw = html_bw();
   if (hs == HS_DISABLED) {
     html_box_r(r, rad, HTML_LIGHTEN, 0, 0);
   }
-  html_box_r(r, rad, kHtmlCheckBg[hs], kHtmlBorder[hs == HS_PRESSED ? HS_HOVER : hs], bw);
+  const uint32_t fill = (bg && bg[3] && hs != HS_DISABLED) ? ((uint32_t)bg[3] << 24 | (uint32_t)bg[0] << 16 | (uint32_t)bg[1] << 8 | bg[2]) : kHtmlCheckBg[hs];
+  html_box_r(r, rad, fill, kHtmlBorder[hs == HS_PRESSED ? HS_HOVER : hs], bw);
   if (focused) {
     html_focus_ring(r, rad);
   }
@@ -3691,7 +3693,7 @@ static void html_text_draw(BKNode *n)
   const BKRect r = bk_node_rect(n);
   const int hs = html_state(n);
   if (!(n->flags & NF_BARE)) { /* `border: none`: no frame and no focus ring, as in Chrome */
-    html_field_frame(&r, hs, n->edit != NULL);
+    html_field_frame(&r, hs, n->edit != NULL, n->field_bg);
   }
   const BKRect cr = html_inset(&r, 4, 3, 4, 3);
   const uchar *tc = hs == HS_DISABLED ? kHtmlFieldTextDisabled : n->text_color[3] ? n->text_color : kHtmlText;
@@ -3770,7 +3772,7 @@ static void html_number_draw(BKNode *n)
 {
   const BKRect r = bk_node_rect(n);
   const int hs = html_state(n);
-  html_field_frame(&r, hs, n->edit != NULL);
+  html_field_frame(&r, hs, n->edit != NULL, NULL);
   BKRect cr = html_inset(&r, 4, 3, 4, 3);
   cr.xmax = BK_MAX(cr.xmin, cr.xmax - hpi(15)); /* the spin button's space is always kept */
   const uchar *tc = hs == HS_DISABLED ? kHtmlFieldTextDisabled : kHtmlText;
@@ -4050,7 +4052,7 @@ static void html_select_draw(BKNode *n)
     hs = HS_PRESSED;
   }
   /* PaintMenuList without a CSS radius: PaintTextField, then the arrow */
-  html_field_frame(&r, hs, false);
+  html_field_frame(&r, hs, false, NULL);
   const uchar *tc = hs == HS_DISABLED ? kHtmlTextDisabled : kHtmlText;
   const BKRect cr = html_inset(&r, 5, 2, 19, 2);
   html_text(&cr, html_item(n, (int)n->value), -1, tc, BK_ALIGN_LEFT, false);

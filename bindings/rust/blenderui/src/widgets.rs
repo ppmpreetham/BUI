@@ -84,6 +84,16 @@ pub(crate) struct WidgetSpec {
     /// A browser-look text field with its own CSS `color` / `font-size` (they differ from the parent's):
     /// 0xAARRGGBB and CSS px. None: Chrome's field text (black, 13.33px).
     pub text_color: Option<u32>,
+    /// Its CSS `background-color` (0xAARRGGBB); None: the browser's white.
+    pub field_bg: Option<u32>,
+    /// A browser-look textarea with `field-sizing: content`: wraps at its width, and its height follows its lines.
+    pub grow: bool,
+    /// A textarea's `rows` attribute: the lines it shows at least (None: the browser's two).
+    pub rows: Option<u32>,
+    /// A growing textarea's CSS padding (top, right, bottom, left) in CSS px: the text sits inside it.
+    pub pad: [f32; 4],
+    /// Its CSS `max-height` in CSS px (None: unbounded): the box shows whole lines up to it.
+    pub max_h: Option<f32>,
     pub font_px: Option<f32>,
     /// `<optgroup>` labels: (index of the option they come before, label).
     pub groups: Vec<(usize, String)>,
@@ -166,6 +176,11 @@ impl WidgetSpec {
             html: false,
             bare: false,
             text_color: None,
+            field_bg: None,
+            grow: false,
+            rows: None,
+            pad: [0.0; 4],
+            max_h: None,
             font_px: None,
             groups: Vec::new(),
             meter: [None; 3],
@@ -269,6 +284,7 @@ impl WidgetSpec {
             }
             "textarea" => {
                 s = WidgetSpec::new(WKind::TextArea, attrs);
+                s.rows = num("rows").map(|r| r.max(1.0) as u32);
                 s.text = Some(attr(attrs, "value").map(str::to_owned)
                     .unwrap_or_else(|| d.children.iter().filter_map(|c| match c {
                         AnyElement::Text(t) => Some(t.as_ref()),
@@ -319,6 +335,12 @@ pub(crate) struct WidgetNode {
     clip: Option<[i32; 4]>,
 }
 
+/// What layout asks the widgets: the natural size of a spec, or a growing textarea's height at a width.
+pub(crate) enum WidgetAsk<'a> {
+    Ensure(&'a WidgetSpec),
+    Height(f32),
+}
+
 /// The kit widgets of one window, keyed by element key.
 pub(crate) struct Widgets {
     pub nodes: HashMap<Key, WidgetNode>,
@@ -364,6 +386,19 @@ impl Widgets {
         // browser-look controls keep the browser's sizes
         let (mw, mh) = if spec.html { (0.0, 0.0) } else { spec.kind.min_size() };
         ((nat[0] as f32 / scale).max(mw), (nat[1] as f32 / scale).max(mh))
+    }
+
+    /// The height in logical pixels a growing textarea needs when it is `width` wide.
+    pub(crate) fn height_for(&mut self, key: Key, width: f32, scale: f32) -> f32 {
+        let Some(w) = self.nodes.get(&key) else { return 0.0 };
+        let mut nat = [0i32; 2];
+        // SAFETY: our node; the width is a hint for the one natural-size query that follows.
+        unsafe {
+            sys::BK_set_num(w.node, c"measure_w".as_ptr(), f64::from((width * scale).round() as i32));
+            sys::BK_node_natural(w.node, nat.as_mut_ptr());
+            sys::BK_set_num(w.node, c"measure_w".as_ptr(), 0.0);
+        }
+        nat[1] as f32 / scale
     }
 
     /// A frame without layout (a redraw of Motion's values) keeps the widgets
@@ -527,6 +562,23 @@ fn sync(n: *mut sys::BKNode, old: Option<&WidgetSpec>, spec: &WidgetSpec) {
         }
         if old.is_none_or(|o| o.bare != spec.bare) {
             set_num(c"bare", spec.bare as i32 as f64);
+        }
+        if let Some(rows) = spec.rows.filter(|_| old.is_none_or(|o| o.rows != spec.rows)) {
+            set_num(c"rows", f64::from(rows));
+        }
+        if old.is_none_or(|o| o.pad != spec.pad) {
+            for (k, v) in [c"pad_t", c"pad_r", c"pad_b", c"pad_l"].into_iter().zip(spec.pad) {
+                set_num(k, f64::from(v));
+            }
+        }
+        if old.is_none_or(|o| o.max_h != spec.max_h) {
+            set_num(c"max_h", f64::from(spec.max_h.unwrap_or(0.0)));
+        }
+        if old.is_none_or(|o| o.grow != spec.grow) {
+            set_num(c"grow", f64::from(u8::from(spec.grow)));
+        }
+        if old.is_none_or(|o| o.field_bg != spec.field_bg) {
+            set_num(c"field_bg", f64::from(spec.field_bg.unwrap_or(0)));
         }
         if old.is_none_or(|o| (o.text_color, o.font_px) != (spec.text_color, spec.font_px)) {
             set_num(c"text_color", f64::from(spec.text_color.unwrap_or(0)));

@@ -1255,7 +1255,10 @@ impl Window {
         let recycle = self.frame.take().unwrap_or_default();
         self.caches.anim.begin(self.clock.now());
         let mut frame = layout(root, vp, &self.state, &mut self.caches, recycle,
-                           &mut |key, spec| widgets.ensure(canvas, key, spec, scale));
+                           &mut |key, ask| match ask {
+                               crate::widgets::WidgetAsk::Ensure(spec) => widgets.ensure(canvas, key, spec, scale),
+                               crate::widgets::WidgetAsk::Height(w) => (0.0, widgets.height_for(key, w, scale)),
+                           });
         // CSS animations / transitions still moving: render again next frame;
         // Motion's values alone: redraw (nothing running: no frames, so an
         // idle window costs no CPU)

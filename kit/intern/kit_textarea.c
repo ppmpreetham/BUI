@@ -29,15 +29,22 @@ typedef struct TAData {
   int caret, anchor; /* anchor < 0: no selection */
   float want_x;      /* column memory for Up/Down */
   int scroll;        /* first visible line */
-  int *lines;        /* line start offsets */
+  int *lines;        /* visual line start offsets */
+  uchar *soft;       /* soft[i]: line i continues line i-1 (wrapped, no newline between) */
   int nlines, caplines;
+  bool grow;     /* "grow": wraps at the width, and is sized by its lines (field-sizing: content) */
+  int wrapped_w, wrapped_h; /* the node size the lines were wrapped for */
+  bool bar_drag;            /* the scrollbar's thumb is being dragged */
+  float pad[4];             /* CSS padding (top, right, bottom, left, CSS px) of a growing field */
+  float max_h;              /* CSS max-height in CSS px of a growing field (0: none) */
+  int measure_w; /* a width to measure the natural height at (0: the node's own) */
   Span *spans;
   int nspans;
   bool rows_set; /* "rows" was given (the browser look defaults to 2) */
   BKImeComp ime; /* the IME composition at the caret */
 } TAData;
 
-#define TA(n) ((TAData *)(n)->ext)
+#define TAR(n) ((TAData *)(n)->ext)
 
 static int line_h(void)
 {
@@ -58,6 +65,13 @@ static int ta_pad_y(const BKNode *n)
 {
   return BK_HTML(n) ? bk_iround(bk_hpx(3.0f)) : bk_pad() / 2;
 }
+/* The text's inset on a side (0 top, 1 right, 2 bottom, 3 left): the field's own, and for a growing
+ * field its CSS padding too (its layout box has none: the text sits inside it). */
+static int ta_ins(const BKNode *n, int side)
+{
+  const TAData *t = TAR(n);
+  return ((side & 1) ? ta_pad_x(n) : ta_pad_y(n)) + (t->grow ? bk_iround(bk_hpx(t->pad[side])) : 0);
+}
 
 /* Events measure text at the size it is drawn with. */
 static float ta_font_begin(const BKNode *n)
@@ -70,23 +84,113 @@ static float ta_font_begin(const BKNode *n)
   return saved;
 }
 
-static void ta_reindex(TAData *t)
+/* The text as visual lines: one per '\n'-separated line, and for wrap_px > 0 each of those broken
+ * where it passes wrap_px (after the last space that fits, else inside the word). With store, the
+ * line starts (and whether each continues the line before) are kept. Returns the line count. */
+static int ta_split(BKNode *n, TAData *t, int wrap_px, bool store)
 {
-  t->nlines = 0;
-  for (int i = 0; i <= t->len; i++) {
-    if (i == 0 || t->text[i - 1] == '\n') {
-      if (t->nlines == t->caplines) {
-        t->caplines = t->caplines ? t->caplines * 2 : 64;
-        t->lines = (int *)realloc(t->lines, sizeof(int) * (size_t)t->caplines);
-      }
-      t->lines[t->nlines++] = i;
+  const float saved = ta_font_begin(n);
+  int count = 0;
+  int a = 0;
+  for (;;) {
+    int b = a;
+    while (b < t->len && t->text[b] != '\n') {
+      b++;
     }
+    int start = a;
+    for (;;) {
+      int end = b;
+      if (wrap_px > 0 && b > start && bk_text_width(t->text + start, b - start, false) > (float)wrap_px) {
+        int i = start, after_space = -1;
+        while (i < b) {
+          int nx = i;
+          BLI_str_cursor_step_utf8(t->text, t->len, &nx, STRCUR_DIR_NEXT, STRCUR_JUMP_NONE, true);
+          if (i > start && bk_text_width(t->text + start, nx - start, false) > (float)wrap_px) {
+            break;
+          }
+          if (t->text[i] == ' ') {
+            after_space = nx;
+          }
+          i = nx;
+        }
+        end = (i < b && after_space > start) ? after_space : i;
+      }
+      if (store) {
+        if (count == t->caplines) {
+          t->caplines = t->caplines ? t->caplines * 2 : 64;
+          t->lines = (int *)realloc(t->lines, sizeof(int) * (size_t)t->caplines);
+          t->soft = (uchar *)realloc(t->soft, (size_t)t->caplines);
+        }
+        t->lines[count] = start;
+        t->soft[count] = start != a;
+      }
+      count++;
+      if (end >= b) {
+        break;
+      }
+      start = end;
+    }
+    if (b >= t->len) {
+      break;
+    }
+    a = b + 1;
+  }
+  bk_text_scale = saved;
+  return count;
+}
+
+/* The width the text may use in a node of outer width w. */
+static int ta_wrap_px(const BKNode *n, int w)
+{
+  return TAR(n)->grow && w > 0 ? BK_MAX(1, w - ta_ins(n, 1) - ta_ins(n, 3)) : 0;
+}
+
+static int visible_lines(const BKNode *n);
+
+/* Blender's text box scroller (ui_draw_but_TEXTBOX): a slim track along the right edge, drawn when the
+ * text has more lines than fit. */
+static int ta_bar_w(void)
+{
+  return BK_MAX(2, bk_iround(bk_hpx(5.0f)));
+}
+static int ta_bar_pad(void)
+{
+  return BK_MAX(1, bk_iround(bk_hpx(2.0f)));
+}
+
+static void ta_reindex(BKNode *n)
+{
+  TAData *t = TAR(n);
+  t->wrapped_w = n->w;
+  t->wrapped_h = n->h;
+  const int wrap = ta_wrap_px(n, n->w);
+  t->nlines = ta_split(n, t, wrap, true);
+  if (wrap > 0 && n->h > 0 && t->nlines > visible_lines(n)) {
+    /* the scroller takes its width from the text */
+    t->nlines = ta_split(n, t, BK_MAX(1, wrap - ta_bar_w() - ta_bar_pad()), true);
   }
 }
 
+/* The data, with the lines wrapped for the node's current width. */
+static TAData *ta_sync(const BKNode *n)
+{
+  TAData *t = TAR(n);
+  if (t->grow && n->w > 0 && (t->wrapped_w != n->w || t->wrapped_h != n->h)) {
+    ta_reindex((BKNode *)n);
+  }
+  return t;
+}
+#define TA(n) ta_sync(n)
+
 static int line_end(const TAData *t, int line)
 {
-  return line + 1 < t->nlines ? t->lines[line + 1] - 1 : t->len;
+  return line + 1 < t->nlines ? t->lines[line + 1] - (t->soft[line + 1] ? 0 : 1) : t->len;
+}
+
+/* Whether the line ends at a newline rather than at a wrap or the end of the text. */
+static bool line_hard_end(const TAData *t, int line)
+{
+  return line + 1 < t->nlines && !t->soft[line + 1];
 }
 
 static int line_of(const TAData *t, int off)
@@ -110,17 +214,18 @@ static void ta_init(BKNode *n)
   t->cap = 64;
   t->text = (char *)calloc(1, (size_t)t->cap);
   t->anchor = -1;
-  ta_reindex(t);
   n->ext = t;
+  ta_reindex(n);
   n->rows = 8;
 }
 
 static void ta_free(BKNode *n)
 {
-  TAData *t = TA(n);
+  TAData *t = TAR(n);
   bk_ime_comp_free(&t->ime);
   free(t->text);
   free(t->lines);
+  free(t->soft);
   free(t->spans);
   free(t);
 }
@@ -132,7 +237,7 @@ BKImeComp *bk_textarea_ime(BKNode *n)
 
 static void ta_changed(BKNode *n)
 {
-  ta_reindex(TA(n));
+  ta_reindex(n);
   bk_invalidate(n);
   bk_emit(n, BK_EV_CHANGE, NULL, TA(n)->caret, 0);
 }
@@ -180,7 +285,7 @@ void BK_textarea_insert(BKNode *n, int off, const char *text)
     t->caret += (int)strlen(text ? text : "");
   }
   t->anchor = -1;
-  ta_reindex(t);
+  ta_reindex(n);
   bk_invalidate(n);
 }
 
@@ -192,7 +297,7 @@ void BK_textarea_delete(BKNode *n, int a, int b)
     t->caret = BK_MAX(a, t->caret - (b - a));
   }
   t->anchor = -1;
-  ta_reindex(t);
+  ta_reindex(n);
   bk_invalidate(n);
 }
 
@@ -239,7 +344,7 @@ void BK_textarea_set_spans(BKNode *n, const BKTextSpan *spans, int count)
 
 static int visible_lines(const BKNode *n)
 {
-  return BK_MAX(1, (n->h - 2 * ta_pad_y(n)) / ta_line_h(n));
+  return BK_MAX(1, (n->h - ta_ins(n, 0) - ta_ins(n, 2)) / ta_line_h(n));
 }
 
 static void ta_view(BKNode *n, int axis, int *first, int *vis, int *total)
@@ -280,7 +385,7 @@ int bk_textarea_set_text(BKNode *n, const char *s)
   ta_insert_raw(t, 0, s ? s : "");
   t->caret = BK_MIN(t->caret, t->len);
   t->anchor = -1;
-  ta_reindex(t);
+  ta_reindex(n);
   bk_invalidate(n);
   return 1;
 }
@@ -313,9 +418,9 @@ static int col_at(const TAData *t, int line, float px)
 static int offset_at(BKNode *n, int x, int y)
 {
   TAData *t = TA(n);
-  const int line = BK_CLAMP((y - n->y - ta_pad_y(n)) / ta_line_h(n) + t->scroll, 0,
+  const int line = BK_CLAMP((y - n->y - ta_ins(n, 0)) / ta_line_h(n) + t->scroll, 0,
                             t->nlines - 1);
-  return col_at(t, line, (float)(x - n->x - ta_pad_x(n)));
+  return col_at(t, line, (float)(x - n->x - ta_ins(n, 3)));
 }
 
 int BK_textarea_index_at(BKNode *n, int x, int y)
@@ -362,9 +467,35 @@ bool bk_textarea_delete_selection(BKNode *n)
 {
   const bool deleted = delete_selection(n);
   if (deleted) {
-    ta_reindex(TA(n));
+    ta_reindex(n);
   }
   return deleted;
+}
+
+static bool ta_bar_shown(const BKNode *n, const TAData *t)
+{
+  return t->grow && t->nlines > visible_lines(n);
+}
+
+static void ta_bar_rects(const BKNode *n, const TAData *t, BKRect *track, BKRect *thumb)
+{
+  const int pad = ta_bar_pad(), bw = ta_bar_w();
+  const int top = n->y + pad, h = BK_MAX(1, n->h - 2 * pad), vis = visible_lines(n);
+  *track = bk_rect(n->x + n->w - pad - bw, top, bw, h);
+  const float f = (float)h / (float)BK_MAX(1, t->nlines);
+  int th = BK_CLAMP((int)ceilf(f * (float)vis), BK_MIN(h, bk_iround(bk_hpx(10.0f))), h);
+  const int ty = BK_CLAMP(top + (int)ceilf(f * (float)t->scroll), top, top + h - th);
+  *thumb = bk_rect(track->xmin, ty, bw, th);
+}
+
+/* Scroll so the thumb follows the mouse at y (Blender's BUTTON_STATE_TEXTBOX_SCROLLING). */
+static void ta_bar_to(BKNode *n, TAData *t, int y)
+{
+  const int pad = ta_bar_pad(), h = BK_MAX(1, n->h - 2 * pad);
+  const int range = BK_MAX(0, t->nlines - visible_lines(n));
+  const float k = BK_CLAMP((float)(y - n->y - pad) / (float)h, 0.0f, 1.0f);
+  t->scroll = BK_CLAMP((int)(k * (float)range + 0.5f), 0, range);
+  bk_invalidate(n);
 }
 
 static int ta_press(BKNode *n, BKEvent *e)
@@ -377,8 +508,19 @@ static int ta_press(BKNode *n, BKEvent *e)
     }
     ctx->focus = n;
   }
-  move(TA(n), offset_at(n, e->x, e->y), EV_SHIFT(e));
-  TA(n)->want_x = caret_x(TA(n), TA(n)->caret);
+  TAData *t = TA(n);
+  t->bar_drag = false;
+  if (ta_bar_shown(n, t)) { /* on the scroller: scroll to the mouse */
+    BKRect track, thumb;
+    ta_bar_rects(n, t, &track, &thumb);
+    if (e->x >= track.xmin - ta_bar_pad()) {
+      t->bar_drag = true;
+      ta_bar_to(n, t, e->y);
+      return 1;
+    }
+  }
+  move(t, offset_at(n, e->x, e->y), EV_SHIFT(e));
+  t->want_x = caret_x(t, t->caret);
   bk_invalidate(n);
   return 1;
 }
@@ -397,6 +539,10 @@ static int ta_dbl(BKNode *n, BKEvent *e)
 static int ta_drag(BKNode *n, BKEvent *e)
 {
   TAData *t = TA(n);
+  if (t->bar_drag) {
+    ta_bar_to(n, t, e->y);
+    return 1;
+  }
   if (t->anchor < 0) {
     t->anchor = t->caret;
   }
@@ -494,7 +640,10 @@ static int ta_key(BKNode *n, BKEvent *e)
     move(t, ctrl ? 0 : t->lines[line_of(t, t->caret)], shift);
   }
   else if (bk_keysym_is(ks, "End")) {
-    move(t, ctrl ? t->len : line_end(t, line_of(t, t->caret)), shift);
+    const int line = line_of(t, t->caret);
+    /* on a wrapped line the end is before the break, or the caret would show on the next line */
+    const int end = line_end(t, line) - (line + 1 < t->nlines && t->soft[line + 1] && line_end(t, line) > t->lines[line] ? 1 : 0);
+    move(t, ctrl ? t->len : end, shift);
   }
   else if (bk_keysym_is(ks, "BackSpace")) {
     if (!(edited = delete_selection(n)) && t->caret > 0) {
@@ -529,7 +678,7 @@ static int ta_key(BKNode *n, BKEvent *e)
     return 0;
   }
   if (!keep_x) {
-    ta_reindex(t);
+    ta_reindex(n);
     t->want_x = caret_x(t, t->caret);
   }
   if (edited) {
@@ -583,15 +732,50 @@ static int ta_set_num(BKNode *n, const char *key, double v)
     bk_relayout(n);
     return 1;
   }
+  if (strncmp(key, "pad_", 4) == 0 && key[4] && !key[5] && strchr("trbl", key[4])) { /* CSS padding, CSS px */
+    TAR(n)->pad[strchr("trbl", key[4]) - "trbl"] = (float)v;
+    n->nat_gen = 0;
+    ta_reindex(n);
+    bk_relayout(n);
+    return 1;
+  }
+  if (strcmp(key, "max_h") == 0) { /* CSS px */
+    TAR(n)->max_h = (float)v;
+    n->nat_gen = 0;
+    bk_relayout(n);
+    return 1;
+  }
+  if (strcmp(key, "measure_w") == 0) { /* the width a following natural size is asked for (0: none) */
+    TAR(n)->measure_w = (int)v;
+    n->nat_gen = 0; /* the cached natural size was for another width */
+    return 1;
+  }
+  if (strcmp(key, "grow") == 0) { /* field-sizing: content: wrap at the width, height follows the lines */
+    TAData *t = TAR(n);
+    if (t->grow != (v != 0.0)) {
+      t->grow = v != 0.0;
+      ta_reindex(n);
+      bk_relayout(n);
+    }
+    return 1;
+  }
   return 0;
 }
 
 bool bk_textarea_html_measure(BKNode *n, int *rw, int *rh)
 {
   /* Chrome: cols=20 -> 182px; rows (default 2) x 15px + 2px padding + 1px border */
-  const int rows = TA(n)->rows_set ? BK_MAX(1, n->rows) : 2;
+  TAData *t = TAR(n);
+  int rows = t->rows_set ? BK_MAX(1, n->rows) : 2;
+  if (t->grow && t->measure_w > 0) { /* field-sizing: content, for the width the layout asks about */
+    rows = BK_MAX(rows, ta_split(n, t, ta_wrap_px(n, t->measure_w), false));
+  }
   *rw = bk_iround(bk_hpx(182.0f));
-  *rh = rows * ta_line_h(n) + 2 * ta_pad_y(n);
+  const int ins = ta_ins(n, 0) + ta_ins(n, 2), lh = ta_line_h(n);
+  if (t->grow && t->max_h > 0.0f) { /* whole lines only, as Blender's text box shows: a cut line is never half drawn */
+    rows = BK_MIN(rows, BK_MAX(1, (bk_iround(bk_hpx(t->max_h)) - ins) / lh));
+  }
+  *rh = rows * lh + ins;
   return true;
 }
 
@@ -607,10 +791,21 @@ void bk_textarea_html_draw(BKNode *n)
     bk_argb(0x33A9A9A9u, fill);
     bk_html_box(n->x, n->y, n->w, n->h, rad, fill, NULL, 0);
   }
-  bk_argb(enabled ? 0xFFFFFFFFu : 0x99FFFFFFu, fill);
+  const bool bare = (n->flags & NF_BARE) != 0; /* border: none, as for text fields */
+  if (enabled && n->field_bg[3]) { /* the CSS background-color */
+    for (int k = 0; k < 3; k++) {
+      fill[k] = n->field_bg[k] / 255.0f;
+    }
+    fill[3] = n->field_bg[3] / 255.0f;
+  }
+  else {
+    bk_argb(enabled ? 0xFFFFFFFFu : 0x99FFFFFFu, fill);
+  }
   bk_argb(!enabled ? 0x4D767676u : (hover ? 0xFF4F4F4Fu : 0xFF767676u), border);
-  bk_html_box(n->x, n->y, n->w, n->h, rad, fill, border, bw);
-  if (focused) { /* the 2px focus ring, 1px outside */
+  if (!bare) {
+    bk_html_box(n->x, n->y, n->w, n->h, rad, fill, border, bw);
+  }
+  if (focused && !bare) { /* the 2px focus ring, 1px outside */
     const float o = bk_hpx(1.0f);
     float ring[4];
     bk_argb(0xFF101010u, ring);
@@ -619,11 +814,19 @@ void bk_textarea_html_draw(BKNode *n)
   }
   static const uchar black[4] = {0, 0, 0, 255}, gray[4] = {0x54, 0x54, 0x54, 255},
                      white[4] = {255, 255, 255, 255};
-  const uchar *tc = enabled ? black : gray;
-  const int px = ta_pad_x(n), py = ta_pad_y(n), lh = ta_line_h(n);
+  const uchar *tc = enabled ? (n->text_color[3] ? n->text_color : black) : gray;
+  const int px = ta_ins(n, 3), py = ta_ins(n, 0), lh = ta_line_h(n);
   const int b = (int)bw;
-  bk_clip_push(n->x + b, n->y + b, n->w - 2 * b, n->h - 2 * b);
+  if (t->grow) { /* text is clipped inside the padding, as Blender's text box does: no half line at the edge */
+    bk_clip_push(n->x + b, n->y + py, n->w - 2 * b, BK_MAX(1, n->h - py - ta_ins(n, 2)));
+  }
+  else {
+    bk_clip_push(n->x + b, n->y + b, n->w - 2 * b, n->h - 2 * b);
+  }
   t->scroll = BK_CLAMP(t->scroll, 0, BK_MAX(0, t->nlines - 1));
+  if (t->grow) { /* the box is as tall as its lines: scrolled past the first only when they don't all fit */
+    t->scroll = BK_MIN(t->scroll, BK_MAX(0, t->nlines - visible_lines(n)));
+  }
   int sa = -1, sb = -1;
   const bool sel = BK_textarea_selection(n, &sa, &sb);
   const float x0 = (float)(n->x + px);
@@ -644,7 +847,7 @@ void bk_textarea_html_draw(BKNode *n)
       const int s0 = BK_MAX(sa, la), s1 = BK_MIN(sb, lb);
       const float sx = x0 + bk_text_width(t->text + la, s0 - la, false);
       float sw = bk_text_width(t->text + s0, s1 - s0, false);
-      if (sb > lb) {
+      if (sb > lb && line_hard_end(t, line)) {
         sw += bk_font_size() * 0.4f; /* the newline */
       }
       float sc[4];
@@ -664,6 +867,16 @@ void bk_textarea_html_draw(BKNode *n)
     }
   }
   bk_clip_pop();
+  if (ta_bar_shown(n, t)) { /* Blender's text box scroller */
+    BKRect track, thumb;
+    t->scroll = BK_CLAMP(t->scroll, 0, BK_MAX(0, t->nlines - visible_lines(n)));
+    ta_bar_rects(n, t, &track, &thumb);
+    BKWCol w = bk_theme.scroll;
+    if (hover || t->bar_drag) {
+      bk_widget_active_color(&w);
+    }
+    bk_widget_scroll(&w, &track, &thumb, t->bar_drag);
+  }
 }
 
 static void draw_line_spans(TAData *t, int a, int b, float x, const BKRect *line,
@@ -750,7 +963,7 @@ static void ta_draw(BKNode *n)
       const int s0 = BK_MAX(a, la), s1 = BK_MIN(b, lb);
       const float sx = x0 + bk_text_width(t->text + la, s0 - la, false);
       float sw = bk_text_width(t->text + s0, s1 - s0, false);
-      if (b > lb) {
+      if (b > lb && line_hard_end(t, line)) {
         sw += bk_font_size() * 0.4f; /* the newline */
       }
       bk_fill(sx, (float)y, sw, (float)lh, bk_theme.selection);

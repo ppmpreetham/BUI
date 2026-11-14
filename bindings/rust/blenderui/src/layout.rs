@@ -28,7 +28,7 @@ use crate::prof::{span, Phase};
 use crate::style::ContentPart;
 use crate::style::{apply, key_hasher, Computed, DisplayKind, KeyMap, TextAlign, TextTransform, VAlign, WhiteSpace};
 use crate::text::{self, TextCache};
-use crate::widgets::WidgetSpec;
+use crate::widgets::{WidgetAsk, WidgetSpec};
 
 // ==========================================================================
 // Keys
@@ -316,6 +316,9 @@ pub(crate) enum Measure {
     /// Text of the box registered under `key` this frame (already
     /// whitespace-processed and transformed); `hash` identifies the text.
     Text { key: Key, hash: u64, size: f32, flags: i32, line: f32, nowrap: bool, brk: u8 },
+    /// A textarea with `field-sizing: content`: its height is asked of the kit at the width it gets;
+    /// `hash` identifies the text.
+    Area { key: Key, hash: u64 },
 }
 
 /// The persistent taffy tree's nodes by box key (with the frame they were
@@ -483,7 +486,7 @@ struct Builder<'a> {
     state: &'a UiState,
     viewport: (f32, f32),
     title: Option<String>,
-    widgets: &'a mut dyn FnMut(Key, &WidgetSpec) -> (f32, f32),
+    widgets: &'a mut dyn FnMut(Key, WidgetAsk) -> (f32, f32),
     /// CSS counters in scope: name, value, and the box whose subtree the
     /// instance is scoped to (dropped when that box is finished).
     counters: Vec<(Box<str>, i32, usize)>,
@@ -1219,15 +1222,34 @@ impl<'a> Builder<'a> {
                     // `styled` and for the Blender components (`bui-blender`)
                     spec.html = !self.nodes[i].styled && self.attr(i, "bui-blender").is_none();
                     spec.bare = spec.html && self.styles[style].border_drawn.iter().all(|d| !d);
-                    if spec.html && matches!(spec.kind, crate::widgets::WKind::Text { .. }) {
-                        // a form control does not inherit its text style; one that differs from the
-                        // parent's was given by the CSS of the field itself
-                        let (own, up) = (&self.styles[style], &self.styles[parent_style]);
-                        let c = own.color;
-                        spec.text_color = (c != up.color && c.a > 0.0).then(|| {
+                    if spec.html && matches!(spec.kind, crate::widgets::WKind::TextArea) {
+                        let own = &self.styles[style];
+                        let argb = |c: crate::Rgba| {
                             let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
-                            b(c.a) << 24 | b(c.r) << 16 | b(c.g) << 8 | b(c.b)
-                        });
+                            (c.a > 0.0).then(|| b(c.a) << 24 | b(c.r) << 16 | b(c.g) << 8 | b(c.b))
+                        };
+                        spec.text_color = argb(own.color);
+                        spec.field_bg = argb(own.background);
+                        spec.grow = own.field_sizing_content;
+                        if spec.grow {
+                            let px = |l: LengthPercentage| match l.into_raw() { r if r.tag() == taffy::CompactLength::LENGTH_TAG => r.value(), _ => 0.0 };
+                            let p = own.layout.padding;
+                            spec.pad = [px(p.top), px(p.right), px(p.bottom), px(p.left)];
+                            let m = own.layout.max_size.height.into_raw();
+                            spec.max_h = (m.tag() == taffy::CompactLength::LENGTH_TAG).then(|| m.value());
+                        }
+                    }
+                    if spec.html && matches!(spec.kind, crate::widgets::WKind::Text { .. }) {
+                        // a form control does not inherit its text color: the UA sheet gives it
+                        // `fieldtext`, so the computed color is the field's own (`text-white` on a
+                        // dark field), and its CSS background replaces the browser's white
+                        let (own, up) = (&self.styles[style], &self.styles[parent_style]);
+                        let argb = |c: crate::Rgba| {
+                            let b = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+                            (c.a > 0.0).then(|| b(c.a) << 24 | b(c.r) << 16 | b(c.g) << 8 | b(c.b))
+                        };
+                        spec.text_color = argb(own.color);
+                        spec.field_bg = argb(own.background);
                         spec.font_px = (own.font_size != up.font_size).then_some(own.font_size);
                     }
                     self.nodes[i].content = Content::Widget(spec);
@@ -1791,10 +1813,22 @@ impl<'a> Builder<'a> {
         let sid = self.nodes[i].style;
         match &self.nodes[i].content {
             Content::Widget(spec) => {
-                let (w, h) = (self.widgets)(self.nodes[i].key, spec);
+                let (w, h) = (self.widgets)(self.nodes[i].key, WidgetAsk::Ensure(spec));
                 let mut s = base;
                 if s.size.width == Dimension::auto() {
                     s.size.width = Dimension::length(w);
+                }
+                if spec.grow && s.size.height == Dimension::auto() {
+                    // as tall as its wrapped text, at least its rows
+                    let hash = hash_parts(&[spec.text.as_deref().unwrap_or_default().as_bytes()]);
+                    let key = self.nodes[i].key;
+                    s.padding = Rect::zero(); // the widget insets its text by the padding itself
+                    if s.min_size.height == LengthPercentageAuto::auto() {
+                        s.min_size.height = LengthPercentageAuto::length(h);
+                    }
+                    let id = self.node(key, s, Some(Measure::Area { key, hash }), &[]);
+                    self.nodes[i].taffy = Some(id);
+                    return id;
                 }
                 if s.size.height == Dimension::auto() {
                     s.size.height = Dimension::length(h);
@@ -2225,7 +2259,7 @@ fn transform(s: &str, t: TextTransform, ws: WhiteSpace, tab: u8) -> std::borrow:
 /// Build, cascade and lay out `root` in a `viewport` (logical pixels),
 /// reusing the arenas of `recycle` (the previous frame) and `caches`.
 pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, caches: &mut LayoutCaches,
-                     recycle: Frame, widgets: &mut dyn FnMut(Key, &WidgetSpec) -> (f32, f32)) -> Frame {
+                     recycle: Frame, widgets: &mut dyn FnMut(Key, WidgetAsk) -> (f32, f32)) -> Frame {
     let mut css = String::new();
     let mut title = None;
     caches.tw.on = TAILWIND.load(std::sync::atomic::Ordering::Relaxed);
@@ -2318,9 +2352,16 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     });
     let avail = Size { width: AvailableSpace::Definite(viewport.0),
                        height: AvailableSpace::Definite(viewport.1) };
-    let Builder { nodes, els, taffy, styles, text: tc, title, text_box, .. } = b;
+    let Builder { nodes, els, taffy, styles, text: tc, title, text_box, widgets, .. } = b;
     taffy.compute(root_id, avail, |known, available, ctx| {
             match ctx {
+                Measure::Area { key, .. } => {
+                    let w = known.width.unwrap_or(match available.width {
+                        AvailableSpace::Definite(w) => w,
+                        _ => 0.0,
+                    });
+                    Size { width: known.width.unwrap_or(w), height: known.height.unwrap_or_else(|| widgets(*key, WidgetAsk::Height(w)).1) }
+                }
                 Measure::Text { key, size, flags, line, nowrap, brk, .. } => {
                     let text = match text_box.get(key).map(|&k| &nodes[k].content) {
                         Some(Content::Text(t)) => t.as_str(),

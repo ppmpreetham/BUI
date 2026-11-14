@@ -123,6 +123,7 @@ dialog { position: absolute; left: 10%; right: 10%; top: 15%; padding: 1em;
 dialog:not([open]) { display: none; }
 img, video, iframe, embed, object, audio, canvas, svg, math { display: inline-block; }
 button, input, select, textarea, progress, meter { display: inline-block; }
+input, textarea, select { color: #000000; }
 audio:not([controls]) { display: none; }
 iframe { border: 2px inset #808080; }
 label { cursor: default; }

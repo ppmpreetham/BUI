@@ -446,6 +446,7 @@ struct BKNode {
   int cursor_override; /* hover cursor + 1 (0 = the class's) */
   float font_scale;    /* text size relative to the UI font (0 = 1) */
   uchar text_color[4]; /* browser-look text fields: the CSS color (alpha 0: Chrome's FieldText) */
+  uchar field_bg[4];   /* browser-look text fields: the CSS background-color (alpha 0: Chrome's Field) */
   int selmode; /* list/tree: 0 single, 1 multiple (toggle), 2 extended (Ctrl/Shift),
                 * 3 single shown with marks (clearable) */
   unsigned char *marks;   /* list: selected rows when selmode != 0 */

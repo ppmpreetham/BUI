@@ -90,6 +90,20 @@ A `<title>` element sets the window title.
 | `.colspan` | Table cell spans (`u32`) |
 | `live` (in `rsx!`: `<input live>`; `.attr("live", "")`) | A text field or `textarea` that reports every keystroke to `on_input` / `on_change`, not only on Enter or blur |
 
+### Styling text fields and textareas
+
+A browser-look `<input>` and `<textarea>` take their own CSS `color` and `background-color` (`class="bg-zinc-800 text-white"`); the browser's black text on white is the default, and a parent's `color` is not inherited, as in a browser. `border-style: none` (`border-none`) draws no frame and no focus ring, so a field can sit on its container's background.
+
+A `<textarea>` with `field-sizing: content` (`field-sizing-content`) wraps its text at its width and is as tall as its lines, at least `rows` and at most `max-height` (then it scrolls). It starts as one row and grows as you type:
+
+```rust
+<textarea class="w-full border-none field-sizing-content max-h-32" rows="1" placeholder="Type a message" />
+```
+
+The textarea's own CSS padding (`p-2`) is the space around the text, inside the box, so one line is exactly the line plus the padding. `rows` is the minimum number of lines (one with `rows="1"`, the browser's two when left out). It shows whole lines up to `max-height`, then scrolls: a slim scroller, drawn as Blender's text boxes draw theirs, appears along the right edge and can be dragged or turned with the wheel.
+
+Without `field-sizing: content` a textarea keeps its `rows`, and its lines break only at Enter.
+
 Text children are `&'static str`, `String` or `SharedString`.
 
 `FluentBuilder` adds conditional building, gpui-style:

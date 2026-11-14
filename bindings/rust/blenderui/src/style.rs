@@ -395,6 +395,8 @@ pub struct Computed {
     pub underline_offset: Option<f32>,
     /// `empty-cells: hide` (inherited).
     pub empty_cells_hide: bool,
+    /// `field-sizing: content` (not inherited): a textarea is as tall as its text, wrapped at its width.
+    pub field_sizing_content: bool,
     /// `list-style-image: url()` (inherited).
     pub list_image: Option<std::sync::Arc<str>>,
     /// `word-break: break-all` (inherited).
@@ -492,6 +494,7 @@ impl Default for Computed {
             decoration_thickness: None,
             underline_offset: None,
             empty_cells_hide: false,
+            field_sizing_content: false,
             list_image: None,
             break_all: false,
             wrap_anywhere: false,
@@ -688,7 +691,7 @@ pub const ACCEPTED: &[&str] = &[
     // sizing / containment / rendering hints
     "contain-intrinsic-size", "contain-intrinsic-width", "contain-intrinsic-height",
     "contain-intrinsic-block-size", "contain-intrinsic-inline-size", "content-visibility",
-    "field-sizing", "interpolate-size", "color-scheme", "forced-color-adjust",
+    "interpolate-size", "color-scheme", "forced-color-adjust",
     "print-color-adjust", "color-adjust", "image-orientation", "image-resolution",
     "transform-box", "transform-style", "perspective-origin", "zoom", "caret", "caret-shape",
     "background-blend-mode", "column-span", "column-fill", "column-rule-color", "column-rule-style",
@@ -3161,6 +3164,13 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
                 }
                 _ => false,
             },
+            _ => false,
+        }),
+        h("field-sizing", |c, v| match kw(v) {
+            Some(k @ ("content" | "fixed")) => {
+                c.c.field_sizing_content = k == "content";
+                true
+            }
             _ => false,
         }),
         h("empty-cells", |c, v| match kw(v) {
