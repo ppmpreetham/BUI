@@ -572,17 +572,26 @@ void *BK_tree_item_ref(const BKTreeItem *it)
 {
   return it->ref;
 }
+BKTreeItem *BK_tree_item_parent(const BKTreeItem *it)
+{
+  return it->parent;
+}
+
+static void tree_item_remove(BKTreeItem *parent, int index)
+{
+  BKTreeItem *kid = parent->kids[index];
+  memmove(parent->kids + index, parent->kids + index + 1,
+          sizeof(BKTreeItem *) * (size_t)(parent->nkids - index - 1));
+  parent->nkids--;
+  kid->parent = NULL;
+  bk_release(kid->ref); /* the parent's reference */
+}
 
 void BK_tree_item_clear(BKTreeItem *parent)
 {
-  for (int i = 0; i < parent->nkids; i++) {
-    BKTreeItem *kid = parent->kids[i];
-    kid->parent = NULL;
-    if (kid->ref) {
-      bk_release(kid->ref);
-    }
+  while (parent->nkids > 0) {
+    tree_item_remove(parent, parent->nkids - 1);
   }
-  parent->nkids = 0;
 }
 
 void BK_tree_item_add(BKTreeItem *parent, BKTreeItem *child)
@@ -708,6 +717,18 @@ void BK_tree_set_roots(BKNode *n, BKTreeItem *const *roots, int count)
   TreeData *t = TREE(n);
   for (int i = 0; i < count; i++) {
     bk_retain(roots[i]->ref);
+  }
+  for (int i = 0; i < count; i++) {
+    BKTreeItem *it = roots[i];
+    BKTreeItem *p = it->parent;
+    if (p) {
+      for (int j = 0; j < p->nkids; j++) {
+        if (p->kids[j] == it) {
+          tree_item_remove(p, j);
+          break;
+        }
+      }
+    }
   }
   for (int i = 0; i < t->nroots; i++) {
     if (t->roots[i]->ref) {

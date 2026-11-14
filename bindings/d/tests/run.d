@@ -604,6 +604,35 @@ private void testReviewRegressions() {
     check(throwsBui({ setRoots(label, []); }), "tree type guard");
     label.free();
 
+    // A C-owned child gets one cached borrowed wrapper, and handlers added
+    // through it see the kit's events.
+    auto panel = new Node("panel");
+    auto body = panel.child(0);
+    check(body !is null, "panel body child");
+    check(panel.child(0) is body, "borrowed wrapper is cached");
+    body.set("events", true);
+    int enters;
+    body.on(BK_EV_ENTER, (NodeEvent) {
+        ++enters;
+    });
+    auto content = new Node("label");
+    content.set("text", "body");
+    body.add(content);
+    auto panelContext = new Context(panel);
+    auto panelRaster = new Raster(200, 160);
+    panelContext.render(panelRaster, true);
+    const bodyRect = body.rect();
+    check(bodyRect[2] > 0 && bodyRect[3] > 0, "panel body laid out");
+    body = null;
+    GC.collect();
+    panelContext.motion(bodyRect[0] + bodyRect[2] / 2,
+                        bodyRect[1] + bodyRect[3] / 2, 0);
+    check(enters == 1, "borrowed wrapper handler runs");
+    panelRaster.free();
+    panelContext.free();
+    panel.free();
+    content.free();
+
     // The texture accessor returns the texture ID, not a success flag.
     static assert(is(typeof(Video.init.texture(0)) == int),
                   "Video.texture returns a texture id");
@@ -653,6 +682,19 @@ private void testReviewRegressions() {
     check(detachChild.handle is null, "detached child frees");
     detachRoot.free();
     check(detachRoot.handle is null, "detached root frees");
+
+    // Making a child a root detaches it from its old parent in the kit.
+    auto oldParent = new TreeItem("parent");
+    auto promoted = new TreeItem("child");
+    oldParent.add(promoted);
+    auto tree = new Node("tree");
+    setRoots(tree, [promoted]);
+    check(promoted.parent() is null, "a tree root has no parent");
+    check(oldParent.childCount() == 0, "setRoots detaches from the old parent");
+    setRoots(tree, []);
+    tree.free();
+    promoted.free();
+    oldParent.free();
 
     // Every wrapper surface rejects an empty node the same way.
     Node empty;

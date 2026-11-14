@@ -414,6 +414,7 @@ struct BKNode {
   int nkids, capkids;
   BKContext *ctx_root; /* set on a context's root (and popups) */
   void *ref;           /* host object */
+  void *bref;          /* borrowed host wrapper (C-owned node), retained */
 
   int x, y, w, h;
   int nat_w, nat_h, nat_gen;

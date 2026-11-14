@@ -470,7 +470,8 @@ final class Context {
         return cast(BKContext*) handle;
     }
 
-    private void store(Throwable e) {
+    /// Keep the first exception a host or window callback caught.
+    package void store(Throwable e) {
         if (pending is null) {
             pending = e;
         }
@@ -567,7 +568,11 @@ final class Context {
                 return;
             }
             if (node !is null) {
-                if (auto wrapper = BK_node_ref(node)) {
+                void* wrapper = BK_node_ref(node);
+                if (wrapper is null) {
+                    wrapper = BK_node_borrowed_ref(node);
+                }
+                if (wrapper !is null) {
                     (cast(Node) wrapper).dispatch(kind, ref_, a, b);
                 }
             }

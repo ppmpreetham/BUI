@@ -9,10 +9,22 @@
     "copyright": "BUI contributors",
     "targetType": "library",
     "sourcePaths": ["source"],
-    "preBuildCommands-windows": [
+    "extraDependencyFiles-windows": [
+        ".bui/lib/bui_api.lib",
+        ".bui/lib/bui_core.lib",
+        ".bui/lib/bui_gpu.lib",
+        ".bui/lib/bui_kit.lib"
+    ],
+    "extraDependencyFiles-posix": [
+        ".bui/lib/libbui_api.a",
+        ".bui/lib/libbui_core.a",
+        ".bui/lib/libbui_gpu.a",
+        ".bui/lib/libbui_kit.a"
+    ],
+    "preGenerateCommands-windows": [
         "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$PACKAGE_DIR/scripts/build_bui.ps1\""
     ],
-    "preBuildCommands-posix": [
+    "preGenerateCommands-posix": [
         "bash \"$PACKAGE_DIR/scripts/build_bui.sh\""
     ],
     "dflags-windows": ["-mscrtlib=msvcrt"],

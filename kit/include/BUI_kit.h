@@ -218,6 +218,11 @@ void BK_node_free(BKNode *node);
 const char *BK_node_type(const BKNode *node);
 void BK_node_set_ref(BKNode *node, void *ref); /* host object (not retained) */
 void *BK_node_ref(const BKNode *node);
+/* A borrowed wrapper for a C-owned node (a panel body, a popup, a picker
+ * part): retained by the node until it is freed, so host handlers stay
+ * reachable for the node's lifetime. */
+void BK_node_set_borrowed_ref(BKNode *node, void *ref);
+void *BK_node_borrowed_ref(const BKNode *node);
 int BK_node_add(BKNode *parent, BKNode *child, int index); /* index -1: append */
 void BK_node_remove(BKNode *parent, BKNode *child);
 int BK_node_child_count(const BKNode *node);
@@ -280,6 +285,7 @@ BKTreeItem *BK_tree_item_new(const char *label, int icon);
 void BK_tree_item_free(BKTreeItem *item);
 void BK_tree_item_set_ref(BKTreeItem *item, void *ref);
 void *BK_tree_item_ref(const BKTreeItem *item);
+BKTreeItem *BK_tree_item_parent(const BKTreeItem *item); /* NULL for a root */
 void BK_tree_item_add(BKTreeItem *parent, BKTreeItem *child);
 void BK_tree_item_clear(BKTreeItem *parent); /* detach (and release) all children */
 void BK_tree_item_set(BKTreeItem *item, const char *key, double value);

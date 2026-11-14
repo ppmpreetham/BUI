@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Build the C kit for the D binding. DUB runs this before compiling, so
-# `dub build`, `dub run` and `dub test` work from a clean checkout.
+# Build the C kit for the D binding. DUB runs this from
+# `preGenerateCommands`, so every `dub build`, `dub run` and `dub test`
+# checks the C sources, even when DUB would otherwise consider the package
+# up to date. The libraries are extra dependency files in `dub.json`; they
+# are only copied when their content changes, so an up-to-date native build
+# does not force a relink.
 #
 # Set BUI_SOURCE_DIR to build another BUI checkout.
 #
@@ -42,5 +46,7 @@ for name in kit gpu core api; do
     echo "built library not found: $source" >&2
     exit 1
   fi
-  cp -f "$source" "$lib/$file"
+  if ! cmp -s "$source" "$lib/$file"; then
+    cp -f "$source" "$lib/$file"
+  fi
 done
