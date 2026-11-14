@@ -33,6 +33,7 @@
 #  define ID_WAKE 3 /* BK_TIMER_CUSTOM: custom nodes' frames */
 #  define ID_GPU 4  /* checks the GPU device until it is ready */
 #  define ID_SIZE 5 /* the render of a size change, one refresh after the last */
+#  define ID_MODAL 6 /* the next frame while the user moves or resizes the window */
 #  define ID_USER_BASE 1000
 
 /* How a transparent window shows its frame: UpdateLayeredWindow copies the software raster
@@ -245,7 +246,14 @@ static void host_request(void *data)
   BKWindow *win = (BKWindow *)data;
   if (win->hwnd && !win->render_pending) {
     win->render_pending = 1;
-    PostMessageW(win->hwnd, WM_BK_RENDER, 0, 0);
+    if (win->user_sizing) {
+      /* Posted messages come before input, so an animation's frames posted from inside the user's
+       * move or resize loop would leave it no mouse to follow: timers come after input. */
+      timer_arm(win, ID_MODAL, 1);
+    }
+    else {
+      PostMessageW(win->hwnd, WM_BK_RENDER, 0, 0);
+    }
   }
 }
 
@@ -701,7 +709,9 @@ static void render_message(BKWindow *win, bool serve_between)
     if (win->frame_vsync && bk_frame_ms < refresh_ms() - 1.5) {
       vsync(); /* early: wait for the next refresh; late: start right away */
     }
-    if (serve_between) {
+    /* Not inside the user's move or resize loop: that loop reads the mouse itself, and taking its
+     * messages here stops the window following the mouse. */
+    if (serve_between && !win->user_sizing) {
       serve_input(); /* posted renders beat hardware input: without this an animated window starves */
       if (!win->hwnd) { /* an input message closed the window */
         return;
@@ -1056,6 +1066,10 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         timer_kill(win, ID_SIZE);
         win->size_wait = 0;
         host_request(win);
+      }
+      else if (wp == ID_MODAL) {
+        timer_kill(win, ID_MODAL);
+        render_message(win, false);
       }
       else if (wp == ID_TIP) {
         timer_kill(win, ID_TIP);
