@@ -193,6 +193,38 @@ final class Node {
         return wrapNode(BK_node_parent(handle));
     }
 
+    /* -- screens: an "area" in a "screen" (BK_area_*) ------------------------ */
+
+    /// Split this area: `axis` 'v' puts the new area beside it (`factor` from the left), 'h'
+    /// above or below (from the bottom); the new area is the side past 0.5, or null when this
+    /// one is too small. The screen made it: a borrowed wrapper, gone when the area closes.
+    Node split(char axis, float factor) {
+        if (axis != 'h' && axis != 'v') {
+            throw new BuiException("Node.split", "axis must be 'h' or 'v'");
+        }
+        return wrapNode(BK_area_split(handle, axis, factor));
+    }
+
+    /// `gone` joins into this area (they share an edge).
+    bool join(Node gone) {
+        return gone !is null && BK_area_join(handle, gone.handle) != 0;
+    }
+
+    /// Move this area beside `target` (`BK_DOCK_LEFT` ... taking `factor` of it) or into its
+    /// place (`BK_DOCK_CENTER`).
+    bool dock(Node target, int where, float factor = 0.5f) {
+        return target !is null && BK_area_dock(handle, target.handle, where, factor) != 0;
+    }
+
+    bool swap(Node other) {
+        return other !is null && BK_area_swap(handle, other.handle) != 0;
+    }
+
+    /// A neighbor takes this area's place.
+    bool close() {
+        return BK_area_close(handle) != 0;
+    }
+
     /// x, y, w, h in window pixels.
     int[4] rect() const {
         int[4] r;
@@ -358,6 +390,22 @@ final class Node {
 
     Node onBrowse(NodeHandler handler) {
         return on(BK_EV_BROWSE, handler);
+    }
+
+    /// A screen's areas: `BK_AREA_NEW` on the screen (`a` = the new area's index), `BK_AREA_CLOSE`
+    /// and `BK_AREA_WINDOW` on the area itself.
+    Node onArea(NodeHandler handler) {
+        return on(BK_EV_AREA, handler);
+    }
+
+    /// A panel dragged to a new place: `a` = old index, `b` = new index.
+    Node onMove(NodeHandler handler) {
+        return on(BK_EV_MOVE, handler);
+    }
+
+    /// A region resized, hidden or shown by the user: `a` = size, `b` = hidden.
+    Node onResize(NodeHandler handler) {
+        return on(BK_EV_RESIZE, handler);
     }
 
     /// The kit's `BKHost.emit` path: dispatch one event to this node's handlers.
