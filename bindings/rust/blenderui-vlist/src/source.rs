@@ -7,28 +7,40 @@
 //! Items not loaded yet come back as placeholders; [`ItemSource::ensure_loaded`]
 //! asks for them without blocking. The in-memory [`VecSource`] is here; the
 //! file-backed log is [`crate::log`].
+//!
+//! A [`Record`] is neutral: an id, an ordering value (`time`), a small kind
+//! (`sender`), flag bits, text, an optional image and an opaque byte payload
+//! (`data`) a look decodes however it likes. The engine reads none of them
+//! except [`FLAG_PLACEHOLDER`] and the text (to wrap it).
 
 use std::ops::Range;
 
-/// The group header (avatar, name, time) is shown above this item.
+// Flag bits. The engine reserves `FLAG_PLACEHOLDER` (0x04) only; the other
+// three named ones are the chat look's, and bits 0x10..=0x80 are free for any look.
+
+/// Chat look: the group header (avatar, name, time) is shown above this item.
 pub const FLAG_HEADER: u8 = 1;
-/// A date divider is shown above this item.
+/// Chat look: a date divider is shown above this item.
 pub const FLAG_DIVIDER: u8 = 2;
-/// Not loaded yet: the text is empty and the height an estimate.
+/// Engine: not loaded yet: the text is empty and the height an estimate.
 pub const FLAG_PLACEHOLDER: u8 = 4;
-/// Sent by the local user.
+/// Chat look: sent by the local user.
 pub const FLAG_OWN: u8 = 8;
+/// The first of the four flag bits a look may use for itself (`FLAG_USER << n`, n < 4).
+pub const FLAG_USER: u8 = 0x10;
 
 /// One item. Everything that decides its height is in the record itself
 /// (neighbour-dependent layout was decided when it was inserted and lives
 /// in `flags`), so a height depends on its own record only.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct Record<'a> {
     /// Stable, ascending with the index.
     pub id: u64,
-    /// Seconds since the epoch.
+    /// An ordering or timestamp value the look interprets (chat: seconds since the epoch).
     pub time: u32,
+    /// A small group or kind value the look interprets (chat: the sender; a feed: the item's kind).
     pub sender: u16,
+    /// Bit flags: [`FLAG_PLACEHOLDER`] is the engine's, see the constants for the rest.
     pub flags: u8,
     /// Height of an attached image in px (0: none). Known before the image
     /// loads, so loading it shifts nothing.
@@ -37,6 +49,18 @@ pub struct Record<'a> {
     /// The attached image's file path ("" with `media_h` > 0: a placeholder).
     /// Drawn through `PaintSink::image`: only visible items load it.
     pub media: &'a str,
+    /// Opaque bytes the look decodes (a count, a status, a color ...). Kept in
+    /// the page's arena like the text: no allocation per item after warm-up.
+    pub data: &'a [u8],
+}
+
+impl Record<'_> {
+    /// An empty record with `id`. Set the fields you use with struct update
+    /// syntax, `Record { text, ..Record::new(id) }`, so new fields stay non-breaking.
+    #[must_use]
+    pub const fn new(id: u64) -> Self {
+        Record { id, time: 0, sender: 0, flags: 0, media_h: 0, text: "", media: "", data: &[] }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -48,11 +72,12 @@ struct Meta {
     media_h: u16,
     text: (u32, u32),
     media: (u32, u32),
+    data: (u32, u32),
 }
 
 impl Meta {
-    const fn new(r: &Record<'_>, text: (u32, u32), media: (u32, u32)) -> Self {
-        Self { id: r.id, time: r.time, sender: r.sender, flags: r.flags, media_h: r.media_h, text, media }
+    const fn new(r: &Record<'_>, text: (u32, u32), media: (u32, u32), data: (u32, u32)) -> Self {
+        Self { id: r.id, time: r.time, sender: r.sender, flags: r.flags, media_h: r.media_h, text, media, data }
     }
 }
 
@@ -62,6 +87,7 @@ pub struct Page {
     start: usize,
     metas: Vec<Meta>,
     text: String,
+    data: Vec<u8>,
     scratch: Vec<u8>,
 }
 
@@ -76,6 +102,7 @@ impl Page {
         self.start = start;
         self.metas.clear();
         self.text.clear();
+        self.data.clear();
     }
 
     /// Append the next record.
@@ -84,7 +111,8 @@ impl Page {
         self.text.push_str(r.text);
         let text = (a, self.text.len() as u32);
         let media = self.push_media(r);
-        self.metas.push(Meta::new(r, text, media));
+        let data = self.push_data(r);
+        self.metas.push(Meta::new(r, text, media, data));
     }
 
     /// The text buffer, for sources that read straight into it; then call
@@ -101,7 +129,15 @@ impl Page {
     /// Append a record whose text (`r.text` is ignored) is already in the buffer at `text`.
     pub fn push_span(&mut self, r: &Record<'_>, text: Range<usize>) {
         let media = self.push_media(r);
-        self.metas.push(Meta::new(r, (text.start as u32, text.end as u32), media));
+        let data = self.push_data(r);
+        self.metas.push(Meta::new(r, (text.start as u32, text.end as u32), media, data));
+    }
+
+    /// `r.data` appended to the payload arena.
+    fn push_data(&mut self, r: &Record<'_>) -> (u32, u32) {
+        let a = self.data.len() as u32;
+        self.data.extend_from_slice(r.data);
+        (a, self.data.len() as u32)
     }
 
     /// `r.media` appended to the buffer (empty: no bytes).
@@ -122,7 +158,8 @@ impl Page {
         let m = self.metas.get(item.checked_sub(self.start)?)?;
         let text = self.text.get(m.text.0 as usize..m.text.1 as usize)?;
         let media = self.text.get(m.media.0 as usize..m.media.1 as usize)?;
-        Some(Record { id: m.id, time: m.time, sender: m.sender, flags: m.flags, media_h: m.media_h, text, media })
+        let data = self.data.get(m.data.0 as usize..m.data.1 as usize)?;
+        Some(Record { id: m.id, time: m.time, sender: m.sender, flags: m.flags, media_h: m.media_h, text, media, data })
     }
 }
 
@@ -158,7 +195,7 @@ pub trait ItemSource {
 }
 
 /// An owned message.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Message {
     pub id: u64,
     pub time: u32,
@@ -168,12 +205,23 @@ pub struct Message {
     pub text: String,
     /// The attached image's file path (see [`Record::media`]).
     pub media: String,
+    /// The look's opaque payload (see [`Record::data`]).
+    pub data: Vec<u8>,
 }
 
 impl Message {
     #[must_use]
     pub fn record(&self) -> Record<'_> {
-        Record { id: self.id, time: self.time, sender: self.sender, flags: self.flags, media_h: self.media_h, text: &self.text, media: &self.media }
+        Record {
+            id: self.id,
+            time: self.time,
+            sender: self.sender,
+            flags: self.flags,
+            media_h: self.media_h,
+            text: &self.text,
+            media: &self.media,
+            data: &self.data,
+        }
     }
 }
 
@@ -230,6 +278,14 @@ impl VecSource {
         for c in &mut self.cum[i + 1..] {
             *c = *c - old + d;
         }
+        self.version += 1;
+    }
+
+    /// Replace item `i`'s payload. The height is unchanged unless the look
+    /// derives it from the payload: then tell the view (`ListView::changed`).
+    pub fn set_data(&mut self, i: usize, data: &[u8]) {
+        self.items[i].data.clear();
+        self.items[i].data.extend_from_slice(data);
         self.version += 1;
     }
 

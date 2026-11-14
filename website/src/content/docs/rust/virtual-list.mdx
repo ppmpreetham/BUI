@@ -1,15 +1,17 @@
 ---
 title: Variable-height lists
-description: A chat-grade virtualized list whose items have different heights, one design from 100 messages to 10 million. It has a two-level height index, scrolling anchored to an item, wrapped-text measuring on demand and a file-backed source, and is drawn the way Blender text view is drawn.
+description: A virtualized view for any app (feeds, logs, file lists, cards, chats) whose items have different heights, one design from 100 items to 10 million. You bring the items and how they look; it brings a two-level height index, scrolling anchored to an item, wrapped-text measuring on demand and a file-backed source, drawn the way Blender text view is drawn.
 section: Rust
 order: 66
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui-vlist/src/lib.rs", "bindings/rust/blenderui-vlist/src/index/mod.rs", "bindings/rust/blenderui-vlist/src/index/block.rs", "bindings/rust/blenderui-vlist/src/index/fenwick.rs", "bindings/rust/blenderui-vlist/src/estimate.rs", "bindings/rust/blenderui-vlist/src/wrap.rs", "bindings/rust/blenderui-vlist/src/measure.rs", "bindings/rust/blenderui-vlist/src/source.rs", "bindings/rust/blenderui-vlist/src/log.rs", "bindings/rust/blenderui-vlist/src/list.rs", "bindings/rust/blenderui-vlist/src/chat.rs", "bindings/rust/blenderui-vlist/src/view/mod.rs", "bindings/rust/blenderui-vlist/src/view/frame.rs", "bindings/rust/blenderui-vlist/src/view/edit.rs", "bindings/rust/blenderui-vlist/tests/view.rs", "bindings/rust/blenderui-vlist/examples/bench_core.rs", "bindings/rust/blenderui-vlist/examples/bench_frames.rs", "bindings/rust/blenderui-paint/src/lib.rs", "bindings/rust/blenderui/src/vlist/mod.rs", "bindings/rust/blenderui/src/vlist/element.rs", "bindings/rust/blenderui/src/sink.rs", "bindings/rust/blenderui/tests/vlist.rs", "bindings/rust/blenderui/examples/site_chat.rs", "bindings/rust/blenderui/src/shadcn/virtual_list.rs", "bindings/rust/blenderui-vlist/src/rows.rs", "bindings/rust/blenderui-vlist-gpui/src/element.rs", "bindings/rust/blenderui-vlist-gpui/examples/bench_list_gpui.rs", "bindings/rust/blenderui-vlist-gpui/bench/run.mjs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui-vlist/src/lib.rs", "bindings/rust/blenderui-vlist/src/index/mod.rs", "bindings/rust/blenderui-vlist/src/index/block.rs", "bindings/rust/blenderui-vlist/src/index/fenwick.rs", "bindings/rust/blenderui-vlist/src/estimate.rs", "bindings/rust/blenderui-vlist/src/wrap.rs", "bindings/rust/blenderui-vlist/src/measure.rs", "bindings/rust/blenderui-vlist/src/source.rs", "bindings/rust/blenderui-vlist/src/log.rs", "bindings/rust/blenderui-vlist/src/list.rs", "bindings/rust/blenderui-vlist/src/chat.rs", "bindings/rust/blenderui-vlist/src/view/mod.rs", "bindings/rust/blenderui-vlist/src/view/frame.rs", "bindings/rust/blenderui-vlist/src/view/edit.rs", "bindings/rust/blenderui-vlist/tests/view.rs", "bindings/rust/blenderui-vlist/examples/bench_core.rs", "bindings/rust/blenderui-vlist/examples/bench_frames.rs", "bindings/rust/blenderui-paint/src/lib.rs", "bindings/rust/blenderui/src/vlist/mod.rs", "bindings/rust/blenderui/src/vlist/element.rs", "bindings/rust/blenderui/src/sink.rs", "bindings/rust/blenderui/tests/vlist.rs", "bindings/rust/blenderui/examples/site_chat.rs", "bindings/rust/blenderui/examples/vlist_cards.rs", "bindings/rust/blenderui/tests/vlist_custom.rs", "bindings/rust/blenderui-vlist/src/paint.rs", "bindings/rust/blenderui-paint/src/sink.rs", "bindings/rust/blenderui/src/shadcn/virtual_list.rs", "bindings/rust/blenderui-vlist/src/rows.rs", "bindings/rust/blenderui-vlist-gpui/src/element.rs", "bindings/rust/blenderui-vlist-gpui/examples/bench_list_gpui.rs", "bindings/rust/blenderui-vlist-gpui/bench/run.mjs"]
 ---
 
-A chat is the hard case for a list. Every message has its own height (a one-word reply, a paragraph, a screenshot), the height depends on how wide the window is, new messages arrive at the bottom while you read older ones, and history loads at the top. A list that only handles rows of equal height can't do it, and one that keeps a height for every message stops being cheap when there are ten million of them.
+Feeds, logs, file lists, task cards and chats have one thing in common: the items have different heights. A card wraps its text, a log line is one row or twelve, a message has a screenshot. The height depends on how wide the window is, new items arrive at the end while you read older ones, and history loads at the top. A list that only handles rows of equal height can't do it, and one that keeps a height for every item stops being cheap when there are ten million of them.
 
-**`blenderui-vlist` is one design for all of it.** A hundred messages and ten million take the same code path. Only what you scrolled through costs memory, a frame paints only the messages in view straight to the screen, and what you are looking at doesn't move when the heights around it change.
+**`blenderui-vlist` is one design for all of it.** A hundred items and ten million take the same code path. Only what you scrolled through costs memory, a frame paints only the items in view straight to the screen, and what you are looking at doesn't move when the heights around it change.
+
+BUI keeps the engine: the height index, anchored scrolling, text wrapping and its cache, loading ahead, the scrollbar and the input. You write the items. You say how tall an item is (a `Measurer`) and how it looks and what a click on it hits (an `ItemPainter`), and your own data rides along in each record. The chat on this page is one look that ships with BUI; [Your own items](#your-own-items) shows how to write another.
 
 <Figure
   shot="chat-list"
@@ -27,7 +29,7 @@ A chat is the hard case for a list. Every message has its own height (a one-word
 
 ## A chat in 20 lines
 
-You give the list your messages and keep its state in an entity. `chat_list` is the element; a click on a message selects it.
+The shipped look is a chat. You give the list your messages and keep its state in an entity. `chat_list` is the element; a click on a message selects it.
 
 <Tabs sync="rust-syntax" label="Rust syntax">
 <Tab label="rsx!">
@@ -81,7 +83,75 @@ let list = cx.new(|cx| ListState::new(messages, cx));
 
 A `Message` is an id, a time, a sender, some flags, an optional image height and the text. Whether a message starts a new run (and shows the avatar and name) or a new day (and shows a date divider) is decided when you `push` it and kept in the message's flags, so a message's height depends on that message alone and any message can be measured without its neighbours.
 
-The same crate lists anything else: build a `List` from your own `ItemSource` (where the items come from), `Measurer` (how an item lays out) and `ItemPainter` (how it looks).
+## Your own items
+
+A chat is just one look. Any list of variable-height items takes three parts, and an app needs only `blenderui` for all of them (`blenderui::vlist` re-exports `PaintSink`, `Palette`, `Rect`, `Rgba`, `Lines`, `Record` and the rest of what the traits mention).
+
+- **A source** says where the items come from. `VecSource` holds `Message`s in memory; `ItemSource` is the trait for your own store.
+- **A `Measurer`** says how tall an item is: how wide its text wraps (`wrap_width`), how tall everything that isn't text is (`chrome`), and the font size and line height. `estimator` has a default made from those, so you only write it when your items vary a lot.
+- **An `ItemPainter`** draws an item into a `PaintSink` (fills, rounded rectangles, text, images) and, if you want clicks inside an item, answers `hit`.
+
+An item's data is a `Record`. The engine only reads `text`, to wrap it, and the placeholder flag. The rest is yours:
+
+| Field | Meaning for your look |
+| --- | --- |
+| `id` | Stable and ascending with the index. |
+| `time` | An ordering or timestamp value: a chat uses seconds since the epoch, a feed can use anything it sorts by. |
+| `sender` | A small group or kind value: a chat uses the sender, a feed uses the kind of card. |
+| `flags` | Bit flags. The engine reserves `FLAG_PLACEHOLDER`; `FLAG_USER << n` (n from 0 to 3) is yours; `FLAG_HEADER`, `FLAG_DIVIDER` and `FLAG_OWN` are the chat's. |
+| `media_h`, `media` | An image's height (known before it loads, so loading shifts nothing) and its path. |
+| `data` | Opaque bytes your look decodes: a count, a status, a color. They live in the same buffer as the text, so there is no allocation per item once the list is warm. |
+
+`Record::new(id)` is an empty record, so `Record { text, ..Record::new(id) }` keeps compiling when a field is added. `Message` is the owned form (`data` is a `Vec<u8>`), and `VecSource::set_data` replaces an item's payload.
+
+Here is a card from `examples/vlist_cards.rs`, a feed of 200,000 task cards that is not a chat: a colored bar by `sender`, a title and a count badge read from `data`, and the body wrapped as text.
+
+```rust
+use blenderui::vlist::{ItemPainter, Lines, Measurer, PaintSink, Palette, Record, Rect, SCROLLBAR_WIDTH};
+
+const BADGE: u32 = 1; // a part id: 0 is the card itself
+
+impl Measurer for CardStyle {
+    fn font_size(&self) -> f32 { 13.0 }
+    fn line_height(&self) -> f32 { 18.0 }
+    fn wrap_width(&self, _: &Record<'_>, list_width: f32) -> f32 {
+        (list_width - SCROLLBAR_WIDTH - 6.0 - 2.0 * self.pad).max(40.0)
+    }
+    fn chrome(&self, _: &Record<'_>) -> f32 { 2.0 * self.pad + self.title_h + 1.0 }
+}
+
+impl ItemPainter for CardStyle {
+    fn palette(&self) -> &Palette { &self.pal }
+
+    fn item(&self, sink: &mut dyn PaintSink, r: Rect, rec: &Record<'_>, lines: &Lines) {
+        // rec.data: the badge count, then the title
+        // ... sink.fill / sink.text for the bar, the title, lines.line(rec.text, i), the badge
+    }
+
+    fn skeleton(&self, sink: &mut dyn PaintSink, r: Rect, _: Option<&Record<'_>>) { /* grey bars */ }
+
+    fn hit(&self, r: Rect, _: &Record<'_>, _: &Lines, x: f32, y: f32) -> u32 {
+        let b = self.badge(r); // the rect `item` painted the badge in
+        if x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h { BADGE } else { 0 }
+    }
+}
+```
+
+Show it with `variable_list` and handle presses. `on_item_click` gets the item; `on_item_hit` gets the item and the part your `hit` returned, so a click on the badge is not a click on the card.
+
+```rust
+variable_list(&cards)
+    .on_item_click(|i, list| { /* select card i */ })
+    .on_item_hit(|i, part, list| {
+        if part == BADGE { /* acknowledge card i */ }
+    })
+```
+
+`hit` runs on the frame that is on screen, with the same rectangle, record and wrapped lines the item was painted with. Nothing is measured again, and an item that was not measured yet (a skeleton) reports part 0.
+
+<Callout type="note" title="Items are painted, not built from elements">
+A frame draws every visible item straight to the paint sink, with no element per item. That is why it stays cheap, and it means an item can't hold a button, a text field or a nested layout. Draw the control yourself and use the `hit` part for the clickable region, as the badge does. `LogSource`, the file-backed log, stores the chat's fields only: it doesn't carry `data`.
+</Callout>
 
 ## One index for every size
 

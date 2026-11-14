@@ -162,7 +162,7 @@ impl LogSource {
     fn placeholders(page: &mut Page, range: Range<usize>) {
         let a = page.text_mut().len();
         for i in range {
-            page.push_span(&Record { id: i as u64 + 1, time: 0, sender: 0, flags: FLAG_PLACEHOLDER, media_h: 0, text: "", media: "" }, a..a);
+            page.push_span(&Record { flags: FLAG_PLACEHOLDER, ..Record::new(i as u64 + 1) }, a..a);
         }
     }
 }
@@ -204,7 +204,7 @@ impl ItemSource for LogSource {
                 }
                 stop = m.off + u64::from(m.len);
                 let a = (m.off - base) as usize;
-                let r = Record { id: (i + k) as u64 + 1, time: m.time, sender: m.sender, flags: m.flags, media_h: m.media_h, text: "", media: "" };
+                let r = Record { time: m.time, sender: m.sender, flags: m.flags, media_h: m.media_h, ..Record::new((i + k) as u64 + 1) };
                 page.push_span(&r, a..a + m.len as usize);
             }
             i += n;

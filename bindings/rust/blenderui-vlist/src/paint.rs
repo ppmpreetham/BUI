@@ -24,9 +24,30 @@ pub trait ItemPainter {
     fn item(&self, sink: &mut dyn PaintSink, r: Rect, rec: &Record<'_>, lines: &Lines);
     /// An item not measured or not loaded: a placeholder in `r`.
     fn skeleton(&self, sink: &mut dyn PaintSink, r: Rect, rec: Option<&Record<'_>>);
+    /// What a press at (`x`, `y`) (viewport coordinates) hit inside the item
+    /// painted in `r`: a part id the look defines (a badge, a button area);
+    /// 0 is the item itself. Called with the same rect, record and lines
+    /// that `item` was painted with, nothing is re-measured.
+    fn hit(&self, r: Rect, rec: &Record<'_>, lines: &Lines, x: f32, y: f32) -> u32 {
+        let _ = (r, rec, lines, x, y);
+        0
+    }
 }
 
 impl ListView {
+    /// The part of placed item `item` under (`x`, `y`) as [`ItemPainter::hit`]
+    /// answers it, from the frame already laid out; 0 when the item is not
+    /// placed, not measured or a placeholder.
+    #[must_use]
+    pub fn part_at<S: Measurer + ItemPainter>(&self, style: &S, item: usize, x: f32, y: f32) -> u32 {
+        let Some(p) = self.placed.iter().find(|p| p.item == item) else { return 0 };
+        let Some(rec) = self.page.record(item) else { return 0 };
+        if !p.exact || rec.flags & crate::source::FLAG_PLACEHOLDER != 0 {
+            return 0;
+        }
+        self.text.peek(&rec, style, self.width).map_or(0, |lines| style.hit(Rect::new(0.0, p.y, self.width, p.h), &rec, lines, x, y))
+    }
+
     /// Paint the frame laid out by [`ListView::layout`].
     pub fn paint<S: Measurer + ItemPainter>(&self, style: &S, sink: &mut dyn PaintSink) {
         let pal = *style.palette();

@@ -1,5 +1,9 @@
-//! A variable-height virtualized list for chat-grade UIs, one design for
-//! 100 items and for 10M: the logic once, for every UI framework.
+//! A variable-height virtualized view for any app (feeds, logs, file lists,
+//! cards, chats), one design for 100 items and for 10M: the logic once, for
+//! every UI framework. The engine (height index, anchored scrolling, wrap
+//! cache, prefetch, scrollbar, input) is generic; what an item is and looks
+//! like is yours (a [`Measurer`] and an [`ItemPainter`] over a [`Record`]
+//! with a free `data` payload). [`ChatStyle`] is one shipped look.
 //!
 //! | Blender | here |
 //! |---|---|
@@ -11,8 +15,8 @@
 //!
 //! Layering: [`source::ItemSource`] (data) and [`measure::Measurer`]
 //! (layout) feed a [`ListView`] (state, index, one frame), which paints
-//! through an [`paint::ItemPainter`] into a [`PaintSink`]. [`chat`] is a
-//! Measurer + ItemPainter for messages. A framework adapter owns a view
+//! through an [`paint::ItemPainter`] into a [`PaintSink`]. [`chat`] and
+//! [`rows`] are Measurer + ItemPainter looks (messages, plain rows). A framework adapter owns a view
 //! next to its source, translates events into view calls and implements
 //! `PaintSink`. `std` only.
 
@@ -44,7 +48,8 @@ pub use index::{HeightIndex, IndexError};
 pub use measure::{Measurer, TextLayout, TextWidth};
 pub use paint::ItemPainter;
 pub use rows::{CountSource, RowList, RowStyle};
-pub use source::{ItemSource, Message, Page, Record, VecSource};
+pub use scrollbar::WIDTH as SCROLLBAR_WIDTH;
+pub use source::{ItemSource, Message, Page, Record, VecSource, FLAG_DIVIDER, FLAG_HEADER, FLAG_OWN, FLAG_PLACEHOLDER, FLAG_USER};
 pub use view::{Align, Budget, ListView, Nav, Options, Placed, Pos};
 pub use wrap::Lines;
 

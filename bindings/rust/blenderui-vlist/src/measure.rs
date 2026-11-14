@@ -32,8 +32,20 @@ pub trait Measurer {
     /// header, divider, image).
     fn chrome(&self, rec: &Record<'_>) -> f32;
 
-    /// The estimator for blocks nobody measured, for this list width.
-    fn estimator(&self, list_width: f32) -> Estimator;
+    /// The estimator for blocks nobody measured, for this list width. The
+    /// default takes the chrome of an empty record as the fixed height, the
+    /// line height, half the font size per text byte, and the wrap width;
+    /// override it when the items' chrome varies a lot (the calibration
+    /// from real measurements corrects a rough guess as the user scrolls).
+    fn estimator(&self, list_width: f32) -> Estimator {
+        let empty = Record::new(0);
+        Estimator::new(
+            f64::from(self.chrome(&empty)),
+            f64::from(self.line_height()),
+            f64::from(self.font_size()) * 0.5,
+            f64::from(self.wrap_width(&empty, list_width)),
+        )
+    }
 }
 
 /// Wrapping with a cache.

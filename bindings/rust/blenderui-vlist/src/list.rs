@@ -114,6 +114,12 @@ impl<S: ItemSource, P: Measurer + ItemPainter> List<S, P> {
         self.view.item_at(y).map_or(Hit::None, Hit::Item)
     }
 
+    /// The item-local part a press at (`x`, `y`) hit in `item` (see [`ItemPainter::hit`]).
+    #[must_use]
+    pub fn hit_part(&self, item: usize, x: f32, y: f32) -> u32 {
+        self.view.part_at(&self.style, item, x, y)
+    }
+
     /// The pointer moved to `y`; returns whether the thumb is being dragged.
     pub fn pointer_move(&mut self, y: f32) -> bool {
         let (Some(grab), Some(t)) = (self.drag, self.thumb()) else { return false };

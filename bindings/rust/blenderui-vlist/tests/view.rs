@@ -393,3 +393,18 @@ fn tanstack_virtual_options_and_offsets() {
     let big = chat(5000, Options { estimate_size: Some(96.0), ..Options::default() });
     assert!(big.view.scroll_extent().1 > small.view.scroll_extent().1 * 2.0);
 }
+
+#[test]
+fn the_payload_travels_through_the_page() {
+    use blenderui_vlist::{Message, VecSource};
+    let msgs: Vec<Message> =
+        (0..5u8).map(|i| Message { id: u64::from(i) + 1, text: format!("item {i}"), data: vec![i; usize::from(i)], ..Message::default() }).collect();
+    let mut src = VecSource::from_messages(msgs);
+    src.set_data(2, &[9, 9, 9]);
+    let mut page = Page::new();
+    src.fetch(1..5, &mut page);
+    assert_eq!(page.record(1).unwrap().data, &[1]);
+    assert_eq!(page.record(2).unwrap().data, &[9, 9, 9]);
+    assert_eq!(page.record(4).unwrap().data, &[4, 4, 4, 4]);
+    assert!(page.record(0).is_none());
+}

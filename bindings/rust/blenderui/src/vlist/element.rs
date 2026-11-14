@@ -17,6 +17,13 @@ use crate::html::div;
 use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement, Styled, Window};
 
 type Listener<S, P> = Rc<dyn Fn(usize, &mut List<S, P>)>;
+type HitListener<S, P> = Rc<dyn Fn(usize, u32, &mut List<S, P>)>;
+
+/// The press handlers of a list.
+struct Handlers<S: ItemSource, P: Measurer + ItemPainter> {
+    click: Option<Listener<S, P>>,
+    hit: Option<HitListener<S, P>>,
+}
 
 /// A variable-height list over `state`.
 ///
@@ -29,12 +36,13 @@ pub struct VariableList<S: ItemSource + 'static, P: Measurer + ItemPainter + 'st
     state: Entity<ListState<S, P>>,
     base: Div,
     on_item_click: Option<Listener<S, P>>,
+    on_item_hit: Option<HitListener<S, P>>,
     on_view_change: Option<Rc<dyn Fn(&ViewInfo)>>,
 }
 
 /// The element for a list state.
 pub fn variable_list<S: ItemSource, P: Measurer + ItemPainter>(state: &Entity<ListState<S, P>>) -> VariableList<S, P> {
-    VariableList { state: *state, base: div().relative().overflow_hidden().size_full(), on_item_click: None, on_view_change: None }
+    VariableList { state: *state, base: div().relative().overflow_hidden().size_full(), on_item_click: None, on_item_hit: None, on_view_change: None }
 }
 
 /// A chat: a [`VariableList`] over a [`ChatList`] where a click selects a
@@ -58,6 +66,15 @@ impl<S: ItemSource, P: Measurer + ItemPainter> VariableList<S, P> {
         self.on_item_click = Some(Rc::new(f));
         self
     }
+
+    /// An item was pressed: its index and the part of it that was hit, as
+    /// [`ItemPainter::hit`] answers it (0: the item itself). Called after
+    /// `on_item_click`, from the frame that is on screen. The closure may change the list.
+    #[must_use]
+    pub fn on_item_hit(mut self, f: impl Fn(usize, u32, &mut List<S, P>) + 'static) -> Self {
+        self.on_item_hit = Some(Rc::new(f));
+        self
+    }
 }
 
 impl<S: ItemSource, P: Measurer + ItemPainter> Styled for VariableList<S, P> {
@@ -68,7 +85,7 @@ impl<S: ItemSource, P: Measurer + ItemPainter> Styled for VariableList<S, P> {
 
 impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P> {
     fn into_any_element(self) -> AnyElement {
-        let VariableList { state, base, on_item_click, on_view_change } = self;
+        let VariableList { state, base, on_item_click, on_item_hit, on_view_change } = self;
         let el = base.defer(move |window, cx, el| {
             let id = state.read(cx).id.clone();
             let known = window.bounds_of(&id);
@@ -86,7 +103,7 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                 f(&info);
             }
             let (down, mv, up, wh, key) = (state, state, state, state, state);
-            let click = on_item_click;
+            let handlers = Handlers { click: on_item_click, hit: on_item_hit };
             let taken = std::mem::replace(el, Div::new("div"));
             *el = taken
                 .id(id)
@@ -95,7 +112,7 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                         return;
                     }
                     let local = |s: &ListState<S, P>| (e.position.x.0 - s.bounds.origin.x, e.position.y.0 - s.bounds.origin.y);
-                    state_pointer_down(down, click.as_ref(), local, cx);
+                    state_pointer_down(down, &handlers, local, cx);
                     w.refresh();
                 })
                 .on_mouse_move(move |e, w, cx| {
@@ -146,15 +163,19 @@ const WHEEL_NOTCH_PX: f64 = 57.0;
 
 fn state_pointer_down<S: ItemSource, P: Measurer + ItemPainter>(
     state: Entity<ListState<S, P>>,
-    click: Option<&Listener<S, P>>,
+    handlers: &Handlers<S, P>,
     local: impl Fn(&ListState<S, P>) -> (f32, f32),
     cx: &mut App,
 ) {
     state.update(cx, |s, _| {
         let (x, y) = local(s);
         if let Hit::Item(i) = s.pointer_down(x, y) {
-            if let Some(f) = click {
+            if let Some(f) = &handlers.click {
                 f(i, s);
+            }
+            if let Some(f) = &handlers.hit {
+                let part = s.hit_part(i, x, y);
+                f(i, part, s);
             }
         }
     });

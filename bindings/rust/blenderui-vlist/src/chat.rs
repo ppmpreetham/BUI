@@ -129,8 +129,8 @@ impl Measurer for ChatStyle {
 
     fn estimator(&self, list_width: f32) -> Estimator {
         // a third of the messages start a run; images are rare
-        let pad = f64::from(self.top(&Record { id: 0, time: 0, sender: 0, flags: 0, media_h: 0, text: "", media: "" }) + 3.0) + f64::from(self.header_h) * 0.33;
-        let w = f64::from(self.wrap_width(&Record { id: 0, time: 0, sender: 0, flags: 0, media_h: 0, text: "", media: "" }, list_width));
+        let pad = f64::from(self.top(&Record::new(0)) + 3.0) + f64::from(self.header_h) * 0.33;
+        let w = f64::from(self.wrap_width(&Record::new(0), list_width));
         Estimator::new(pad, f64::from(self.line_height), f64::from(self.font_size) * 0.5, w)
     }
 }
