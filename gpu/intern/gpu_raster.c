@@ -2431,6 +2431,32 @@ void BUI_raster_mesh(BuiRaster *r,
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Effects (application shaders, gpu_effect.c)
+ * \{ */
+
+int BUI_raster_effect(BuiRaster *r,
+                      float x,
+                      float y,
+                      float w,
+                      float h,
+                      int effect,
+                      const int inputs[BUI_EFFECT_MAX_INPUTS],
+                      const float *floats,
+                      int n_floats)
+{
+  int box[4];
+  const int placed = r->gpu && inputs && w > 0.0f && h > 0.0f &&
+                 clip_box(r, x, y, x + w, y + h, &box[0], &box[1], &box[2], &box[3]);
+  if (!placed) {
+    return 0; /* the software raster has no shaders: the caller draws its fallback */
+  }
+  const float rect[4] = {x, y, w, h};
+  return bui_gpu_effect(r->gpu, effect, rect, inputs, floats, n_floats, box);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Color widgets (HSV wheel, gradients, lit sphere)
  * \{ */
 

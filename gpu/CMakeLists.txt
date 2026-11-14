@@ -8,6 +8,7 @@
 set(SRC
   intern/gpu_null.c
   intern/gpu_raster.c
+  intern/gpu_effect.c # the registry and dialect of application shaders (BUI_effect_*)
   intern/gpu_d3d11.c # without BUI_GPU (features.json), the stubs that keep rasters on the CPU
 )
 

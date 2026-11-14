@@ -32,6 +32,7 @@
 
 #  include "GPU_raster.h"
 #  include "gpu_d3d11.h"
+#  include "gpu_effect.h"
 
 /* -------------------------------------------------------------------- */
 /** \name Vendored GL / GLX / EGL / Xlib declarations
@@ -160,6 +161,8 @@ typedef ptrdiff_t GLintptr;
     F(GLint, glGetUniformLocation, (GLuint, const GLchar *)) \
     F(void, glUniform1i, (GLint, GLint)) \
     F(void, glUniform2f, (GLint, GLfloat, GLfloat)) \
+    F(void, glUniform4f, (GLint, GLfloat, GLfloat, GLfloat, GLfloat)) \
+    F(void, glUniform1fv, (GLint, GLsizei, const GLfloat *)) \
     F(void, glGenFramebuffers, (GLsizei, GLuint *)) \
     F(void, glDeleteFramebuffers, (GLsizei, const GLuint *)) \
     F(void, glBindFramebuffer, (GLenum, GLuint)) \
@@ -878,7 +881,8 @@ typedef struct SlugGlyph {
 } SlugGlyph;
 
 typedef struct Batch {
-  int tri; /* 0: quad instances, 1: triangles, 2: textured mesh (indexed) */
+  int tri; /* 0: quad instances, 1: triangles, 2: textured mesh (indexed), 3: one effect draw
+            * (first: its FxCall) */
   int first, count;
   int img; /* quads: the RGBA texture their images sample (-1 none yet, 0 atlas, n: big[n - 1]) */
   /* meshes: texture (0: white), sampler, scissor x0 y0 x1 y1 */
@@ -915,6 +919,24 @@ typedef struct TriV {
   float clip[4];
 } TriV;
 
+/* An effect (gpu_effect.h) in this context, by registry slot: compiled on first use. */
+typedef struct DevFx {
+  int id;     /* 0 = empty */
+  int failed; /* compiling it failed: the log is the effect's error */
+  int n_inputs, n_floats;
+  GLuint prog;
+  GLint box, ndc, u; /* uniform locations (u: -1 when the shader never reads U) */
+} DevFx;
+
+/* One recorded effect draw. */
+typedef struct FxCall {
+  int effect;
+  float rect[4];
+  int inputs[BUI_EFFECT_MAX_INPUTS];
+  int clip[4];
+  int floats; /* where its n_floats of the effect are in BuiGpu.fxf */
+} FxCall;
+
 enum { API_GLX = 1, API_EGL = 2 };
 
 struct BuiGpu {
@@ -941,12 +963,15 @@ struct BuiGpu {
 
   GLuint prog_quad, prog_tri, prog_mesh;
   GLint ndc_quad, ndc_tri, ndc_mesh;
-  GLuint vao_quad, vao_tri, vao_mesh;
+  GLuint vao_quad, vao_tri, vao_mesh, vao_fx; /* vao_fx: no attributes (effects use gl_VertexID) */
   GLuint ib, tb, mvb, mib;
   GLuint white_tex; /* 1x1 white: meshes without a texture */
   DevTex *dtex;
   int n_dtex;
   unsigned dtex_free_gen;
+  DevFx *dfx;
+  int n_dfx;
+  unsigned dfx_free_gen;
   int max_tex;
 
   GLuint fbo, target;
@@ -976,6 +1001,10 @@ struct BuiGpu {
   int n_mv, cap_mv;
   uint32_t *mi;
   int n_mi, cap_mi;
+  FxCall *fx;
+  int n_fx, cap_fx;
+  float *fxf;
+  int n_fxf, cap_fxf;
   Batch *b;
   int n_b, cap_b;
 
@@ -1244,7 +1273,9 @@ static int egl_create(BuiGpu *g)
   return fail("EGL context");
 }
 
-static GLuint compile(BuiGpu *g, GLenum type, const char *src)
+/* `log` (may be NULL): where the driver's text goes when this fails, as Blender keeps it
+ * (GLShader::print_log); with BUI_GPU_DEBUG it is also printed. */
+static GLuint compile(BuiGpu *g, GLenum type, const char *src, char *log, size_t log_n)
 {
   const GLuint sh = GL(glCreateShader)(type);
   GL(glShaderSource)(sh, 1, &src, NULL);
@@ -1252,10 +1283,13 @@ static GLuint compile(BuiGpu *g, GLenum type, const char *src)
   GLint ok = 0;
   GL(glGetShaderiv)(sh, GL_COMPILE_STATUS, &ok);
   if (!ok) {
+    char text[2048] = {0};
+    GL(glGetShaderInfoLog)(sh, sizeof(text) - 1, NULL, text);
+    if (log) {
+      snprintf(log, log_n, "%s: %s", type == GL_VERTEX_SHADER ? "vertex" : "fragment", text);
+    }
     if (debug_on()) {
-      char log[2048] = {0};
-      GL(glGetShaderInfoLog)(sh, sizeof(log) - 1, NULL, log);
-      fprintf(stderr, "bui gpu (gl): shader:\n%s\n", log);
+      fprintf(stderr, "bui gpu (gl): shader:\n%s\n", text);
     }
     GL(glDeleteShader)(sh);
     return 0;
@@ -1263,10 +1297,10 @@ static GLuint compile(BuiGpu *g, GLenum type, const char *src)
   return sh;
 }
 
-static GLuint program(BuiGpu *g, const char *vs_src, const char *fs_src)
+static GLuint program(BuiGpu *g, const char *vs_src, const char *fs_src, char *log, size_t log_n)
 {
-  const GLuint vs = compile(g, GL_VERTEX_SHADER, vs_src);
-  const GLuint fs = vs ? compile(g, GL_FRAGMENT_SHADER, fs_src) : 0;
+  const GLuint vs = compile(g, GL_VERTEX_SHADER, vs_src, log, log_n);
+  const GLuint fs = vs ? compile(g, GL_FRAGMENT_SHADER, fs_src, log, log_n) : 0;
   if (!fs) {
     if (vs) {
       GL(glDeleteShader)(vs);
@@ -1282,10 +1316,13 @@ static GLuint program(BuiGpu *g, const char *vs_src, const char *fs_src)
   GLint ok = 0;
   GL(glGetProgramiv)(p, GL_LINK_STATUS, &ok);
   if (!ok) {
+    char text[2048] = {0};
+    GL(glGetProgramInfoLog)(p, sizeof(text) - 1, NULL, text);
+    if (log) {
+      snprintf(log, log_n, "link: %s", text);
+    }
     if (debug_on()) {
-      char log[2048] = {0};
-      GL(glGetProgramInfoLog)(p, sizeof(log) - 1, NULL, log);
-      fprintf(stderr, "bui gpu (gl): link:\n%s\n", log);
+      fprintf(stderr, "bui gpu (gl): link:\n%s\n", text);
     }
     GL(glDeleteProgram)(p);
     return 0;
@@ -1349,9 +1386,9 @@ static int device_init(BuiGpu *g)
   if (max_env && atoi(max_env) >= 64 && atoi(max_env) < g->big_max) {
     g->big_max = atoi(max_env);
   }
-  g->prog_quad = program(g, k_vs_quad, k_fs_quad);
-  g->prog_tri = program(g, k_vs_tri, k_fs_tri);
-  g->prog_mesh = program(g, k_vs_mesh, k_fs_mesh);
+  g->prog_quad = program(g, k_vs_quad, k_fs_quad, NULL, 0);
+  g->prog_tri = program(g, k_vs_tri, k_fs_tri, NULL, 0);
+  g->prog_mesh = program(g, k_vs_mesh, k_fs_mesh, NULL, 0);
   if (!g->prog_quad || !g->prog_tri || !g->prog_mesh) {
     return fail("shaders");
   }
@@ -1372,6 +1409,7 @@ static int device_init(BuiGpu *g)
   GL(glGenBuffers)(1, &g->tb);
   GL(glGenVertexArrays)(1, &g->vao_quad);
   GL(glGenVertexArrays)(1, &g->vao_tri);
+  GL(glGenVertexArrays)(1, &g->vao_fx);
   /* instances: 8 float4 attributes, one step per instance (pointers are set
    * per batch: GL 3.3 has no base instance) */
   GL(glBindVertexArray)(g->vao_quad);
@@ -1540,6 +1578,9 @@ void bui_gpu_free(BuiGpu *g)
   }
   context_free(g); /* deletes the textures and buffers with it */
   free(g->dtex);
+  free(g->dfx);
+  free(g->fx);
+  free(g->fxf);
   free(g->inst);
   free(g->tv);
   free(g->mv);
@@ -1635,7 +1676,7 @@ static Batch *batch_new(BuiGpu *g, int tri, int first);
 /* The batch to append to: the last one when it is of the same kind. */
 static Batch *batch_for(BuiGpu *g, int tri, int first)
 {
-  if (tri != 2 && g->n_b > 0 && g->b[g->n_b - 1].tri == tri) {
+  if (tri < 2 && g->n_b > 0 && g->b[g->n_b - 1].tri == tri) {
     return &g->b[g->n_b - 1];
   }
   return batch_new(g, tri, first);
@@ -1735,14 +1776,14 @@ static void dtex_get(BuiGpu *g, int id)
   t->nearest = 1; /* tex_create's filter */
 }
 
-/* Binds the texture a recorded batch samples to unit 4. */
-static void dtex_bind(BuiGpu *g, int id, int nearest)
+/* Binds the texture a recorded batch samples to `unit` (4 for meshes, 8.. for effect inputs). */
+static void dtex_bind(BuiGpu *g, int id, int unit, int nearest)
 {
   const int slot = (id & 0xFFFF) - 1;
   DevTex *t = id > 0 && slot < g->n_dtex && g->dtex[slot].id == id && g->dtex[slot].tex ?
                   &g->dtex[slot] :
                   NULL;
-  GL(glActiveTexture)(GL_TEXTURE0 + 4);
+  GL(glActiveTexture)(GL_TEXTURE0 + (GLenum)unit);
   GL(glBindTexture)(GL_TEXTURE_2D, t ? t->tex : g->white_tex);
   if (t && t->nearest != nearest) {
     const GLint f = nearest ? GL_NEAREST : GL_LINEAR;
@@ -1932,6 +1973,141 @@ void bui_gpu_triangles(BuiGpu *g,
     }
   }
   b->count += count;
+}
+
+/* -- effects (application shaders, as gpu_d3d11.c) ----------------------------------- */
+
+static void dfx_release(BuiGpu *g, DevFx *f)
+{
+  if (f->prog) {
+    GL(glDeleteProgram)(f->prog);
+  }
+  memset(f, 0, sizeof(*f));
+}
+
+/* Compiles and links `v` for this context (through bui_effect_assemble's GLSL prelude); false
+ * (with the log) when it fails. */
+static int fx_build(BuiGpu *g, const BuiEffectView *v, DevFx *f, char *log, size_t log_n)
+{
+  char *fs = bui_effect_assemble(BUI_FX_GLSL, v);
+  if (!fs) {
+    snprintf(log, log_n, "out of memory");
+    return 0;
+  }
+  f->prog = program(g, bui_fx_glsl_vs, fs, log, log_n);
+  free(fs);
+  if (!f->prog) {
+    return 0;
+  }
+  f->box = GL(glGetUniformLocation)(f->prog, "bui_box");
+  f->ndc = GL(glGetUniformLocation)(f->prog, "bui_ndc");
+  f->u = GL(glGetUniformLocation)(f->prog, "U");
+  GL(glUseProgram)(f->prog);
+  for (int k = 0; k < v->n_inputs; k++) { /* input k samples unit 8 + k */
+    char name[16];
+    snprintf(name, sizeof(name), "bui_t%d", k);
+    GL(glUniform1i)(GL(glGetUniformLocation)(f->prog, name), 8 + k);
+  }
+  GL(glUseProgram)(0);
+  return 1;
+}
+
+/* The context's program of effect `v`, compiled on first use. NULL: no room. */
+static DevFx *dfx_get(BuiGpu *g, const BuiEffectView *v)
+{
+  const int slot = BUI_EFFECT_SLOT(v->id);
+  if (slot >= g->n_dfx) {
+    const int n = slot + 8;
+    DevFx *nd = (DevFx *)realloc(g->dfx, sizeof(DevFx) * (size_t)n);
+    if (!nd) {
+      return NULL;
+    }
+    memset(nd + g->n_dfx, 0, sizeof(DevFx) * (size_t)(n - g->n_dfx));
+    g->dfx = nd;
+    g->n_dfx = n;
+  }
+  DevFx *f = &g->dfx[slot];
+  if (f->id == v->id) {
+    return f;
+  }
+  if (f->id) { /* a freed effect's slot, reused */
+    flush(g);
+    dfx_release(g, f);
+  }
+  char log[BUI_EFFECT_LOG] = "";
+  f->id = v->id;
+  f->n_inputs = v->n_inputs;
+  f->n_floats = v->n_floats;
+  if (!fx_build(g, v, f, log, sizeof(log))) {
+    dfx_release(g, f);
+    f->id = v->id;
+    f->failed = 1;
+  }
+  bui_effect_set_error(v->id, log);
+  return f;
+}
+
+/* Frees the programs of effects freed in the registry. */
+static void dfx_sweep(BuiGpu *g)
+{
+  const unsigned fg = bui_effect_free_gen();
+  if (fg == g->dfx_free_gen) {
+    return;
+  }
+  g->dfx_free_gen = fg;
+  BuiEffectView v;
+  for (int i = 0; i < g->n_dfx; i++) {
+    if (g->dfx[i].id && !bui_effect_view(g->dfx[i].id, &v)) {
+      flush(g);
+      dfx_release(g, &g->dfx[i]);
+    }
+  }
+}
+
+int bui_gpu_effect(BuiGpu *g,
+                   int effect,
+                   const float rect[4],
+                   const int inputs[BUI_EFFECT_MAX_INPUTS],
+                   const float *floats,
+                   int n_floats,
+                   const int clip[4])
+{
+  BuiEffectView v;
+  if (!bui_effect_view(effect, &v) || !make_current(g)) {
+    return 0;
+  }
+  dfx_sweep(g);
+  DevFx *f = dfx_get(g, &v);
+  if (!f || f->failed) {
+    return 0;
+  }
+  dtex_sweep(g);
+  for (int k = 0; k < v.n_inputs; k++) {
+    dtex_get(g, inputs[k]); /* may flush: before anything of this draw is recorded */
+  }
+  if (!grow((void **)&g->fx, &g->cap_fx, g->n_fx + 1, sizeof(FxCall)) ||
+      !grow((void **)&g->fxf, &g->cap_fxf, g->n_fxf + v.n_floats, sizeof(float)))
+  {
+    return 0;
+  }
+  Batch *b = batch_new(g, 3, g->n_fx); /* never merged: each draw has its own shader state */
+  if (!b) {
+    return 0;
+  }
+  b->count = 1;
+  FxCall *c = &g->fx[g->n_fx++];
+  c->effect = effect;
+  memcpy(c->rect, rect, sizeof(c->rect));
+  memcpy(c->inputs, inputs, sizeof(c->inputs));
+  memcpy(c->clip, clip, sizeof(c->clip));
+  c->floats = g->n_fxf;
+  const int n = floats && n_floats > 0 ? (n_floats < v.n_floats ? n_floats : v.n_floats) : 0;
+  if (n > 0) {
+    memcpy(g->fxf + g->n_fxf, floats, sizeof(float) * (size_t)n);
+  }
+  memset(g->fxf + g->n_fxf + n, 0, sizeof(float) * (size_t)(v.n_floats - n));
+  g->n_fxf += v.n_floats;
+  return 1;
 }
 
 static uint64_t mix64(uint64_t h)
@@ -2455,13 +2631,34 @@ static int ensure_target(BuiGpu *g)
   return 1;
 }
 
+/* One recorded effect draw: its program, floats and inputs, scissored to its clip. */
+static void fx_draw(BuiGpu *g, const FxCall *fc, float sx, float sy)
+{
+  const int slot = BUI_EFFECT_SLOT(fc->effect);
+  const DevFx *f = slot >= 0 && slot < g->n_dfx ? &g->dfx[slot] : NULL;
+  if (!f || f->id != fc->effect || !f->prog) {
+    return;
+  }
+  GL(glUseProgram)(f->prog);
+  GL(glUniform4f)(f->box, fc->rect[0], fc->rect[1], fc->rect[2], fc->rect[3]);
+  GL(glUniform2f)(f->ndc, sx, sy);
+  if (f->u >= 0 && f->n_floats > 0) {
+    GL(glUniform1fv)(f->u, f->n_floats, g->fxf + fc->floats);
+  }
+  for (int k = 0; k < f->n_inputs; k++) {
+    dtex_bind(g, fc->inputs[k], 8 + k, 0);
+  }
+  GL(glScissor)(fc->clip[0], fc->clip[1], fc->clip[2] - fc->clip[0], fc->clip[3] - fc->clip[1]);
+  GL(glDrawArrays)(GL_TRIANGLE_STRIP, 0, 4);
+}
+
 static void flush(BuiGpu *g)
 {
   if (g->n_b == 0) {
     return;
   }
   if (!make_current(g) || !ensure_target(g)) {
-    g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = 0;
+    g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = g->n_fx = g->n_fxf = 0;
     return;
   }
   GL(glBindFramebuffer)(GL_FRAMEBUFFER, g->fbo);
@@ -2501,7 +2698,7 @@ static void flush(BuiGpu *g)
       continue;
     }
     if (b->tri != cur) {
-      if (cur == 2) {
+      if (cur == 2 || cur == 3) {
         GL(glDisable)(GL_SCISSOR_TEST);
       }
       cur = b->tri;
@@ -2517,6 +2714,10 @@ static void flush(BuiGpu *g)
         GL(glBindVertexArray)(g->vao_quad);
         GL(glBindBuffer)(GL_ARRAY_BUFFER, g->ib);
       }
+      else if (b->tri == 3) { /* effects: a quad from gl_VertexID, programs set per draw */
+        GL(glBindVertexArray)(g->vao_fx);
+        GL(glEnable)(GL_SCISSOR_TEST);
+      }
       else {
         GL(glUseProgram)(g->prog_tri);
         GL(glUniform2f)(g->ndc_tri, sx, sy);
@@ -2525,7 +2726,7 @@ static void flush(BuiGpu *g)
     }
     if (b->tri == 2) {
       /* the frame is stored top row first: GL y == BUI y */
-      dtex_bind(g, b->tex, b->nearest);
+      dtex_bind(g, b->tex, 4, b->nearest);
       GL(glScissor)(b->clip[0], b->clip[1], b->clip[2] - b->clip[0], b->clip[3] - b->clip[1]);
       GL(glDrawElements)(GL_TRIANGLES, b->count, GL_UNSIGNED_INT,
                          (const void *)(sizeof(uint32_t) * (size_t)b->first));
@@ -2547,15 +2748,18 @@ static void flush(BuiGpu *g)
       }
       GL(glDrawArraysInstanced)(GL_TRIANGLE_STRIP, 0, 4, b->count);
     }
+    else if (b->tri == 3) {
+      fx_draw(g, &g->fx[b->first], sx, sy);
+    }
     else {
       GL(glDrawArrays)(GL_TRIANGLES, b->first, b->count);
     }
   }
-  if (cur == 2) {
+  if (cur == 2 || cur == 3) {
     GL(glDisable)(GL_SCISSOR_TEST);
   }
   GL(glBindVertexArray)(0);
-  g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = 0;
+  g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = g->n_fx = g->n_fxf = 0;
 }
 
 void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h)

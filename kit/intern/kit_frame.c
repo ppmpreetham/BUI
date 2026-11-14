@@ -698,10 +698,19 @@ typedef struct CItem {
   BKCanvasItem it;
   float *coords;
   char *text;
-  BKImageRef img; /* BK_ITEM_IMAGE: rgba (copied), imbuf (borrowed) or src (cached) */
+  BKImageRef img; /* BK_ITEM_IMAGE, and the fallback of BK_ITEM_EFFECT: rgba (copied), imbuf
+                   * (borrowed) or src (cached) */
+  float *fx_floats; /* BK_ITEM_EFFECT: its floats (copied) */
   int coords_cap; /* floats allocated in coords */
   int text_cap;   /* bytes allocated in text */
 } CItem;
+
+/* Items that show pixels (an effect's fallback is an image): placed in a box, damaged and prepared
+ * like images. */
+static bool item_is_image(const BKCanvasItem *it)
+{
+  return it->type == BK_ITEM_IMAGE || it->type == BK_ITEM_EFFECT;
+}
 
 typedef struct CanvasData {
   CItem *items;
@@ -785,6 +794,7 @@ static void citem_free(CItem *c)
 {
   free(c->coords);
   free(c->text);
+  free(c->fx_floats);
   bk_image_ref_clear(&c->img);
 }
 
@@ -849,7 +859,7 @@ static void citem_assign(CItem *c, const BKCanvasItem *item)
   /* one pixel source per image item (validated here, at the boundary) */
   const int sources = (item->rgba != NULL) + (item->imbuf != NULL) + (item->src != NULL) +
                       (item->video != NULL);
-  if (item->type != BK_ITEM_IMAGE || sources != 1) {
+  if (!item_is_image(item) || sources != 1) {
     bk_image_ref_clear(&c->img);
   }
   else if (item->video) {
@@ -864,7 +874,19 @@ static void citem_assign(CItem *c, const BKCanvasItem *item)
   else {
     bk_image_ref_set_rgba(&c->img, item->rgba, item->iw, item->ih);
   }
+  /* an effect's floats (the count is validated here, at the boundary) */
+  const int nf = item->type == BK_ITEM_EFFECT && item->effect_floats ?
+                     BK_CLAMP(item->n_effect_floats, 0, BK_EFFECT_MAX_FLOATS) :
+                     0;
+  if (nf > 0) {
+    c->fx_floats = (float *)realloc(c->fx_floats, sizeof(float) * (size_t)nf);
+    if (c->fx_floats) {
+      memcpy(c->fx_floats, item->effect_floats, sizeof(float) * (size_t)nf);
+    }
+  }
   c->it = *item;
+  c->it.effect_floats = nf > 0 ? c->fx_floats : NULL;
+  c->it.n_effect_floats = nf > 0 && c->fx_floats ? nf : 0;
   c->it.coords = c->coords;
   c->it.text = tl ? c->text : NULL;
   c->it.rgba = NULL;
@@ -949,7 +971,7 @@ static bool citem_bbox_ex(const CItem *ci, float b[4], bool tight)
     y1 = base + size * 0.75f;
     m = 2.0f;
   }
-  else if (it->type == BK_ITEM_IMAGE) {
+  else if (item_is_image(it)) {
     float ib[4];
     if (!citem_image_box(ci, ib)) {
       return false;
@@ -1051,7 +1073,7 @@ void BK_canvas_add_item(BKNode *n, const BKCanvasItem *item)
 static bool citem_same(const CItem *c, const BKCanvasItem *it)
 {
   const BKCanvasItem *o = &c->it;
-  if (it->type == BK_ITEM_IMAGE || o->type != it->type || o->id != it->id ||
+  if (item_is_image(it) || o->type != it->type || o->id != it->id ||
       o->ncoords != it->ncoords || o->hidden != it->hidden || o->anchor != it->anchor ||
       o->text_flags != it->text_flags || o->clip_on != it->clip_on || o->family != it->family ||
       o->width != it->width || o->radius != it->radius || o->size != it->size ||
@@ -1335,6 +1357,19 @@ static void canvas_item_draw(BuiRaster *r, const CItem *ci, float ox, float oy, 
       }
       break;
     }
+    case BK_ITEM_EFFECT:
+      if (it->ncoords < 4) {
+        return;
+      }
+      /* the GPU runs the shader; elsewhere (or when it fails) the item's image is drawn, by the
+       * image code below */
+      if (BUI_raster_effect(r, ox + BK_MIN(p[0], p[2]), oy + BK_MIN(p[1], p[3]),
+                            fabsf(p[2] - p[0]), fabsf(p[3] - p[1]), it->effect, it->effect_inputs,
+                            it->effect_floats, it->n_effect_floats))
+      {
+        break;
+      }
+      /* fall through */
     case BK_ITEM_IMAGE: {
       BKImageDraw d;
       if (prep ? prep->image.ib != NULL : citem_image_resolve(ci, ox, oy, &d)) {
@@ -1435,7 +1470,7 @@ static bool item_prepare(const CItem *ci, float ox, float oy, ItemPrep *pp)
     pp->y0 = y - size * 1.5f - 2.0f;
     pp->y1 = y + size + 2.0f;
   }
-  else if (it->type == BK_ITEM_IMAGE) {
+  else if (item_is_image(it)) {
     pp->image.ib = NULL;
     if (citem_image_resolve(ci, ox, oy, &pp->image)) {
       pp->y0 = pp->image.dst[1] - 1.0f;
@@ -1491,7 +1526,7 @@ static void band_draw(const BandJob *j, int b)
     }
     BUI_raster_view(j->base, view, cx0, cy0, cx1, cy1);
     canvas_item_draw(view, ci, j->ox, j->oy,
-                     it->type == BK_ITEM_TEXT || it->type == BK_ITEM_IMAGE ? &j->prep[i] : NULL);
+                     it->type == BK_ITEM_TEXT || item_is_image(it) ? &j->prep[i] : NULL);
   }
   free(view);
 }

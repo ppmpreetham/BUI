@@ -33,6 +33,7 @@
 #  include "GPU_raster.h"
 #  include "gpu_d3d11.h"
 #  include "gpu_d3d11_shaders.h"
+#  include "gpu_effect.h"
 
 static const GUID k_IID_IDXGIDevice = {
     0x54ec77fa, 0x1377, 0x44e6, {0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}};
@@ -93,7 +94,8 @@ typedef struct SlugGlyph {
 } SlugGlyph;
 
 typedef struct Batch {
-  int tri; /* 0: quad instances, 1: triangles, 2: textured mesh (indexed) */
+  int tri; /* 0: quad instances, 1: triangles, 2: textured mesh (indexed), 3: one effect draw
+            * (first: its FxCall) */
   int first, count;
   int img; /* quads: the RGBA texture their images sample (-1 none yet, 0 atlas, n: big[n - 1]) */
   /* meshes: texture (0: white), sampler, scissor x0 y0 x1 y1 */
@@ -130,6 +132,25 @@ typedef struct TriV {
   float clip[4];
 } TriV;
 
+/* An effect (gpu_effect.h) on this device, by registry slot: compiled on first use. */
+typedef struct DevFx {
+  int id;     /* 0 = empty */
+  int failed; /* compiling it failed: the log is the effect's error */
+  int n_inputs, n_floats;
+  ID3D11VertexShader *vs;
+  ID3D11PixelShader *ps;
+  ID3D11Buffer *cb; /* b1: box, 2 / target size, then one register per float */
+} DevFx;
+
+/* One recorded effect draw. */
+typedef struct FxCall {
+  int effect;
+  float rect[4];
+  int inputs[BUI_EFFECT_MAX_INPUTS];
+  int clip[4];
+  int floats; /* where its n_floats of the effect are in BuiGpu.fxf */
+} FxCall;
+
 struct BuiGpu {
   HWND hwnd;
   volatile LONG state; /* 0 pending, 1 ready, -1 failed */
@@ -159,6 +180,9 @@ struct BuiGpu {
   DevTex *dtex;
   int n_dtex;
   unsigned dtex_free_gen;
+  DevFx *dfx;
+  int n_dfx;
+  unsigned dfx_free_gen;
 
   ID3D11Texture2D *target;
   ID3D11RenderTargetView *rtv;
@@ -190,6 +214,10 @@ struct BuiGpu {
   int n_mv, cap_mv;
   uint32_t *mi;
   int n_mi, cap_mi;
+  FxCall *fx;
+  int n_fx, cap_fx;
+  float *fxf;
+  int n_fxf, cap_fxf;
   Batch *b;
   int n_b, cap_b;
 
@@ -276,6 +304,14 @@ static void atlas_upload(BuiGpu *g, Atlas *a, int x, int y, int w, int h, const 
 /* -------------------------------------------------------------------- */
 /** \name Device (worker thread)
  * \{ */
+
+static void dfx_release(DevFx *f)
+{
+  REL(f->vs);
+  REL(f->ps);
+  REL(f->cb);
+  memset(f, 0, sizeof(*f));
+}
 
 typedef HRESULT(WINAPI *CreateDeviceFn)(IDXGIAdapter *, D3D_DRIVER_TYPE, HMODULE, UINT,
                                         const D3D_FEATURE_LEVEL *, UINT, UINT, ID3D11Device **,
@@ -516,6 +552,12 @@ void bui_gpu_free(BuiGpu *g)
     REL(g->dtex[i].tex);
   }
   free(g->dtex);
+  for (int i = 0; i < g->n_dfx; i++) {
+    dfx_release(&g->dfx[i]);
+  }
+  free(g->dfx);
+  free(g->fx);
+  free(g->fxf);
   REL(g->white_srv);
   REL(g->white_tex);
   REL(g->smp_linear);
@@ -578,7 +620,7 @@ static Batch *batch_new(BuiGpu *g, int tri, int first);
 /* The batch to append to: the last one when it is of the same kind. */
 static Batch *batch_for(BuiGpu *g, int tri, int first)
 {
-  if (tri != 2 && g->n_b > 0 && g->b[g->n_b - 1].tri == tri) {
+  if (tri < 2 && g->n_b > 0 && g->b[g->n_b - 1].tri == tri) {
     return &g->b[g->n_b - 1];
   }
   return batch_new(g, tri, first);
@@ -873,6 +915,184 @@ void bui_gpu_triangles(BuiGpu *g,
     }
   }
   b->count += count;
+}
+
+/* -- effects (application shaders) -------------------------------------------------- */
+
+typedef HRESULT(WINAPI *D3DCompileFn)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO *,
+                                      ID3DInclude *, LPCSTR, LPCSTR, UINT, UINT, ID3DBlob **,
+                                      ID3DBlob **);
+
+/* d3dcompiler_47.dll (Windows 8.1 and later ship it) is loaded when the first effect is drawn:
+ * nothing links against it and no SDK is needed. System folder first, then the app's own. */
+static D3DCompileFn d3d_compiler(void)
+{
+  static int tried;
+  static D3DCompileFn fn;
+  if (!tried) {
+    tried = 1;
+    HMODULE m = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!m) {
+      m = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+    }
+    if (m) {
+      fn = (D3DCompileFn)(void *)GetProcAddress(m, "D3DCompile");
+    }
+  }
+  return fn;
+}
+
+/* One stage of the assembled source; on failure the compiler's text goes to `log`. */
+static ID3DBlob *fx_stage(D3DCompileFn compile, const char *src, const char *name,
+                          const char *entry, const char *target, char *log, size_t log_n)
+{
+  ID3DBlob *code = NULL, *err = NULL;
+  const HRESULT hr = compile(src, strlen(src), name, NULL, NULL, entry, target,
+                             (1u << 15) /* D3DCOMPILE_OPTIMIZATION_LEVEL3 */, 0, &code, &err);
+  if (FAILED(hr)) {
+    snprintf(log, log_n, "%.*s",
+             err ? (int)ID3D10Blob_GetBufferSize(err) : 0,
+             err ? (const char *)ID3D10Blob_GetBufferPointer(err) : "compile failed");
+    REL(code);
+  }
+  REL(err);
+  return FAILED(hr) ? NULL : code;
+}
+
+/* Compiles `v` for this device; false (with the log) when it fails. */
+static int fx_build(BuiGpu *g, const BuiEffectView *v, DevFx *f, char *log, size_t log_n)
+{
+  D3DCompileFn compile = d3d_compiler();
+  if (!compile) {
+    snprintf(log, log_n, "d3dcompiler_47.dll is not available: the effect cannot run on this system");
+    return 0;
+  }
+  char *src = bui_effect_assemble(BUI_FX_HLSL, v);
+  if (!src) {
+    snprintf(log, log_n, "out of memory");
+    return 0;
+  }
+  ID3DBlob *psb = fx_stage(compile, src, v->name, "bui_ps", "ps_4_0", log, log_n);
+  free(src);
+  ID3DBlob *vsb = psb ? fx_stage(compile, bui_fx_hlsl_vs, "effect_vs", "bui_vs", "vs_4_0", log, log_n) : NULL;
+  int ok = 0;
+  if (vsb) {
+    D3D11_BUFFER_DESC bd = {0};
+    bd.ByteWidth = (UINT)(sizeof(float) * (8 + 4 * (size_t)(v->n_floats > 0 ? v->n_floats : 1)));
+    bd.Usage = D3D11_USAGE_DYNAMIC;
+    bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    ok = SUCCEEDED(ID3D11Device_CreateVertexShader(g->dev, ID3D10Blob_GetBufferPointer(vsb),
+                                                   ID3D10Blob_GetBufferSize(vsb), NULL, &f->vs)) &&
+         SUCCEEDED(ID3D11Device_CreatePixelShader(g->dev, ID3D10Blob_GetBufferPointer(psb),
+                                                  ID3D10Blob_GetBufferSize(psb), NULL, &f->ps)) &&
+         SUCCEEDED(ID3D11Device_CreateBuffer(g->dev, &bd, NULL, &f->cb));
+    if (!ok) {
+      snprintf(log, log_n, "the device rejected the compiled shader");
+    }
+  }
+  REL(vsb);
+  REL(psb);
+  return ok;
+}
+
+/* The device's pipeline of effect `v`, compiled on first use. NULL: no room. */
+static DevFx *dfx_get(BuiGpu *g, const BuiEffectView *v)
+{
+  const int slot = BUI_EFFECT_SLOT(v->id);
+  if (slot >= g->n_dfx) {
+    const int n = slot + 8;
+    DevFx *nd = (DevFx *)realloc(g->dfx, sizeof(DevFx) * (size_t)n);
+    if (!nd) {
+      return NULL;
+    }
+    memset(nd + g->n_dfx, 0, sizeof(DevFx) * (size_t)(n - g->n_dfx));
+    g->dfx = nd;
+    g->n_dfx = n;
+  }
+  DevFx *f = &g->dfx[slot];
+  if (f->id == v->id) {
+    return f;
+  }
+  if (f->id) { /* a freed effect's slot, reused */
+    flush(g);
+    dfx_release(f);
+  }
+  char log[BUI_EFFECT_LOG] = "";
+  f->id = v->id;
+  f->n_inputs = v->n_inputs;
+  f->n_floats = v->n_floats;
+  if (!fx_build(g, v, f, log, sizeof(log))) {
+    dfx_release(f);
+    f->id = v->id;
+    f->failed = 1;
+    fail(log, 0);
+  }
+  bui_effect_set_error(v->id, log);
+  return f;
+}
+
+/* Frees the pipelines of effects freed in the registry. */
+static void dfx_sweep(BuiGpu *g)
+{
+  const unsigned fg = bui_effect_free_gen();
+  if (fg == g->dfx_free_gen) {
+    return;
+  }
+  g->dfx_free_gen = fg;
+  BuiEffectView v;
+  for (int i = 0; i < g->n_dfx; i++) {
+    if (g->dfx[i].id && !bui_effect_view(g->dfx[i].id, &v)) {
+      flush(g);
+      dfx_release(&g->dfx[i]);
+    }
+  }
+}
+
+int bui_gpu_effect(BuiGpu *g,
+                   int effect,
+                   const float rect[4],
+                   const int inputs[BUI_EFFECT_MAX_INPUTS],
+                   const float *floats,
+                   int n_floats,
+                   const int clip[4])
+{
+  BuiEffectView v;
+  if (!bui_effect_view(effect, &v)) {
+    return 0;
+  }
+  dfx_sweep(g);
+  DevFx *f = dfx_get(g, &v);
+  if (!f || f->failed) {
+    return 0;
+  }
+  dtex_sweep(g);
+  for (int k = 0; k < v.n_inputs; k++) {
+    dtex_get(g, inputs[k]); /* may flush: before anything of this draw is recorded */
+  }
+  if (!grow((void **)&g->fx, &g->cap_fx, g->n_fx + 1, sizeof(FxCall)) ||
+      !grow((void **)&g->fxf, &g->cap_fxf, g->n_fxf + v.n_floats, sizeof(float)))
+  {
+    return 0;
+  }
+  Batch *b = batch_new(g, 3, g->n_fx); /* never merged: each draw has its own shader state */
+  if (!b) {
+    return 0;
+  }
+  b->count = 1;
+  FxCall *c = &g->fx[g->n_fx++];
+  c->effect = effect;
+  memcpy(c->rect, rect, sizeof(c->rect));
+  memcpy(c->inputs, inputs, sizeof(c->inputs));
+  memcpy(c->clip, clip, sizeof(c->clip));
+  c->floats = g->n_fxf;
+  const int n = floats && n_floats > 0 ? (n_floats < v.n_floats ? n_floats : v.n_floats) : 0;
+  if (n > 0) {
+    memcpy(g->fxf + g->n_fxf, floats, sizeof(float) * (size_t)n);
+  }
+  memset(g->fxf + g->n_fxf + n, 0, sizeof(float) * (size_t)(v.n_floats - n));
+  g->n_fxf += v.n_floats;
+  return 1;
 }
 
 static uint64_t mix64(uint64_t h)
@@ -1482,13 +1702,46 @@ static void upload(BuiGpu *g, ID3D11Buffer *buf, const void *data, size_t bytes)
   }
 }
 
+/* One recorded effect draw: its shaders, floats and inputs, scissored to its clip. */
+static void fx_draw(BuiGpu *g, const FxCall *fc)
+{
+  const int slot = BUI_EFFECT_SLOT(fc->effect);
+  const DevFx *f = slot >= 0 && slot < g->n_dfx ? &g->dfx[slot] : NULL;
+  if (!f || f->id != fc->effect || !f->ps) {
+    return;
+  }
+  ID3D11DeviceContext *c = g->ctx;
+  float data[8 + 4 * BUI_EFFECT_MAX_FLOATS] = {0};
+  memcpy(data, fc->rect, sizeof(fc->rect));
+  data[4] = 2.0f / (float)g->tw;
+  data[5] = 2.0f / (float)g->th;
+  for (int i = 0; i < f->n_floats; i++) { /* HLSL gives each element of an array a register */
+    data[8 + 4 * i] = g->fxf[fc->floats + i];
+  }
+  upload(g, f->cb, data, sizeof(float) * (size_t)(8 + 4 * (f->n_floats > 0 ? f->n_floats : 1)));
+  ID3D11ShaderResourceView *srv[BUI_EFFECT_MAX_INPUTS];
+  for (int k = 0; k < f->n_inputs; k++) {
+    srv[k] = dtex_srv(g, fc->inputs[k]);
+  }
+  if (f->n_inputs > 0) {
+    ID3D11DeviceContext_PSSetShaderResources(c, 8, (UINT)f->n_inputs, srv);
+  }
+  ID3D11DeviceContext_VSSetShader(c, f->vs, NULL, 0);
+  ID3D11DeviceContext_PSSetShader(c, f->ps, NULL, 0);
+  ID3D11DeviceContext_VSSetConstantBuffers(c, 1, 1, (ID3D11Buffer *const *)&f->cb);
+  ID3D11DeviceContext_PSSetConstantBuffers(c, 1, 1, (ID3D11Buffer *const *)&f->cb);
+  const D3D11_RECT sr = {fc->clip[0], fc->clip[1], fc->clip[2], fc->clip[3]};
+  ID3D11DeviceContext_RSSetScissorRects(c, 1, &sr);
+  ID3D11DeviceContext_Draw(c, 4, 0);
+}
+
 static void flush(BuiGpu *g)
 {
   if (g->n_b == 0) {
     return;
   }
   if (!ensure_target(g)) {
-    g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = 0;
+    g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = g->n_fx = g->n_fxf = 0;
     return;
   }
   ID3D11DeviceContext *c = g->ctx;
@@ -1532,7 +1785,7 @@ static void flush(BuiGpu *g)
       continue;
     }
     if (b->tri != cur) {
-      if (cur == 2) {
+      if (cur == 2 || cur == 3) { /* the scissored states */
         ID3D11DeviceContext_RSSetState(c, g->rs);
       }
       cur = b->tri;
@@ -1554,6 +1807,12 @@ static void flush(BuiGpu *g)
         ID3D11DeviceContext_IASetPrimitiveTopology(c, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         ID3D11DeviceContext_VSSetShader(c, g->vs_quad, NULL, 0);
         ID3D11DeviceContext_PSSetShader(c, g->ps_quad, NULL, 0);
+      }
+      else if (b->tri == 3) { /* effects: a quad from SV_VertexID, no vertex data */
+        ID3D11DeviceContext_IASetInputLayout(c, NULL);
+        ID3D11DeviceContext_IASetPrimitiveTopology(c, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        ID3D11DeviceContext_PSSetSamplers(c, 0, 1, &g->smp_linear);
+        ID3D11DeviceContext_RSSetState(c, g->rs_scissor);
       }
       else {
         UINT stride = sizeof(TriV);
@@ -1583,14 +1842,17 @@ static void flush(BuiGpu *g)
       }
       ID3D11DeviceContext_DrawInstanced(c, 4, (UINT)b->count, 0, (UINT)b->first);
     }
+    else if (b->tri == 3) {
+      fx_draw(g, &g->fx[b->first]);
+    }
     else {
       ID3D11DeviceContext_Draw(c, (UINT)b->count, (UINT)b->first);
     }
   }
-  if (cur == 2) {
+  if (cur == 2 || cur == 3) {
     ID3D11DeviceContext_RSSetState(c, g->rs);
   }
-  g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = 0;
+  g->n_b = g->n_inst = g->n_tv = g->n_mv = g->n_mi = g->n_fx = g->n_fxf = 0;
 }
 
 static int ensure_swap(BuiGpu *g)
@@ -1899,6 +2161,23 @@ void bui_gpu_mesh(BuiGpu *g,
   (void)tex;
   (void)nearest;
   (void)clip;
+}
+int bui_gpu_effect(BuiGpu *g,
+                   int effect,
+                   const float rect[4],
+                   const int inputs[BUI_EFFECT_MAX_INPUTS],
+                   const float *floats,
+                   int n_floats,
+                   const int clip[4])
+{
+  (void)g;
+  (void)effect;
+  (void)rect;
+  (void)inputs;
+  (void)floats;
+  (void)n_floats;
+  (void)clip;
+  return 0;
 }
 void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h)
 {

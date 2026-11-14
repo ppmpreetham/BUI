@@ -240,6 +240,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 
 - **Damage rendering**: an idle UI costs 0% CPU, and a hover redraws only the widget it touches.
 - **Opt-in GPU renderer** (Direct3D 11 on Windows, OpenGL 3.3 on Linux), modeled on Blender's instanced widget drawing. It draws the same pixels as the CPU raster.
+- **GPU effects**: your own GLSL pixel shader in a canvas (`BK_ITEM_EFFECT`, Rust `Painter::effect`), run on Direct3D 11 and OpenGL in paint order with an image as the fallback; the compile log comes back as a string.
 - In the benchmark, **2–4× less CPU per frame than gpui-fast**, with **less RAM** and a **~5 ms first frame**.
 - **Blender's text**: Inter (Blender's UI font) is embedded and rendered with FreeType the way Blender renders it, so text looks the same on every platform. On the GPU, glyphs are drawn from their outlines with [Slug](https://github.com/EricLengyel/Slug), falling back to a per-glyph atlas like Blender's.
 

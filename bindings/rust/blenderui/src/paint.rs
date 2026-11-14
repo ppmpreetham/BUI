@@ -8,6 +8,7 @@ use taffy::prelude::*;
 
 use crate::color::Rgba;
 use crate::geometry::{rect, Bounds, Length, Units};
+use crate::shader::ShaderEffect;
 use crate::layout::{BoxNode, Content, Frame, Key, Replaced, StyleStore};
 use crate::style::{key_hasher, BorderStyle, BoxEdge, Computed, DecoStyle, DisplayKind, TextAlign, WhiteSpace};
 use crate::text::{self, TextCache};
@@ -237,6 +238,18 @@ enum Kind {
     File { start: u32, fit: i32, frame: i32 },
     /// A video's current frame, fitted by `fit`.
     Video(std::rc::Rc<crate::video::Video>, i32),
+    /// A GPU shader over the box (see [`crate::shader`]).
+    Effect(Box<EffectItem>),
+}
+
+/// What [`Painter::effect`] records: the effect, its textures and floats, and the image drawn where
+/// the GPU cannot run it.
+#[derive(Clone)]
+struct EffectItem {
+    id: i32,
+    inputs: [i32; sys::BK_EFFECT_MAX_INPUTS],
+    floats: Vec<f32>,
+    fallback: Option<Arc<Image>>,
 }
 
 /// Coordinates: up to four inline (rects, ovals, text, images), more on the heap.
@@ -315,6 +328,8 @@ pub struct Painter {
     segments: Vec<u32>,
     widgets: Vec<(Key, u32, Bounds<f32>)>,
     over: Vec<Bounds<f32>>,
+    /// The window draws on the GPU (set before each paint).
+    gpu: bool,
 }
 
 impl Painter {
@@ -527,6 +542,35 @@ impl Painter {
         self.push(Kind::Video(video.clone(), fit), Self::corners(bounds), Rgba::TRANSPARENT);
     }
 
+    /// Whether the window being painted is drawn by a GPU renderer right now (the first frames
+    /// of a GPU window use the software raster while the device starts; off-screen drawing is
+    /// software). A paint callback that has both a GPU effect and a CPU way to draw picks one.
+    #[must_use]
+    pub const fn is_gpu(&self) -> bool {
+        self.gpu
+    }
+
+    /// Set by the window before it paints.
+    pub(crate) const fn set_gpu(&mut self, on: bool) {
+        self.gpu = on;
+    }
+
+    /// A GPU effect over `bounds` (see [`crate::shader`]): `inputs` are the BUI textures it samples
+    /// (`Image::texture`; at most [`ShaderEffect::MAX_INPUTS`], the rest are ignored), `floats` its
+    /// `U[..]` (at most [`ShaderEffect::MAX_FLOATS`]). The shader sees device pixels. Where the GPU
+    /// cannot run it, `fallback` is drawn fitted into `bounds` (nothing when `None`). Floats that
+    /// change every frame repaint the canvas every frame.
+    pub fn effect(&mut self, bounds: Bounds<f32>, effect: &ShaderEffect, inputs: &[i32], floats: &[f32],
+                  fallback: Option<&Arc<Image>>) {
+        let mut slots = [0; sys::BK_EFFECT_MAX_INPUTS];
+        for (slot, id) in slots.iter_mut().zip(inputs) {
+            *slot = *id;
+        }
+        let floats = floats[..floats.len().min(ShaderEffect::MAX_FLOATS)].to_vec();
+        let item = EffectItem { id: effect.id(), inputs: slots, floats, fallback: fallback.cloned() };
+        self.push(Kind::Effect(Box::new(item)), Self::corners(bounds), Rgba::TRANSPARENT);
+    }
+
     fn file(&mut self, bounds: Bounds<f32>, src: &str, fit: i32, frame: Option<u32>) {
         if !src.is_empty() {
             let start = self.text.len() as u32;
@@ -606,6 +650,15 @@ impl Painter {
                 ci.type_ = sys::BK_ITEM_IMAGE;
                 ci.video = v.as_ptr();
                 ci.fit = *fit;
+            }
+            Kind::Effect(e) => {
+                ci.type_ = sys::BK_ITEM_EFFECT;
+                ci.effect = e.id;
+                ci.effect_inputs = e.inputs;
+                ci.effect_floats = e.floats.as_ptr();
+                ci.n_effect_floats = e.floats.len() as i32;
+                ci.fit = sys::BK_FIT_FILL;
+                ci.imbuf = e.fallback.as_ref().map_or(std::ptr::null(), |img| img.as_ptr());
             }
             Kind::File { start, fit, frame } => {
                 ci.type_ = sys::BK_ITEM_IMAGE;
@@ -730,6 +783,12 @@ impl Painter {
                 Kind::Image(img) => (6u8, Arc::as_ptr(img) as usize).hash(h),
                 Kind::File { start, fit, frame } => (7u8, self.arena_str(*start), fit, frame).hash(h),
                 Kind::Video(v, fit) => (8u8, std::rc::Rc::as_ptr(v) as usize, fit).hash(h),
+                Kind::Effect(e) => {
+                    // the floats move every frame: a changed value is a changed layer
+                    let fallback = e.fallback.as_ref().map_or(0, |img| Arc::as_ptr(img) as usize);
+                    (9u8, e.id, e.inputs, fallback).hash(h);
+                    e.floats.iter().for_each(|v| v.to_bits().hash(h));
+                }
             }
             if let Some(c) = it.clip {
                 (c.origin.x.to_bits(), c.origin.y.to_bits(), c.size.width.to_bits(), c.size.height.to_bits()).hash(h);

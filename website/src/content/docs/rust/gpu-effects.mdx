@@ -1,0 +1,95 @@
+---
+title: GPU effects
+description: Run your own pixel shader inside a canvas on the GPU, with a fallback image where the GPU cannot run it.
+section: Rust
+order: 92
+languages: ["rust"]
+sources: ["gpu/intern/gpu_effect.c", "gpu/intern/gpu_effect.h", "gpu/include/GPU_raster.h", "gpu/intern/gpu_d3d11.c", "gpu/intern/gpu_gl.c", "gpu/tests/test_gpu_effect.c", "kit/include/BUI_kit.h", "kit/intern/kit_frame.c", "bindings/rust/blenderui/src/shader.rs", "bindings/rust/blenderui/src/paint.rs", "bindings/rust/blenderui/examples/gpu_effect.rs", "CHANGELOG.md"]
+---
+
+A **GPU effect** is a small program of yours, a *pixel shader*, that the GPU runs for every pixel of a box in a canvas. You get gradients, distortions, blurs and transitions that would be too slow to compute on the CPU, drawn in paint order with the rest of your UI.
+
+Each effect declares its **inputs** (BUI textures it can sample) and its **floats** (numbers you change every frame). Where the GPU cannot run it, the canvas draws a **fallback image** you gave instead, so a window never goes blank.
+
+## Draw one
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+let tint = ShaderEffect::new("tint", SOURCE, 1, 1)?;   // 1 input texture, 1 float
+rsx! {
+    <div w-72 h-72>
+        { canvas(move |bounds, p| p.effect(bounds, &tint, &[texture], &[t], Some(&fallback))) }
+    </div>
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+let tint = ShaderEffect::new("tint", SOURCE, 1, 1)?;   // 1 input texture, 1 float
+div().w(px(288.0)).h(px(288.0)).child(
+    canvas(move |bounds, p| p.effect(bounds, &tint, &[texture], &[t], Some(&fallback))))
+```
+
+</Tab>
+</Tabs>
+
+`SOURCE` is the shader:
+
+```glsl
+vec4 effect(vec2 p) {
+    vec2 uv = p / box_size;                          // 0..1 over the box
+    vec4 t = input_color(0, uv * input_size(0));     // the texture, bilinear
+    vec3 g = vec3(uv.x, uv.y, 0.5 + 0.5 * sin(U[0]));
+    return vec4(mix(g, t.rgb, 0.5 * t.a), 1.0);      // premultiplied RGBA
+}
+```
+
+`texture` is a BUI texture id (`Image::texture()`); `fallback` is an `Arc<Image>`. Floats that change every frame repaint the canvas every frame. `examples/gpu_effect.rs` runs this next to a deliberately broken shader.
+
+## The shader language
+
+One source runs on every renderer. It is GLSL with a small set of compatibility macros, the way Blender feeds its GLSL to other backends. Direct3D 11 gets an HLSL prelude that maps the names; OpenGL takes the source as it is.
+
+| You write | Meaning |
+| --- | --- |
+| `vec4 effect(vec2 p)` | Required. `p` is the pixel inside the box in device pixels (centres at .5). Return **premultiplied** RGBA. |
+| `vec2 box_size` | The box's size in device pixels. |
+| `float U[i]` | The floats you pass, `i` below the `n_floats` you declared. |
+| `vec4 input_color(int i, vec2 texel)` | Input texture `i` at a position in texels: bilinear, clamped at the edges, premultiplied. |
+| `vec2 input_size(int i)` | Its size in texels. |
+| `float`, `int`, `bool`, `vec2`, `vec3`, `vec4` | Types (`float2`, `float3`, `float4` work too). One-scalar constructors such as `vec3(0.5)` work on both renderers. |
+| `mix fract mod clamp step smoothstep abs sign floor ceil min max pow exp exp2 log sqrt inversesqrt sin cos tan asin acos atan length distance dot normalize` | The usual built-ins. Use `atan2(y, x)` for the two-argument arc tangent. |
+
+Keep to a portable subset: no matrices, no structs or global variables (use `out` and `inout` parameters), no arrays other than `U`, and do not name things `sample`, `line`, `point`, `half`, `texture`, `sampler`, `noise` or `pass` (Direct3D reserves them). An input id with no live texture samples as opaque white.
+
+## Errors and fallbacks
+
+Nothing compiles until a GPU frame first draws the effect. Then `ShaderEffect::error()` is empty when it compiled and holds the compiler's log when it did not:
+
+```text
+effect(1,40-53): error X3004: undeclared identifier 'no_such_symbol'
+```
+
+Line numbers count from the first line of your source. A failed effect draws its fallback (nothing without one), never crashes, and is not retried. The fallback is also what the software renderer, a Windows system without `d3dcompiler_47.dll` and an off-screen CSS effect layer draw.
+
+`Painter::is_gpu()` tells a paint callback whether its window is drawn by the GPU, so code that has both a shader and a CPU renderer can choose. `GpuTarget` renders effects off-screen into pixels, for tests and thumbnails.
+
+## Limits
+
+- At most 8 input textures, 256 floats and 65536 bytes of source; `ShaderEffect::new` rejects more.
+- Direct3D 11 compiles shader model 4.0 with `d3dcompiler_47.dll`, loaded when the first effect is drawn (nothing is linked). OpenGL needs 3.3.
+- The macOS renderer has no effects yet; it draws the fallback.
+- Effects and their textures belong to the thread that paints.
+
+<CardGrid>
+  <Card title="Effects and animations" href="docs/rust/effects-and-animations/" icon="layers" kicker="Rust">
+    CSS effects and motion for elements.
+  </Card>
+  <Card title="Events" href="docs/rust/events/" icon="zap" kicker="Rust">
+    request_animation_frame drives an effect every frame.
+  </Card>
+</CardGrid>

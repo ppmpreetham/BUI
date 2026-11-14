@@ -490,9 +490,25 @@ void BK_image_prefetch(const char *src, int w, int h, int fit);
 void BK_image_clear_cache(void); /* drops every settled entry */
 void BK_image_exit(void);        /* joins the workers, frees the cache */
 
-/* -- canvas (Tk Canvas, QPainter) -------------------------------------------------- */
+/* -- GPU effects: application shaders ------------------------------------------------
+ * A canvas item (BK_ITEM_EFFECT) that runs a pixel shader of the app's over its box on the GPU
+ * renderers (Direct3D 11, OpenGL), in paint order. GPU_raster.h has the dialect and the
+ * BUI_effect_* calls; these are the kit's names for the same functions. Create an effect once,
+ * draw it every frame with its inputs and floats, free it when done. BK_effect_create returns an
+ * id > 0, or 0 for bad arguments (n_inputs 0..BK_EFFECT_MAX_INPUTS, n_floats
+ * 0..BK_EFFECT_MAX_FLOATS, a non-empty source of at most BK_EFFECT_MAX_SOURCE bytes); nothing
+ * compiles until a GPU frame draws it. BK_effect_error: the compile/link log of the last GPU
+ * attempt, "" when fine or not tried yet, NULL for an unknown id. */
+#define BK_EFFECT_MAX_INPUTS BUI_EFFECT_MAX_INPUTS
+#define BK_EFFECT_MAX_FLOATS BUI_EFFECT_MAX_FLOATS
+#define BK_EFFECT_MAX_SOURCE BUI_EFFECT_MAX_SOURCE
+#define BK_effect_create BUI_effect_create
+#define BK_effect_free BUI_effect_free
+#define BK_effect_error BUI_effect_error
+
+/* -- canvas (Tk Canvas, QPainter)-------------------------------------------------- */
 enum { BK_ITEM_RECT, BK_ITEM_OVAL, BK_ITEM_LINE, BK_ITEM_POLYGON, BK_ITEM_TEXT, BK_ITEM_ARC,
-       BK_ITEM_IMAGE, BK_ITEM_ROUNDRECT };
+       BK_ITEM_IMAGE, BK_ITEM_ROUNDRECT, BK_ITEM_EFFECT };
 typedef struct BKCanvasItem {
   int id, type;
   const float *coords; /* x0 y0 x1 y1 ... in canvas space */
@@ -521,6 +537,15 @@ typedef struct BKCanvasItem {
               * says; paused while off screen); n > 0 shows frame n - 1 */
   BKVideo *video; /* images: a video's current frame (borrowed, as imbuf) */
   int no_hit;     /* a canvas with `hititems` lets the pointer through this item */
+  /* BK_ITEM_EFFECT: a GPU shader (BK_effect_create) over the box x0 y0 x1 y1 (4 coords): the BUI
+   * textures it samples (BUI_texture_*; unused slots 0) and its floats (copied; the effect's
+   * n_floats are read, missing ones are 0). Where the GPU cannot run it (software raster, no
+   * shader compiler, a compile error: BK_effect_error) the image of this item is drawn instead:
+   * rgba / imbuf / src / video as for BK_ITEM_IMAGE, fitted into the box by `fit`; none: nothing. */
+  int effect;
+  int effect_inputs[BK_EFFECT_MAX_INPUTS];
+  const float *effect_floats;
+  int n_effect_floats;
 } BKCanvasItem;
 void BK_canvas_set_item(BKNode *canvas, const BKCanvasItem *item); /* insert or replace by id */
 void BK_canvas_add_item(BKNode *canvas, const BKCanvasItem *item);

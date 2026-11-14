@@ -1331,7 +1331,9 @@ impl Window {
         let scale = self.scale;
         {
             let _s = span(Phase::Paint);
+            let gpu = self.is_gpu();
             let p = &mut self.painter;
+            p.set_gpu(gpu);
             let kept = dirty.is_some_and(|d| p.repaint(&frame, &self.caches.styles, &mut self.caches.text, d, vp, app));
             if !kept {
                 p.reset();

@@ -10,6 +10,8 @@
 
 #include <stdint.h>
 
+#include "GPU_raster.h"
+
 /* instance kinds: keep in sync with gpu/shaders/bui_ui.hlsl */
 enum {
   BG_RECT = 0,
@@ -113,6 +115,18 @@ void bui_gpu_mesh(BuiGpu *g,
                   int tex,
                   int nearest,
                   const int clip[4]);
+
+/* An application shader over `rect` (x, y, w, h), clipped to the pixel box `clip` (x0, y0, x1,
+ * y1, non-empty), in paint order: what was recorded before is drawn first. The effect's pipeline
+ * is created on first use (gpu_effect.h; the log goes to BUI_effect_error). 0 when this device
+ * cannot run it: nothing is recorded and the caller draws a fallback. */
+int bui_gpu_effect(BuiGpu *g,
+                   int effect,
+                   const float rect[4],
+                   const int inputs[BUI_EFFECT_MAX_INPUTS],
+                   const float *floats,
+                   int n_floats,
+                   const int clip[4]);
 
 /* Texture registry shared by the renderers (gpu_raster.c). */
 typedef struct BuiTexView {

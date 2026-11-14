@@ -343,6 +343,46 @@ int BUI_gpu_default(void);
 void BUI_gpu_set_slug(int on);
 int BUI_gpu_slug(void);
 
+/* -- effects: application shaders --------------------------------------------
+ * A full-box pixel shader the GPU renderers run: the app gives GLSL-like source
+ * (one portable dialect, see gpu/intern/gpu_effect.c and the "GPU effects" docs
+ * page), the Direct3D 11 backend compiles it at run time with d3dcompiler_47.dll
+ * (loaded dynamically), the OpenGL backend through the driver. As Blender does
+ * with its shader create-infos, the interface is declared up front (inputs,
+ * floats), the compile/link log is kept as the error string, and the shader is
+ * created on the first frame that draws it.
+ *
+ * The source defines `vec4 effect(vec2 p)`: p is the pixel inside the box (pixel
+ * centres at .5), the result is premultiplied RGBA. Available: `vec2 box_size`,
+ * `float U[n_floats]`, `vec4 input_color(int i, vec2 texel)` (input texture i,
+ * bilinear, clamped, premultiplied), `vec2 input_size(int i)`.
+ *
+ * Create, update and free effects on the thread that draws. */
+#define BUI_EFFECT_MAX_INPUTS 8
+#define BUI_EFFECT_MAX_FLOATS 256
+#define BUI_EFFECT_MAX_SOURCE 65536
+/* An id > 0, or 0 for bad arguments (no source or one over BUI_EFFECT_MAX_SOURCE
+ * bytes, n_inputs outside 0..8, n_floats outside 0..256). Nothing is compiled yet. */
+int BUI_effect_create(const char *name, const char *source, int n_inputs, int n_floats);
+void BUI_effect_free(int id);
+/* The compile/link log of the last GPU attempt: "" when it went fine or no GPU
+ * renderer tried it yet; NULL for an id that is not live. */
+const char *BUI_effect_error(int id);
+/* Draws effect `effect` over x, y, w, h (within the clip) on the GPU, sampling the
+ * BUI textures `inputs[0 .. n_inputs of the effect)` and reading `n_floats` floats
+ * (the rest are 0). Returns 1 when it was drawn; 0 when it cannot run here (software
+ * raster, no compiler, compile error: see BUI_effect_error), nothing was drawn and
+ * the caller draws its fallback. */
+int BUI_raster_effect(BuiRaster *r,
+                      float x,
+                      float y,
+                      float w,
+                      float h,
+                      int effect,
+                      const int inputs[BUI_EFFECT_MAX_INPUTS],
+                      const float *floats,
+                      int n_floats);
+
 /* A BuiGpuSink that renders into `r` (user pointer is the raster). */
 const BuiGpuSink *BUI_raster_sink(BuiRaster *r);
 

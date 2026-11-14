@@ -78,6 +78,13 @@ pub const BK_ITEM_TEXT: c_int = 4;
 pub const BK_ITEM_ARC: c_int = 5;
 pub const BK_ITEM_IMAGE: c_int = 6;
 pub const BK_ITEM_ROUNDRECT: c_int = 7;
+/// A GPU shader over the item's box (`BUI_effect_create`); the item's image is the fallback.
+pub const BK_ITEM_EFFECT: c_int = 8;
+
+/// The most textures an effect samples, the most floats it reads, the longest source (bytes).
+pub const BK_EFFECT_MAX_INPUTS: usize = 8;
+pub const BK_EFFECT_MAX_FLOATS: usize = 256;
+pub const BK_EFFECT_MAX_SOURCE: usize = 65536;
 
 // Font flags (GPU_raster.h).
 pub const BUI_FONT_BOLD: c_int = 1;
@@ -121,6 +128,11 @@ pub struct BKCanvasItem {
     pub video: *mut BKVideo,
     /// A canvas with `hititems` lets the pointer through this item.
     pub no_hit: c_int,
+    /// `BK_ITEM_EFFECT`: the effect, the BUI textures it samples (unused: 0) and its floats (copied).
+    pub effect: c_int,
+    pub effect_inputs: [c_int; BK_EFFECT_MAX_INPUTS],
+    pub effect_floats: *const c_float,
+    pub n_effect_floats: c_int,
 }
 
 /// A `<video>` (`BKVideo`): the kit's player (OS decoders; frames in one GPU
@@ -276,6 +288,13 @@ unsafe extern "C" {
     pub fn BK_imbuf_texture_update(ib: *const BKImBuf, frame: c_int, tex: c_int) -> c_int;
     /// Frees a BUI texture (`BK_imbuf_texture`, Dear ImGui user textures).
     pub fn BUI_texture_free(tex: c_int);
+
+    // GPU effects (application shaders; `BK_effect_*` in BUI_kit.h are macros for these)
+    /// An id > 0, or 0 for bad arguments (see `BK_EFFECT_MAX_*`). Nothing compiles until a GPU frame draws it.
+    pub fn BUI_effect_create(name: *const c_char, source: *const c_char, n_inputs: c_int, n_floats: c_int) -> c_int;
+    pub fn BUI_effect_free(id: c_int);
+    /// The compile/link log of the last GPU attempt ("" when fine or not tried yet); null for an unknown id.
+    pub fn BUI_effect_error(id: c_int) -> *const c_char;
     pub fn BK_imbuf_decode_frame(data: *const c_void, len: usize, frame: c_int, max_w: c_int, max_h: c_int)
                                  -> *mut BKImBuf;
     pub fn BK_anim_open(data: *const c_void, len: usize, max_w: c_int, max_h: c_int) -> *mut BKAnim;
@@ -417,6 +436,14 @@ unsafe extern "C" {
     pub fn BUI_raster_width(r: *const BuiRaster) -> c_int;
     pub fn BUI_raster_height(r: *const BuiRaster) -> c_int;
     pub fn BUI_raster_pixels(r: *const BuiRaster) -> *const u32;
+    pub fn BUI_raster_begin_frame(r: *mut BuiRaster, width: c_int, height: c_int);
+    pub fn BUI_raster_end_frame(r: *mut BuiRaster);
+    /// Offscreen GPU rendering with a null window (waits for the device); 0 when there is none.
+    pub fn BUI_raster_gpu_attach(r: *mut BuiRaster, window_handle: *mut c_void, wait: c_int) -> c_int;
+    pub fn BUI_raster_is_gpu(r: *const BuiRaster) -> c_int;
+    /// An application shader over a box, on the GPU: 1 when drawn, 0 when it cannot run (the caller draws its fallback).
+    pub fn BUI_raster_effect(r: *mut BuiRaster, x: c_float, y: c_float, w: c_float, h: c_float, effect: c_int,
+                             inputs: *const c_int, floats: *const c_float, n_floats: c_int) -> c_int;
     pub fn BUI_text_measure(family: *const c_char, flags: c_int, size: c_float,
                             utf8: *const c_char, len: c_int, r_width: *mut c_float) -> c_int;
     /// Registers a TrueType/OpenType font (copied) for `family` + style flags.

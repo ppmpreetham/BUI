@@ -649,6 +649,10 @@ Not done yet:
 - **`all`:** counted as parsed-only. Its CSS-wide keywords (`all: initial`, `inherit`, `unset`, `revert`) reset an element's computed style; there's nothing else it can take.
 - **Box sizing:** the default is `border-box` (like Tailwind's preflight), not CSS's `content-box`.
 
+## GPU effects
+
+A canvas can run your own pixel shader on the GPU: `ShaderEffect::new(name, glsl_source, n_inputs, n_floats)` declares it, `painter.effect(bounds, &effect, &texture_ids, &floats, Some(&fallback_image))` draws it in paint order, and `effect.error()` returns the compile log. The source is GLSL with a small compat set (`vec4 effect(vec2 p)`, `box_size`, `U[i]`, `input_color(i, texel)`), compiled at run time by Direct3D 11 and OpenGL; the software renderer draws the fallback. See [GPU effects](../website/src/content/docs/rust/gpu-effects.mdx) and `examples/gpu_effect.rs`.
+
 ## Performance vs gpui
 
 The same UI on blenderui (GPU renderer and default software raster),
