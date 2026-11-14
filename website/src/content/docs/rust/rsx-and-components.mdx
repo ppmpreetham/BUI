@@ -258,7 +258,8 @@ What `#[component]` does with your function:
 
 ### Passing props
 
-- `label="Clicks"` passes a literal. Prop setters take `impl Into<T>`, so a string literal works for a `String` prop.
+- `label="Clicks"` passes a literal. Prop setters take `impl Into<T>`, so a string literal works for a `String` prop (no `.to_string()` at the call site).
+- **Text you show as it is: use a `SharedString` prop** (`title: SharedString`, which is `Cow<'static, str>`). A literal is borrowed, so it costs no allocation and `{title.clone()}` is free; a `String` is moved in; and `{title}` needs no `.to_string()`. A `&str` prop can't be shown directly, because an element owns its text.
 - `start={1}` passes an expression. Number and `bool` props take their exact type, so integer literals infer correctly.
 - Boolean shorthand: a bare `<toggle on />` passes `true`.
 

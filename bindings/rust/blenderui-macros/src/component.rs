@@ -4,14 +4,17 @@
 //! #[component]
 //! fn profile(username: &str, likes: u32) {
 //!     let (n, set_n) = use_state(likes);
-//!     rsx! { <span onClick={move || set_n(n() + 1)}>{username} " " {n()}</span> }
+//!     rsx! { <span onClick={move || set_n(n() + 1)}>{username.to_string()} " " {n()}</span> }
 //! }
 //! // used as <profile username="Alice" likes={3} />
 //! ```
 //!
 //! Expands to a props struct named like the function, with an `IntoElement`
 //! impl that runs the body in a component scope (hooks, context). `&str`
-//! props are stored as `String`; the body still sees `&str`.
+//! props are stored as `String`; the body still sees `&str`, and an element
+//! owns its text, so `{username}` needs `.to_string()`. For text shown as it
+//! is, take a `SharedString` prop: `<profile username="Alice" />` borrows the
+//! literal (no allocation) and `{username}` needs no conversion.
 
 use proc_macro::{Delimiter, Group, TokenStream, TokenTree};
 
