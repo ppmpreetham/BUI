@@ -563,11 +563,6 @@ impl<E: crate::element::IntoElement> crate::element::IntoElement for Keyed<E> {
 /// A component's props, built field by field (`rsx!` calls the setters, then
 /// [`build`]). Implemented by `#[component]` and `#[derive(Props)]`
 /// builders once every required prop is set.
-#[diagnostic::on_unimplemented(
-    message = "a required prop is missing: `{Self}`",
-    label = "set the props named `missing_<prop>` in this builder's type",
-    note = "optional props are `Option<T>` (or `children`); every other prop must be given"
-)]
 pub trait Complete {
     type Props;
     fn finish(self) -> Self::Props;
@@ -576,6 +571,41 @@ pub trait Complete {
 /// A required prop that has been set (props builders' type state).
 #[doc(hidden)]
 pub struct Set;
+
+/// Implemented by [`Set`] only: a builder is complete when every required
+/// prop's marker (`Component_needs_prop`) is `Set`. The marker's name is the error.
+#[diagnostic::on_unimplemented(
+    message = "missing required prop: `{Self}`",
+    label = "this prop must be given",
+    note = "optional props are `Option<T>` (or `children`); every other prop must be given"
+)]
+#[doc(hidden)]
+pub trait Provided {}
+impl Provided for Set {}
+
+/// Markers telling the two `IntoOptProp` impls apart (props builders).
+#[doc(hidden)]
+pub struct ViaInto;
+#[doc(hidden)]
+pub struct ViaOption;
+
+/// What an `Option<T>` prop's setter accepts: a plain value (anything
+/// `Into<T>`, as in `<c x="a" />`) or an `Option` of one (`<c x={maybe} />`;
+/// `None` leaves the prop unset).
+#[doc(hidden)]
+pub trait IntoOptProp<T, M> {
+    fn into_opt(self) -> Option<T>;
+}
+impl<T, U: Into<T>> IntoOptProp<T, ViaInto> for U {
+    fn into_opt(self) -> Option<T> {
+        Some(self.into())
+    }
+}
+impl<T, U: Into<T>> IntoOptProp<T, ViaOption> for Option<U> {
+    fn into_opt(self) -> Option<T> {
+        self.map(Into::into)
+    }
+}
 
 #[doc(hidden)]
 pub fn build<B: Complete>(builder: B) -> B::Props {

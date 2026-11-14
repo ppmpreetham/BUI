@@ -19,7 +19,7 @@
 //! | `animate={{ x: 100 }}`         | `.animate(vars!{ x: 100 })` (`{{ }}`: a vars object) |
 //! | `animate="visible"`            | `.animate("visible")` (a variant; also initial, exit, while*) |
 
-use proc_macro::{Delimiter, Group, Spacing, TokenStream, TokenTree};
+use proc_macro::{Delimiter, Group, Spacing, Span, TokenStream, TokenTree};
 
 type R<T> = Result<T, String>;
 
@@ -213,6 +213,7 @@ impl P<'_> {
             let kids = self.children_until("")?;
             return Ok(fragment(kids));
         }
+        let tag_span = self.peek().map_or_else(Span::call_site, TokenTree::span);
         let written = self.name()?;
         // `<motion.div>` is `<div>`: every element takes Motion's props
         let tag = written.strip_prefix("motion.").unwrap_or(&written).to_string();
@@ -232,6 +233,7 @@ impl P<'_> {
         };
         let mut fields = TokenStream::new(); // component props: `.name(value)` builder calls
         let mut key: Option<TokenStream> = None; // `key=`: hook identity
+        let mut spread: Option<TokenStream> = None; // `<chat {...props} />`: a ready props value
         let mut classes: Vec<String> = Vec::new(); // bare utility attributes
         loop {
             match self.peek() {
@@ -244,11 +246,20 @@ impl P<'_> {
                     if !classes.is_empty() {
                         base.extend(ts(&format!(".class({:?})", classes.join(" "))));
                     }
-                    return Ok(if component { component_expr(&tag, fields, Vec::new(), key) } else { keyed(base, key) });
+                    return if component { component_or_spread(&tag, tag_span, fields, Vec::new(), key, spread) } else { Ok(keyed(base, key)) };
                 }
                 Some(TokenTree::Punct(p)) if p.as_char() == '>' => {
                     self.i += 1;
                     break;
+                }
+                Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace && component => {
+                    // `{...props}`: the component's props struct as a value
+                    let v: Vec<TokenTree> = g.stream().into_iter().collect();
+                    if !v.len().checked_sub(3).is_some_and(|_| v[..3].iter().all(|t| is(Some(t), '.'))) {
+                        return Err(format!("rsx!: `{g}` on <{tag}>: write `{{...props}}` to pass a props value"));
+                    }
+                    spread = Some(v[3..].iter().cloned().collect());
+                    self.i += 1;
                 }
                 Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace && !component => {
                     // `{...spread}` attributes: a builder closure `{|el| el.w(px(3.))}`
@@ -295,6 +306,8 @@ impl P<'_> {
                         };
                         if name == "key" {
                             key = Some(v);
+                        } else if is_bare_none(&v) {
+                            // `x={None}` leaves the prop out (a bare `None` has no type to infer)
                         } else {
                             fields.extend(ts(&format!(".{}", name.replace('-', "_"))));
                             fields.extend([TokenTree::Group(Group::new(Delimiter::Parenthesis, v))]);
@@ -310,7 +323,7 @@ impl P<'_> {
         }
         let kids = self.children_until(&written)?;
         if component {
-            return Ok(component_expr(&tag, fields, kids, key));
+            return component_or_spread(&tag, tag_span, fields, kids, key, spread);
         }
         for k in kids {
             base.extend(k.call());
@@ -372,10 +385,27 @@ fn keyed(el: TokenStream, key: Option<TokenStream>) -> TokenStream {
     }
 }
 
+/// `<chat {...props} />` is the props value itself (which is an element); it can't be mixed with
+/// other props or children, since a struct value has no builder to add them to.
+fn component_or_spread(tag: &str, tag_span: Span, fields: TokenStream, kids: Vec<Child>, key: Option<TokenStream>,
+                       spread: Option<TokenStream>) -> R<TokenStream> {
+    let Some(value) = spread else { return Ok(component_expr(tag, tag_span, fields, kids, key)) };
+    if !fields.is_empty() || !kids.is_empty() {
+        return Err(format!("rsx!: <{tag} {{...props}}> takes no other props or children"));
+    }
+    Ok(keyed(value, key))
+}
+
+/// A lone `None`: an optional prop given nothing.
+fn is_bare_none(v: &TokenStream) -> bool {
+    let mut it = v.clone().into_iter();
+    matches!((it.next(), it.next()), (Some(TokenTree::Ident(i)), None) if i.to_string() == "None")
+}
+
 /// `<Card a={x}>kids</Card>` -> `build(Card::__builder().a(x).children(vec![..]))`:
 /// `Option` props and `children` may be left out (`#[component]` and
 /// `#[derive(Props)]` generate the builder).
-fn component_expr(tag: &str, mut fields: TokenStream, kids: Vec<Child>, key: Option<TokenStream>) -> TokenStream {
+fn component_expr(tag: &str, tag_span: Span, mut fields: TokenStream, kids: Vec<Child>, key: Option<TokenStream>) -> TokenStream {
     if !kids.is_empty() {
         // { let mut v = Vec::new(); v.push(..); v.extend(..); v }
         let mut body = ts("let mut __v: ::std::vec::Vec<::blenderui::element::AnyElement> = ::std::vec::Vec::new();");
@@ -400,7 +430,11 @@ fn component_expr(tag: &str, mut fields: TokenStream, kids: Vec<Child>, key: Opt
         fields.extend([TokenTree::Group(Group::new(Delimiter::Parenthesis,
             TokenStream::from(TokenTree::Group(Group::new(Delimiter::Brace, body)))))]);
     }
-    let mut chain = ts(&format!("{tag}::__builder()"));
+    // the tag's own identifier keeps its span, so ctrl-click on `<Card />` opens `Card` (and no
+    // other token points at the tag, which would add `blenderui`'s lib.rs as a second target)
+    let mut head: Vec<TokenTree> = ts(&format!("{tag}::__builder()")).into_iter().collect();
+    head[0].set_span(tag_span);
+    let mut chain: TokenStream = head.into_iter().collect();
     chain.extend(fields);
     let mut out = ts("::blenderui::hooks::build");
     out.extend([TokenTree::Group(Group::new(Delimiter::Parenthesis, chain))]);

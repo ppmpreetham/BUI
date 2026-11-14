@@ -338,6 +338,28 @@ impl IntoElement for Card {
 }
 ```
 
+### Props as a struct
+
+Keep the props in a struct and destructure it in the signature. `#[derive(Props)]` gives the struct its builder, and `#[component]` makes the function the struct's `IntoElement`, with the function's name as the tag:
+
+```rust
+#[derive(Props)]
+struct ChatProps {
+    title: SharedString,
+    unread: bool,
+    note: Option<SharedString>,
+}
+
+#[component]
+fn chat(ChatProps { title, unread, note }: ChatProps) {
+    rsx! { <div class="flex">{title.to_string()}</div> }
+}
+
+// <chat title="Alice" unread={true} />
+```
+
+Use a struct pattern (`ChatProps { .. }: ChatProps`); a plain `props: ChatProps` is read as a single prop named `props`. Because the tag is an alias of the struct, one props struct serves one component.
+
 ## Three component styles
 
 BUI speaks three dialects of the same idea. Mix them freely; they share one hook store.

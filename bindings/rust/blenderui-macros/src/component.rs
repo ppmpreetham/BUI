@@ -46,6 +46,9 @@ fn expand(input: TokenStream) -> Result<TokenStream, String> {
         Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace => g.clone(),
         _ => return Err("#[component]: expected a body".into()),
     };
+    if let Some(out) = struct_props(&name, &toks[..fn_at], &params, &body) {
+        return Ok(out);
+    }
     // props: `name: Type` split at top-level commas (angle brackets count)
     let mut props: Vec<(String, TokenStream)> = Vec::new();
     let mut cur: Vec<TokenTree> = Vec::new();
@@ -107,6 +110,45 @@ fn expand(input: TokenStream) -> Result<TokenStream, String> {
     out.extend([TokenTree::Group(Group::new(Delimiter::Brace, method))]);
     out.extend(builder(&name, &vis_string(&toks[..fn_at]), &typed)?);
     Ok(out)
+}
+
+/// `fn chat(ChatProps { title, .. }: ChatProps)`: the props are a `#[derive(Props)]` struct that
+/// already has the builder. The tag `<chat>` is an alias of the struct, and the struct gets the
+/// `IntoElement` impl that runs the body, so nothing is declared twice.
+fn struct_props(name: &str, head: &[TokenTree], params: &TokenStream, body: &Group) -> Option<TokenStream> {
+    let p: Vec<TokenTree> = params.clone().into_iter().collect();
+    let colon = p.iter().position(|t| matches!(t, TokenTree::Punct(c) if c.as_char() == ':'))?;
+    // a struct pattern (`Name { a, b, .. }`), not a plain `prop: Type`
+    if !matches!(p.get(colon.checked_sub(1)?), Some(TokenTree::Group(g)) if g.delimiter() == Delimiter::Brace) {
+        return None;
+    }
+    let pattern: TokenStream = p[..colon].iter().cloned().collect();
+    let ty: TokenStream = p[colon + 1..].iter().cloned().collect();
+    let mut out = ts("#[allow(non_camel_case_types)]");
+    out.extend(vis_stream(head));
+    out.extend(ts(&format!("type {name} = ")));
+    out.extend(ty.clone());
+    out.extend(ts(";"));
+    let mut inner = ts("let ");
+    inner.extend(pattern);
+    inner.extend(ts(" = self; ::blenderui::hooks::component"));
+    let mut closure = ts("|| ::blenderui::element::IntoElement::into_any_element");
+    closure.extend([TokenTree::Group(Group::new(Delimiter::Parenthesis, body_expr(body.clone())))]);
+    inner.extend([TokenTree::Group(Group::new(Delimiter::Parenthesis, closure))]);
+    let mut method = ts("#[allow(unused_braces)] fn into_any_element(self) -> ::blenderui::element::AnyElement");
+    method.extend([TokenTree::Group(Group::new(Delimiter::Brace, inner))]);
+    out.extend(ts("impl ::blenderui::element::IntoElement for"));
+    out.extend(ty);
+    out.extend([TokenTree::Group(Group::new(Delimiter::Brace, method))]);
+    Some(out)
+}
+
+/// The tokens before `fn` without attributes: visibility.
+fn vis_stream(head: &[TokenTree]) -> TokenStream {
+    head.iter()
+        .filter(|t| !matches!(t, TokenTree::Punct(p) if p.as_char() == '#'))
+        .filter(|t| !matches!(t, TokenTree::Group(g) if g.delimiter() == Delimiter::Bracket))
+        .cloned().collect()
 }
 
 fn vis_string(toks: &[TokenTree]) -> String {
@@ -204,7 +246,7 @@ fn option_inner(ty: &str) -> Option<String> {
 
 /// A typestate props builder (`<Name>::__builder()`): `Option<T>` props and
 /// `children` may be left out; leaving out any other prop is a compile
-/// error naming it (`Name_missing_<prop>` in the builder's type).
+/// error naming it (`<prop>` in the builder's type).
 fn builder(name: &str, vis: &str, fields: &[(String, String)]) -> Result<TokenStream, String> {
     enum Kind {
         Required(usize),
@@ -227,7 +269,10 @@ fn builder(name: &str, vis: &str, fields: &[(String, String)]) -> Result<TokenSt
     let g = gens.join(", ");
     let missing: Vec<String> = fields.iter().zip(&kinds)
         .filter(|(_, k)| matches!(k, Kind::Required(_)))
-        .map(|((n, _), _)| format!("{name}_missing_{n}")).collect();
+        .map(|((n, _), _)| n.clone()).collect();
+    // a missing prop is a marker type named after the prop, in a module of its own,
+    // so the error names just the prop
+    let mark = format!("__{name}_props");
     let pd = "::core::marker::PhantomData";
     // setters take `impl Into<T>` ("x" for a String prop), except numbers,
     // where a generic would stop integer literals from inferring
@@ -237,9 +282,11 @@ fn builder(name: &str, vis: &str, fields: &[(String, String)]) -> Result<TokenSt
         if NUM.contains(&ty.trim()) { ty.to_string() } else { format!("impl ::core::convert::Into<{ty}>") }
     };
     let mut out = String::new();
+    out += &format!("#[doc(hidden)] #[allow(non_camel_case_types, non_snake_case)] mod {mark} {{");
     for m in &missing {
-        out += &format!("#[doc(hidden)] #[allow(non_camel_case_types)] {vis} struct {m};\n");
+        out += &format!("pub struct {m};");
     }
+    out += "}\n";
     out += &format!("#[doc(hidden)] #[allow(non_camel_case_types, non_snake_case)] {vis} struct {b}<{g}> {{");
     for ((n, ty), k) in fields.iter().zip(&kinds) {
         match k {
@@ -253,7 +300,7 @@ fn builder(name: &str, vis: &str, fields: &[(String, String)]) -> Result<TokenSt
         _ => format!("{n}: ::core::default::Default::default(),"),
     }).collect();
     out += &format!("#[allow(non_camel_case_types)] impl {name} {{ #[doc(hidden)] {vis} fn __builder() -> {b}<{}> {{ {b} {{ {init} __s: {pd} }} }} }}\n",
-                    missing.join(", "));
+                    missing.iter().map(|m| format!("{mark}::{m}")).collect::<Vec<_>>().join(", "));
     out += &format!("#[allow(non_camel_case_types, non_snake_case)] impl<{g}> {b}<{g}> {{");
     for ((n, ty), k) in fields.iter().zip(&kinds) {
         match k {
@@ -265,18 +312,25 @@ fn builder(name: &str, vis: &str, fields: &[(String, String)]) -> Result<TokenSt
                                 param(ty), to.join(", "));
             }
             Kind::Optional(inner) => {
-                out += &format!("pub fn {n}(mut self, v: {}) -> Self {{ self.{n} = ::core::option::Option::Some(v.into()); self }}", param(inner));
+                if param(inner) == *inner {
+                    // numbers stay concrete so integer literals infer
+                    out += &format!("pub fn {n}(mut self, v: {inner}) -> Self {{ self.{n} = ::core::option::Option::Some(v); self }}");
+                } else {
+                    // a plain value, or an `Option` of one (`None` leaves it unset)
+                    out += &format!("pub fn {n}<__M>(mut self, v: impl ::blenderui::hooks::IntoOptProp<{inner}, __M>) -> Self {{ self.{n} = v.into_opt(); self }}");
+                }
             }
             Kind::Children => out += &format!("pub fn {n}(mut self, v: {ty}) -> Self {{ self.{n} = v; self }}"),
         }
     }
     out += "}\n";
-    let set = vec!["::blenderui::hooks::Set"; req].join(", ");
+    let set = gens.join(", ");
+    let bounds = gens.iter().map(|x| format!("{x}: ::blenderui::hooks::Provided")).collect::<Vec<_>>().join(", ");
     let fin: String = fields.iter().zip(&kinds).map(|((n, _), k)| match k {
         Kind::Required(_) => format!("{n}: match self.{n} {{ ::core::option::Option::Some(v) => v, ::core::option::Option::None => ::core::unreachable!() }},"),
         _ => format!("{n}: self.{n},"),
     }).collect();
-    out += &format!("impl ::blenderui::hooks::Complete for {b}<{set}> {{ type Props = {name}; fn finish(self) -> {name} {{ {name} {{ {fin} }} }} }}\n");
+    out += &format!("impl<{bounds}> ::blenderui::hooks::Complete for {b}<{set}> {{ type Props = {name}; fn finish(self) -> {name} {{ {name} {{ {fin} }} }} }}\n");
     out.parse().map_err(|e| format!("#[component]: builder for {name}: {e:?}"))
 }
 
