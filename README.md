@@ -377,6 +377,23 @@ theme.
 
 ## 7. Install
 
+**The `bui` command (any language).** One line installs it, and `bui new` makes a project in
+Rust, JavaScript or TypeScript (React, Svelte or plain DOM), Python, Lua or C, with that
+language's lints, checking its tools first and installing the newest BUI with its own package
+manager:
+
+```sh
+curl -LsSf https://bui.preetham.top/install.sh | sh     # Linux and macOS
+irm https://bui.preetham.top/install.ps1 | iex           # Windows (PowerShell)
+
+bui new my-app       # asks what to write it in, then makes it
+bui dev              # run it
+bui doctor           # find what is wrong with the setup, and fix it
+bui update           # update bui and the project's BUI packages
+```
+
+Or install by hand, per language:
+
 **Python.** You need CPython 3.11 or newer. Wheels are published for Windows,
 Linux and macOS, so there's nothing to compile. One package gives you all four
 Python APIs (tkinter syntax, Qt syntax, the Blender components and Dear ImGui):

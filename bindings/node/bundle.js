@@ -40,7 +40,7 @@ async function main ({ entry, out, bun, dev, console: keepConsole }) {
         // an ES module importing the entry: Bun's IIFE output runs a CommonJS
         // entry only when something imports it
         entrypoints: [writeWrapper(entry, out)], target: 'browser', format: 'iife', minify: true, define, plugins,
-        external: ['node:*', '*.node'],
+        external: ['node:*', '*.node', '@blender-ui/native-*'],
       })
   if (!r.success) {
     for (const log of r.logs) console.error(log)

@@ -1,5 +1,7 @@
 # Getting started
 
+**Fastest start: the `bui` command.** `curl -LsSf https://bui.preetham.top/install.sh | sh` (Windows: `irm https://bui.preetham.top/install.ps1 | iex`), then `bui new my-app`. It asks for a language (Rust, JavaScript or TypeScript, Python, Lua, C), makes a project with that language's lints and installs the newest BUI. `bui doctor` checks and fixes the setup, `bui update` updates. See [tools/bui](../tools/bui/README.md). The rest of this page builds BUI from source.
+
 ## 1. Build
 
 Requirements:

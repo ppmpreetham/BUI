@@ -1,0 +1,2 @@
+# shell scripts must keep LF line endings, whatever the checkout: a CRLF install.sh breaks `sh`
+*.sh text eol=lf

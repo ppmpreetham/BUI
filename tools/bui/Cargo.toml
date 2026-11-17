@@ -1,0 +1,73 @@
+[package]
+name = "bui-cli"
+description = "bui: create, run, check and update BUI apps (Rust, JavaScript, Python, Lua, C)"
+version = "0.5.1"
+edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/ppmpreetham/BUI"
+homepage = "https://bui.preetham.top"
+publish = false
+
+[[bin]]
+name = "bui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive", "env"] }
+clap_complete = "4.6.11"
+cliclack = "0.5.7"
+console = "0.16.6"
+flate2 = "1.1.11"
+include_dir = "0.7.4"
+self-replace = "1.5.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.11.1"
+tar = "0.4.46"
+tempfile = "3.27.0"
+toml = "1.2.1"
+ureq = { version = "3.5.2", features = ["json"] }
+zip = { version = "9.6.0", default-features = false, features = ["deflate"] }
+
+# Its own workspace: nothing else in the repo builds it (it needs no BUI code, so it builds in seconds).
+[workspace]
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -2 }
+pedantic = { level = "warn", priority = -2 }
+perf = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+inline_always = "allow"
+unseparated_literal_suffix = "allow"
+similar_names = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+absolute_paths = "allow"
+module_name_repetitions = "allow"
+doc_markdown = "allow"
+too_many_lines = "allow"
+unused_self = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+unreadable_literal = "allow"
+implicit_hasher = "allow"
+significant_drop_tightening = "warn"
+redundant_clone = "warn"
+use_self = "warn"
+redundant_else = "warn"
+or_fun_call = "warn"
+missing_const_for_fn = "warn"
+derive_partial_eq_without_eq = "warn"

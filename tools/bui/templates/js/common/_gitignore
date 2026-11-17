@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# `bui build` writes the app next to the project
+main
+main.exe
+*.log

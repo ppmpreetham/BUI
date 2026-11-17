@@ -1,0 +1,139 @@
+---
+title: The bui command
+sidebarLabel: The bui command
+description: One command that makes a BUI app in Rust, JavaScript, TypeScript, Python, Lua or C, checks your setup, fixes what is wrong and keeps everything up to date. Installs with one line on Windows, Linux and macOS.
+section: Start here
+order: 15
+sources: ["tools/bui/src/main.rs", "tools/bui/src/cli.rs", "tools/bui/src/create.rs", "tools/bui/src/doctor.rs", "tools/bui/src/update.rs", "tools/bui/src/tools.rs", "tools/bui/src/flavours/mod.rs", "tools/bui/src/project.rs", "website/public/install.sh", "website/public/install.ps1", ".github/workflows/cli.yml"]
+---
+
+`bui` is a small program that gets you from nothing to a running BUI window. It asks what you want to write, checks that the tools for it are installed (and offers to install them), makes the project with the language's own modern setup and lints, installs the newest BUI with the language's own package manager, and later tells you what is out of date and how to fix it.
+
+## Install it
+
+<LangTabs>
+<Tab label="Linux and macOS">
+
+```sh
+curl -LsSf https://bui.preetham.top/install.sh | sh
+```
+
+It downloads the newest release for your processor (x86_64 or arm64), checks its checksum, puts `bui` in `~/.bui/bin` and adds that folder to your shell's `PATH`. Open a new terminal afterwards.
+
+</Tab>
+<Tab label="Windows">
+
+```powershell
+irm https://bui.preetham.top/install.ps1 | iex
+```
+
+Works in Windows PowerShell and PowerShell 7. It puts `bui.exe` in `%USERPROFILE%\.bui\bin` and adds that folder to your user `PATH`.
+
+</Tab>
+<Tab label="From a checkout">
+
+```sh
+cargo install --path tools/bui --locked
+```
+
+This builds `tools/bui` from a clone of the repository in a minute or two. It needs a Rust toolchain.
+
+</Tab>
+</LangTabs>
+
+Both installers take `BUI_VERSION` (install that release instead of the newest) and `BUI_INSTALL_DIR`; `BUI_NO_MODIFY_PATH=1` leaves your shell profile alone. On Linux and macOS a new `bui` is written beside the old one and renamed over it in one step. On Windows the old `bui.exe` is moved to `bui.exe.old`, the new one moved in, and the old one put back if that fails; if the installer is killed between those two moves, rename `bui.exe.old` back to `bui.exe`.
+
+## Make an app
+
+```sh
+bui new my-app        # in a new folder
+bui init              # in the folder you are in
+```
+
+`bui` asks, one question at a time (every question is also a flag, see below):
+
+1. **The language.** Rust, JavaScript or TypeScript, Python, Lua or C.
+2. **That language's choices.** JavaScript asks for the framework (React, Svelte or plain DOM), TypeScript or JavaScript, and the runtime and package manager (Bun, or Node.js with npm or pnpm). Python asks for the API: Blender's components, Qt syntax or tkinter syntax.
+3. **The tools.** If something the language needs is missing (Rust, Bun, uv, a C compiler, CMake, LuaRocks...), `bui` shows the command that installs the newest one on your system and asks before it runs it.
+4. **The packages.** Before it writes anything, `bui` lists the exact commands that install BUI and the tooling at their newest versions (`bun add ...`, `cargo add blenderui`, ...) and asks whether to run them now. Say no and `bui doctor` does it later.
+5. **The project.** It writes the files (files you already have are kept: in a folder with a `package.json`, `bui init` adds only the scripts `bui` runs that are missing, says which, and stops, leaving your project files unchanged, if the file cannot be read, is not valid JSON, or is a React and TypeScript project whose `package.json` has `"type": "module"`; tools offered for install are checked before the file is read), offers to start a git repository, runs the install, and ends with every command you will need.
+
+What you get, by language:
+
+| Language | Dependencies | Lints and format |
+| --- | --- | --- |
+| Rust | `cargo add blenderui` | Clippy with the pedantic lints on, rustfmt |
+| JavaScript / TypeScript | `bun add`, `npm install` or `pnpm add` | Biome; TypeScript in strict mode |
+| Python | `uv add blenderui` (uv keeps Python, the environment and the lock file) | Ruff |
+| Lua | `luarocks install blenderui` into `lua_modules/` (nothing global) | Luacheck, StyLua and LuaLS settings |
+| C | CMake `FetchContent` at the newest release | `.clang-format`, `.clang-tidy` |
+
+Each project also gets a `bui.toml` that records what you chose, so `bui` knows how to run, build and check it from any folder inside it.
+
+## Run, build, check, update
+
+| Command | What it does |
+| --- | --- |
+| `bui dev [-- ARGS]` | Runs the app, restarting on every save where the language can (`cargo run`, `bun --watch`, `uv run`, ...) |
+| `bui build [-- ARGS]` | A release build (`cargo build --release`; a JavaScript app becomes one small executable) |
+| `bui doctor` | Looks at what this project needs, says what is wrong in one line each and offers the fixes |
+| `bui update` | Updates `bui` itself, then the BUI packages of the project you are in |
+| `bui docs` | Opens the documentation in your browser |
+| `bui completions <shell>` | Shell completions for bash, zsh, fish, PowerShell and elvish |
+
+Everything after `--` in `bui dev` and `bui build` is given to the tool underneath: `bui dev -- --release` runs `cargo run --release`, and `bui build -- --features foo` runs `cargo build --release --features foo`. Run `bui` with no command to see every command and option, and `--help` on any command for its own.
+
+### bui doctor
+
+`bui doctor` checks the project you are in and only what it needs: its toolchain, whether the packages are installed, whether BUI is the newest version. Outside a project it checks every toolchain. Each problem comes with the commands that fix it, shown before anything runs:
+
+```text
+✔ bui  0.5.1 (newest)
+my-app (React + TypeScript on bun)
+✔ Bun  1.4.4
+✘ node_modules  packages are not installed
+What would fix it
+  1. installs the packages
+      $ bun install
+Run 1 fix now? › yes
+```
+
+Nothing is installed or changed without your answer: `--fix` says yes for you, and without a terminal `bui doctor` only reports. `--all` checks every toolchain, and `--json` prints the results for editors and CI.
+
+### bui update
+
+`bui update` looks for a newer `bui` (a download with a progress bar, checked against its published checksum), then offers to bring the project's `blenderui` packages to the newest version. `bui update --check` only reports, and `bui update --cli-only` updates `bui` itself and leaves the project alone (what `bui doctor --fix` runs for an old `bui`). If a step that has to work fails, the command exits with an error instead of saying it is done.
+
+## Scripts, CI and flags
+
+Every question has a flag, so a script never has to answer one:
+
+```sh
+bui new my-app --language js --framework react --typescript --pm bun --yes
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `-l, --language rust\|js\|python\|lua\|c` | The language |
+| `--framework react\|svelte\|vanilla`, `--typescript` or `--javascript`, `--pm bun\|npm\|pnpm` | JavaScript |
+| `--api components\|qt\|tk` | Python |
+| `--yes`, `-y` | Answer every question with its default, and ask nothing |
+| `--no-install`, `--no-git` | Skip installing dependencies, or `git init` |
+| `--install-tools` | Install missing tools (Rust, Bun, uv...) without asking |
+| `--plain` | No animation or color. This is automatic without a terminal, in CI, or with `NO_COLOR` |
+
+Without a terminal and without `--yes`, a question that cannot be answered stops with a message instead of guessing.
+
+## Good to know
+
+<Callout type="note" title="Svelte runs on Node.js">
+`@blender-ui/svelte`'s loader fails under Bun today, so a Svelte project runs on Node.js (with npm or pnpm). React and plain DOM projects run on Bun or Node.js.
+</Callout>
+
+<Callout type="note" title="Building a JavaScript or TypeScript app needs Bun">
+For JavaScript and TypeScript projects, `bui build` runs `@blender-ui/native`'s `bui`, which bundles your app with Bun, so Bun is checked (and offered for install) before a build even in an npm or pnpm project.
+</Callout>
+
+- **Python needs 3.11 or newer.** BUI's wheels cover CPython 3.11 to 3.14 on Windows, Linux x86_64 and macOS.
+- **Lua and Rust compile BUI's C kit** while they install, so they need a C compiler and CMake. `bui doctor` checks both. On Windows, LuaRocks needs a compiler that matches your Lua build.
+- **macOS** builds of `bui` come from the release workflow and have not been tried by hand yet. **iOS** is not supported.

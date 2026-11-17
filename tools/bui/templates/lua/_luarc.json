@@ -1,0 +1,6 @@
+{
+  "runtime.version": "Lua 5.4",
+  "workspace.library": ["lua_modules/share/lua/5.4"],
+  "workspace.ignoreDir": ["lua_modules"],
+  "diagnostics.globals": []
+}

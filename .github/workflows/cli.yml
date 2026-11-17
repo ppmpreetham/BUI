@@ -1,0 +1,157 @@
+# The `bui` command (tools/bui): tested on the three systems for every change to it, and built for
+# six targets and attached to the GitHub Release when a release tag is pushed. The installers
+# (website/public/install.sh and install.ps1) and `bui update` download these archives.
+#
+#   bui-<target>.tar.gz   (Linux, macOS; holds `bui`)
+#   bui-<target>.zip      (Windows; holds `bui.exe`)
+#   <archive>.sha256
+#
+# A release is made by tools/release.py (it tags vX.Y.Z); this runs beside release.yml and adds the
+# files to the release that one creates (whichever workflow gets there first creates it).
+
+name: bui command
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: ["tools/bui/**", "website/public/install.*", ".github/workflows/cli.yml"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the archives to (e.g. v0.5.1)"
+        required: true
+      publish:
+        description: "Really upload (otherwise only build)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-15]
+    defaults:
+      run:
+        working-directory: tools/bui
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # a manual run builds the tag it was given, not the branch it was started from
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/bui
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  installers:
+    name: installers (syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: install.sh is POSIX sh and passes shellcheck
+        run: |
+          sudo apt-get install -y shellcheck dash
+          dash -n website/public/install.sh
+          shellcheck -s sh -S warning website/public/install.sh
+      - name: install.ps1 is plain ASCII (Windows PowerShell 5.1 decodes a download as it likes) and parses
+        shell: pwsh
+        run: |
+          $bytes = [IO.File]::ReadAllBytes('website/public/install.ps1')
+          if ($bytes | Where-Object { $_ -gt 127 }) { throw 'install.ps1 has non-ASCII characters' }
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path 'website/public/install.ps1'), [ref]$null, [ref]$errors)
+          if ($errors) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: [test, installers]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # a manual run builds the tag it was given, not the branch it was started from
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/bui
+          key: ${{ matrix.target }}
+      - name: Build
+        working-directory: tools/bui
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p dist
+          name="bui-${{ matrix.target }}.tar.gz"
+          tar -czf "dist/$name" -C "tools/bui/target/${{ matrix.target }}/release" bui
+          (cd dist && { sha256sum "$name" 2>/dev/null || shasum -a 256 "$name"; } > "$name.sha256")
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          $name = "bui-${{ matrix.target }}.zip"
+          Compress-Archive -Path "tools/bui/target/${{ matrix.target }}/release/bui.exe" -DestinationPath "dist/$name"
+          $hash = (Get-FileHash "dist/$name" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Set-Content "dist/$name.sha256" -NoNewline
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bui-${{ matrix.target }}
+          path: dist/*
+
+  upload:
+    name: attach to the GitHub Release
+    needs: build
+    if: github.event_name == 'push' || github.event.inputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create the release if release.yml has not yet, then attach the files
+        run: |
+          ls -l dist
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "BUI ${TAG#v}" --generate-notes --verify-tag || gh release view "$TAG" >/dev/null
+          gh release upload "$TAG" dist/* --clobber

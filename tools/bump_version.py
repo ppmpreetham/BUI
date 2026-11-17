@@ -26,7 +26,9 @@ Where the version lives (one source of truth per registry, all moved together):
 * LuaRocks: `bindings/lua/blenderui-<version>-1.rockspec` (its version, its source tag and its file
   name move; the old file is removed, as a rename).
 * `CHANGELOG.md`: `[Unreleased]` becomes a dated section and a fresh `[Unreleased]` opens.
-* The lock files (`Cargo.lock`, `bindings/package-lock.json`) are refreshed (best effort).
+* The `bui` command: `tools/bui/Cargo.toml` (it is released with every BUI release, as `bui-<target>`
+  archives on the GitHub Release; `bui update` compares its own version with the release's).
+* The lock files (`Cargo.lock`, `tools/bui/Cargo.lock`, `bindings/package-lock.json`) are refreshed (best effort).
 
 `--dry-run` shows what would change and touches nothing.
 """
@@ -146,6 +148,10 @@ def plan_edits(new: str, npm: str | None) -> tuple[dict[Path, str], list[Path]]:
             out.append(line)
         put(toml, "".join(out))
 
+    # the `bui` command is released with BUI: one version, so `bui update` has one to compare
+    cli = ROOT / "tools" / "bui" / "Cargo.toml"
+    put(cli, re.sub(r'(^version\s*=\s*")[^"]+(")', rf"\g<1>{new}\g<2>", read(cli), count=1, flags=re.M))
+
     # LuaRocks: the version is in the file name too, so the rockspec is renamed
     (rock,) = rockspecs()
     text = re.sub(r'(^version\s*=\s*")[^"]+(")', rf"\g<1>{new}-1\g<2>", read(rock), count=1, flags=re.M)
@@ -180,16 +186,19 @@ def plan_edits(new: str, npm: str | None) -> tuple[dict[Path, str], list[Path]]:
     return edits, gone
 
 
+def cargo_lock(cwd: Path) -> bool:
+    """Refresh a workspace's Cargo.lock: offline first (the common case, nothing to download), then online."""
+    return any(run(["cargo", "update", "--workspace", *flags], cwd=cwd, check=False).returncode == 0 for flags in (["--offline"], []))
+
+
 def refresh_locks(npm: bool) -> list[Path]:
     """Best effort: a lock file that can't be refreshed is reported, not fatal."""
     touched = []
-    r = run(["cargo", "update", "--workspace", "--offline"], cwd=RUST, check=False)
-    if r.returncode != 0:
-        r = run(["cargo", "update", "--workspace"], cwd=RUST, check=False)
-    if r.returncode == 0:
-        touched.append(RUST / "Cargo.lock")
-    else:
-        print("warning: Cargo.lock was not refreshed (run `cargo update --workspace` in bindings/rust)")
+    for cwd, label in ((RUST, "bindings/rust"), (ROOT / "tools" / "bui", "tools/bui")):
+        if cargo_lock(cwd):
+            touched.append(cwd / "Cargo.lock")
+        else:
+            print(f"warning: {label}/Cargo.lock was not refreshed (run `cargo update --workspace` in {label}): CI builds with --locked and would reject it")
     if npm:
         r = run(["npm", "install", "--package-lock-only", "--ignore-scripts"], cwd=ROOT / "bindings", check=False)
         if r.returncode == 0:
