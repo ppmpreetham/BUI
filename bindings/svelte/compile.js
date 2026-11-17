@@ -114,8 +114,10 @@ function findBrowser (specifier, fromDir) {
   }
 }
 
-/** Files of those packages: Bun's runtime resolves them without plugins. */
-export const BROWSER_PACKAGE_FILE = /[\\/]node_modules[\\/](svelte|esm-env)[\\/]/
+/** Files of those packages: Bun's runtime resolves them without plugins. Not `svelte/compiler`: it
+ *  compiles the components (it is loaded on a cold cache), and it is a UMD file that Bun's default loader
+ *  reads as CommonJS but a plugin's `loader: 'js'` would read as an ES module with no exports. */
+export const BROWSER_PACKAGE_FILE = /[\\/]node_modules[\\/](svelte|esm-env)[\\/](?!compiler[\\/])/
 const redirects = new Map() // package root -> Map(default file -> browser file)
 
 /** The browser counterpart of `file` when it is a package's non-browser entry

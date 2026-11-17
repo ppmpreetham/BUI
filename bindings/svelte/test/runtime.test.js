@@ -45,6 +45,14 @@ test('bun --preload @blender-ui/svelte/register runs it', { skip: !hasBun }, () 
   check(run(bun, ['--preload', register, app]), 'bun')
 })
 
+test('bun runs it with a cold compile cache (the compiler loads as it is)', { skip: !hasBun }, () => {
+  // the cache lives in the nearest node_modules from the working directory: an empty one is a cold cache
+  const cold = fs.mkdtempSync(path.join(dir, 'cold-'))
+  fs.mkdirSync(path.join(cold, 'node_modules'))
+  check(spawnSync(bun, ['--preload', register, app], { encoding: 'utf8', env, timeout: 60000, cwd: cold }), 'bun')
+  assert.ok(fs.readdirSync(path.join(cold, 'node_modules', '.cache', '@blender-ui', 'svelte')).length > 0, 'components were compiled, not cached')
+})
+
 test('bui build: a QuickJS executable of a few MB runs the Svelte app', { skip: !hasBun }, () => {
   const out = path.join(dir, `svelte-app${exe}`)
   const b = spawnSync(process.execPath, [cli, 'build', app, '-o', out, '--console'], { encoding: 'utf8' })
