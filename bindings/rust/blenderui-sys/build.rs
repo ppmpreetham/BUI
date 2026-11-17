@@ -38,6 +38,13 @@ fn main() {
     // `imgui`: Dear ImGui on BUI + its C API (C++), built by the same CMake project
     let imgui = std::env::var("CARGO_FEATURE_IMGUI").is_ok();
     let mut config = cmake::Config::new(&root);
+    let wasi = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("wasi");
+    println!("cargo:rerun-if-env-changed=WASI_SYSROOT");
+    if wasi {
+        // WebAssembly: clang with the WASI sysroot (WASI_SYSROOT names it), no threads, no window system
+        config.define("CMAKE_TOOLCHAIN_FILE", root.join("platform/wasm/wasi.cmake"));
+        println!("cargo:rerun-if-changed={}", root.join("platform/wasm").display());
+    }
     // The optional parts (features.json, the one table): each cargo feature is
     // its CMake option, ON exactly when the feature is.
     let table = std::fs::read_to_string(root.join("features.json")).expect("features.json");
@@ -83,12 +90,24 @@ fn main() {
         println!("cargo:rustc-link-lib=static={lib}");
     }
     let target = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+    if wasi {
+        // libc++ (the no-exceptions build) and the emulated parts of libc the kit was compiled against, from
+        // the WASI sysroot; libc itself is Rust's own
+        let sysroot = std::env::var("WASI_SYSROOT").expect("WASI_SYSROOT must name the WASI sysroot (see platform/wasm)");
+        let lib = PathBuf::from(sysroot).join("lib/wasm32-wasip1");
+        println!("cargo:rustc-link-search=native={}", lib.join("noeh").display());
+        println!("cargo:rustc-link-search=native={}", lib.display());
+        for name in ["c++", "c++abi", "wasi-emulated-signal", "wasi-emulated-process-clocks", "wasi-emulated-mman"] {
+            println!("cargo:rustc-link-lib=static={name}");
+        }
+    } else if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
         // the C++ runtime: the kit and core carry Blender C++ sources (string
         // search, expressions, ...), and Dear ImGui with `imgui` (MSVC links its own)
         println!("cargo:rustc-link-lib={}", if target == "macos" { "c++" } else { "stdc++" });
     }
-    if target == "windows" {
+    if wasi {
+        // nothing else to link: no window system, no threads, no dlopen
+    } else if target == "windows" {
         for lib in ["user32", "gdi32", "imm32"] {
             println!("cargo:rustc-link-lib={lib}");
         }

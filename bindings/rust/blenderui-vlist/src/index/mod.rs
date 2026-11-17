@@ -36,7 +36,7 @@ use crate::estimate::Estimator;
 use crate::fx::Fx;
 
 /// The most items an index holds (hostile counts are refused, not wrapped).
-pub const MAX_ITEMS: usize = 1 << 40;
+pub const MAX_ITEMS: usize = if usize::BITS >= 64 { 1 << 40 } else { 1 << 30 };
 
 /// Why an edit was refused.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

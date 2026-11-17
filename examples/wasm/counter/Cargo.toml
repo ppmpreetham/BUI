@@ -1,0 +1,24 @@
+# A blenderui app in a web page: `python platform/wasm/build.py examples/wasm/counter` builds it to
+# WebAssembly and writes the page that runs it. Its own workspace: no other platform builds it.
+[package]
+name = "counter"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+blenderui = { path = "../../../bindings/rust/blenderui", default-features = false, features = ["png", "svg", "freetype", "anim", "video"] }
+blenderui-web = { path = "../../../bindings/rust/blenderui-web" }
+
+[workspace]
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

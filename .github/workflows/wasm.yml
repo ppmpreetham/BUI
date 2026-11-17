@@ -1,0 +1,80 @@
+# A blenderui app in a web page (docs/wasm.md): the kit and blenderui build for wasm32-wasip1 and the
+# counter example renders under Node.js. Runs on changes to the WebAssembly parts and by hand.
+
+name: wasm
+
+on:
+  push:
+    branches: [main]
+    paths: ["platform/wasm/**", "bindings/rust/blenderui-web/**", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui-sys/**", "examples/wasm/**", ".github/workflows/wasm.yml"]
+  pull_request:
+    paths: ["platform/wasm/**", "bindings/rust/blenderui-web/**", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui-sys/**", "examples/wasm/**", ".github/workflows/wasm.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  counter:
+    name: the counter builds and renders
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # wasi-sdk 34's libc++ needs a recent clang (19 fails on its `#pragma clang attribute` headers); the
+      # runner's own is older, so LLVM 21 comes from apt.llvm.org
+      - name: LLVM 21 (clang with the wasm32 backend, llvm-ar), CMake and Ninja
+        run: |
+          set -o pipefail
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+          echo "deb https://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm-21.list
+          sudo apt-get update
+          sudo apt-get install -y clang-21 llvm-21 lld-21 cmake ninja-build
+          echo "WASI_CLANG=/usr/lib/llvm-21/bin" >> "$GITHUB_ENV"
+          /usr/lib/llvm-21/bin/clang --version
+      - name: The WASI sysroot (cached)
+        uses: actions/cache@v4
+        with:
+          path: ~/.bui/wasi-sysroot
+          key: wasi-sysroot-34-v2
+      # each step keeps its log and, when it fails, puts the lines that matter in an annotation (readable
+      # through the check-run API) and uploads the whole log
+      - name: Fetch the WASI sysroot
+        run: |
+          set -o pipefail
+          python platform/wasm/build.py --fetch-sysroot 2>&1 | tee fetch.log
+      - name: Build the counter
+        run: |
+          set -o pipefail
+          python platform/wasm/build.py examples/wasm/counter 2>&1 | tee build.log
+      - name: It renders, takes a click and resizes
+        run: |
+          set -o pipefail
+          node examples/wasm/smoke.mjs examples/wasm/counter/dist/app.wasm 2>&1 | tee smoke.log
+      - name: What failed
+        if: failure()
+        run: |
+          for f in fetch.log build.log smoke.log; do
+            [ -f "$f" ] || continue
+            errs=$(grep -n -i -m 8 -E 'error|fatal|FAILED' "$f" | cut -c1-300 | tr '\n' '|')
+            tail=$(tail -n 25 "$f" | cut -c1-250 | tr '\n' '|')
+            echo "::error title=wasm $f::first errors: ${errs} -- last lines: ${tail}" | cut -c1-3900
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wasm-logs
+          path: "*.log"
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: counter-web
+          path: examples/wasm/counter/dist/

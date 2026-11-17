@@ -86,7 +86,7 @@ if(MSVC)  # cl and clang-cl spell the forced include /FI
   )
 elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(bui_core PRIVATE
-    "-include${CMAKE_CURRENT_SOURCE_DIR}/intern/bui_c_compat.h"
+    "SHELL:-include \"${CMAKE_CURRENT_SOURCE_DIR}/intern/bui_c_compat.h\""
   )
 endif()
 

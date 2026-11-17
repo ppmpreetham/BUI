@@ -46,6 +46,14 @@ fn read_exact_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<()> {
         use std::os::unix::fs::FileExt;
         f.read_exact_at(buf, off)
     }
+    // anywhere else (WebAssembly: one thread, so the shared file position is no problem)
+    #[cfg(not(any(windows, unix)))]
+    {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = f;
+        f.seek(SeekFrom::Start(off))?;
+        f.read_exact(buf)
+    }
 }
 
 /// Appends messages to a log.

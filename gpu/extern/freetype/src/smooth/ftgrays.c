@@ -142,7 +142,13 @@
 
 #include <stddef.h>
 #include <string.h>
+/* BUI: WebAssembly (WASI) has no setjmp/longjmp; a full cell pool is noted in `ras.overflow` and checked
+ * after the outline is decomposed, which gives the same Raster_Overflow (the band is split) as the jump */
+#ifdef __wasi__
+#define BUI_NO_LONGJMP
+#else
 #include <setjmp.h>
+#endif
 #include <limits.h>
 #define FT_CHAR_BIT   CHAR_BIT
 #define FT_UINT_MAX   UINT_MAX
@@ -157,9 +163,11 @@
 
 #define ft_memset   memset
 
+#ifndef BUI_NO_LONGJMP
 #define ft_setjmp   setjmp
 #define ft_longjmp  longjmp
 #define ft_jmp_buf  jmp_buf
+#endif
 
 typedef ptrdiff_t  FT_PtrDist;
 
@@ -510,7 +518,11 @@ typedef ptrdiff_t  FT_PtrDist;
     FT_Raster_Span_Func  render_span;
     void*                render_span_data;
 
+#ifdef BUI_NO_LONGJMP
+    int         overflow;    /* the cell pool was full: the band is split */
+#else
     ft_jmp_buf  jump_buffer;
+#endif
 
   } gray_TWorker, *gray_PWorker;
 
@@ -615,7 +627,17 @@ typedef ptrdiff_t  FT_PtrDist;
       /* insert new cell */
       cell = ras.cell_free++;
       if ( cell >= ras.cell_null )
+      {
+#ifdef BUI_NO_LONGJMP
+        /* what follows lands in the dumpster cell, and the band is rendered again in halves */
+        ras.overflow  = 1;
+        ras.cell_free = ras.cell_null;
+        ras.cell      = ras.cell_null;
+        return;
+#else
         ft_longjmp( ras.jump_buffer, 1 );
+#endif
+      }
 
       cell->x     = ex;
       cell->area  = 0;
@@ -1702,8 +1724,12 @@ typedef ptrdiff_t  FT_PtrDist;
   {
     volatile int  error;
 
-
+#ifdef BUI_NO_LONGJMP
+    ras.overflow = 0;
+    if ( 1 )
+#else
     if ( ft_setjmp( ras.jump_buffer ) == 0 )
+#endif
     {
       if ( continued )
         FT_Trace_Disable();
@@ -1716,6 +1742,10 @@ typedef ptrdiff_t  FT_PtrDist;
                   ras.max_ey,
                   ras.cell_null - ras.cell_free,
                   ras.cell_null - ras.cell_free == 1 ? "" : "s" ));
+#ifdef BUI_NO_LONGJMP
+      if ( ras.overflow )
+        error = FT_THROW( Raster_Overflow );
+#endif
     }
     else
     {

@@ -1,0 +1,100 @@
+---
+title: A blenderui app in a web page
+sidebarLabel: WebAssembly
+description: Compile a blenderui app to WebAssembly and run it in a browser canvas, drawn by BUI's own raster with Blender's widgets. One macro, one build command, a 4 MB module.
+section: Rust
+order: 96
+languages: ["rust"]
+sources: ["docs/wasm.md", "bindings/rust/blenderui-web/src/lib.rs", "bindings/rust/blenderui-web/js/bui-web.js", "platform/wasm/build.py", "platform/wasm/wasi.cmake", "examples/wasm/counter/src/lib.rs", "examples/wasm/smoke.mjs", "bindings/rust/blenderui/src/window.rs"]
+---
+
+A blenderui app can run in a browser. It is compiled to WebAssembly, drawn by BUI's software raster (the same C kit as on a desktop, so Blender's widgets look the same) and shown in a `<canvas>`. There is no DOM and no browser CSS: the page only provides the canvas and passes its pointer, wheel and key events to the app.
+
+```sh
+python platform/wasm/build.py examples/wasm/counter --serve    # then open http://localhost:8000
+```
+
+## Write the app
+
+An app is a `cdylib` crate. The UI is the code it would be on a desktop; the one addition is `blenderui_web::export!`, which opens the window at the canvas's size and defines what the page calls.
+
+```rust
+use blenderui::prelude::*;
+
+struct Counter { count: i32 }
+
+impl Render for Counter {
+    fn render(&mut self, _w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        body().styled().m_0().css("height", "100vh").p_4()
+            .child(h1().child(format!("Count: {}", self.count)))
+            .child(button().child("Add one").on_click(cx.listener(|this, _, _, cx| {
+                this.count += 1;
+                cx.notify();
+            })))
+    }
+}
+
+blenderui_web::export!(|cx, options| {
+    cx.open_window(options, |_, cx| cx.new(|_| Counter { count: 0 })).unwrap();
+});
+```
+
+```toml title="Cargo.toml"
+[package]
+name = "counter"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+blenderui = { version = "0.5", default-features = false, features = ["png", "svg", "freetype", "anim", "video"] }
+blenderui-web = "0.5"
+```
+
+Give the root `height: 100vh`, because the window is not a scrolling document, and `m_0()` to drop the body's default 8 px margin. `video` is in the feature list because the kit's video code needs its audio code to link; nothing plays.
+
+## Build and run
+
+`python platform/wasm/build.py CRATE` builds the crate and writes `CRATE/dist/`: `app.wasm`, `bui-web.js` and an `index.html` that mounts the app. Add `--serve` to serve it.
+
+You need:
+
+- Rust with the target: `rustup target add wasm32-wasip1` (the script adds it).
+- LLVM's clang 21 or newer with the `wasm32` backend (wasi-sdk 34's libc++ does not compile with older ones: clang 19 fails on its headers; the script refuses them; on Ubuntu, `clang-21 llvm-21 lld-21` from apt.llvm.org), and CMake. Apple's clang has no `wasm32` backend: install LLVM and set `WASI_CLANG` to its `bin` folder.
+- `make` or Ninja.
+- The WASI sysroot (wasi-libc and libc++). `python platform/wasm/build.py --fetch-sysroot` downloads wasi-sdk's once into `~/.bui/wasi-sysroot` (a 0.2 GB download, 94 MB kept), or set `WASI_SYSROOT` to one you have.
+
+In your own page, `bui-web.js` is one call:
+
+```js
+import { mount } from './bui-web.js'
+const app = await mount(document.querySelector('canvas'), './app.wasm')
+// app.stop()
+```
+
+## How it works
+
+The module is a library, not a program: it has no `_start`. `export!` defines `bui_start`, `bui_frame`, the pointer, wheel and key functions, and `bui_pixels`, `bui_width` and `bui_height` for the frame. `Application::start` keeps a headless application alive between calls, where `Application::run` would run a loop of its own, and `App::frame_if_needed` draws a frame only when something changed or is animating. The page calls in on every animation frame; when there is a new frame it is RGBA bytes in the module's memory, which `putImageData` puts on the canvas.
+
+`bui-web.js` is the whole page side: a small WASI shim (a clock, random bytes, and stdout and stderr as the console), the frame loop, and the events. The canvas's CSS size is its logical size and the backing store is that times `devicePixelRatio`, so a retina canvas draws twice the pixels and moving to another screen lays the page out again. Only the primary pointer's primary button is passed on. A trap after the app has started stops it and goes to `onerror` (default `console.error`); `stop()` frees it. Startup errors are different: if the module fails to load or `bui_start` traps or returns 0 (no window), `mount()` rejects before any of that is installed, `onerror` does not run, and the caller catches the promise (`mount(...).catch(...)`).
+
+<Callout type="note" title="Size and speed">
+The counter is a 4.2 MB module, 1.6 MB gzipped (release, `opt-level = "s"`, fat LTO). Under Node.js it instantiated in about 55 ms, started in about 50 ms and drew its first frame in about 11 ms; a changed frame took 3 ms.
+</Callout>
+
+## Limits
+
+- **One thread.** The kit's worker threads and the audio code do not exist.
+- **Images** load from files and a page has none, so an `<img>` shows nothing.
+- **Software raster only.** There are no GPU renderers.
+- **Input** is the primary pointer button, the wheel and the keyboard. There is no right or middle button, touch gesture, IME composition, clipboard or mouse cursor shape yet.
+- **Fonts** are the embedded Inter only.
+- **No files**, so no file browser.
+- **Number fields:** WebAssembly has no floating-point exception flags, so the evaluator works them out from the numbers: `1/0` and `sqrt(-1)` are errors as on a desktop (an overflow such as `exp(1000)` is one too, where a desktop gives infinity).
+- **A malformed font traps** instead of being rejected (wasi-sdk has no `setjmp`); the app stops and `bui-web.js` reports it. The embedded font is fine, and large glyphs are not a problem. JPEG is not built: leave the `jpeg` feature off.
+
+## Tested
+
+The counter was run under Node.js (`examples/wasm/smoke.mjs`: the first frame, no frame when nothing changed, a click, a resize, a retina resize that lays out as a page started at that ratio does) and in Microsoft Edge 157 driven by Playwright on Windows: it renders, three real mouse clicks counted, typing and Backspace worked in a text field, the console stayed empty and the canvas was sharp at a device pixel ratio of 2. Firefox and Safari have not been tried. The build ran on Windows with LLVM 22; the script is written for Linux and macOS too, but has not been run there.

@@ -123,6 +123,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "blenderui-web"
+version = "0.5.1"
+dependencies = [
+ "blenderui",
+ "blenderui-sys",
+]
+
+[[package]]
 name = "cc"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

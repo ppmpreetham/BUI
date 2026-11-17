@@ -714,7 +714,8 @@ The two programs draw identical pixels:
 
 Guide: [docs/rust.md](docs/rust.md), and the
 [Rust tutorial](https://bui.preetham.top/docs/tutorials/first-app-rust/) on the
-website.
+website. A blenderui app also runs in a browser `<canvas>`, compiled to WebAssembly
+([docs/wasm.md](docs/wasm.md): `python platform/wasm/build.py examples/wasm/counter --serve`).
 
 </details>
 
@@ -1594,6 +1595,7 @@ All 26 run headless (`bui-lua --headless app.lua`) for CI and documentation scre
 | [Qt syntax](docs/qt.md)                            | Classes, signals, layouts, painting, coverage                                                                                        |
 | [Components](docs/components.md)                   | The `bui.components` reference                                                                                                       |
 | [Rust](docs/rust.md)                               | `rsx!`, hooks, HTML, CSS and Tailwind coverage, effects, animations, events, headless tests                                          |
+| [WebAssembly](docs/wasm.md)                        | A blenderui app in a browser canvas: `blenderui-web`, the build script, limits                                                       |
 | [JavaScript, React, Svelte and Vue](docs/javascript.md) | `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue`, adding a framework, how changes cross to the UI thread, performance |
 | [Dear ImGui](docs/imgui.md)                        | Dear ImGui on BUI from C++, C, Python and Rust; the Blender-widgets build; coverage                                                  |
 | [C API](docs/c-api.md)                             | The C kit (`BUI_kit.h`)                                                                                                              |

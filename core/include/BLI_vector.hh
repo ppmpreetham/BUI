@@ -1133,6 +1133,7 @@ class Vector {
 
     T *new_array = static_cast<T *>(
         allocator_.allocate(size_t(new_capacity) * sizeof(T), alignof(T), AT));
+#ifdef __cpp_exceptions
     try {
       uninitialized_relocate_n(begin_, size, new_array);
     }
@@ -1140,6 +1141,10 @@ class Vector {
       allocator_.deallocate(new_array);
       throw;
     }
+#else
+    /* built without exceptions (WebAssembly): nothing can throw to undo */
+    uninitialized_relocate_n(begin_, size, new_array);
+#endif
 
     if (!this->is_inline()) {
       allocator_.deallocate(begin_);
