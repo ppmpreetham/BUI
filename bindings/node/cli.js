@@ -4,6 +4,7 @@
 //   bui build app.jsx [-o app.exe]   a small executable: BUI + QuickJS (~5 MB)
 //   bui build app.jsx --bun          a Bun executable (full Node APIs, ~120 MB)
 //   bui run app.jsx [args]           run on the small runtime (no executable)
+//   bui bundle app.jsx -o main.js    one script for QuickJS, no runtime (Android: build.py --js)
 //
 // Options:
 //   -o, --out <file>   output file (default: the entry's name, .exe on Windows)
@@ -150,10 +151,11 @@ function run (o) {
 }
 
 const o = parse(process.argv.slice(2))
-if (!['build', 'run'].includes(o.cmd) || !o.entry) {
-  console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 17).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
+if (!['build', 'run', 'bundle'].includes(o.cmd) || !o.entry) {
+  console.log(fs.readFileSync(__filename, 'utf8').split('\n').slice(1, 18).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'))
   process.exit(o.cmd ? 1 : 0)
 }
 if (!fs.existsSync(o.entry)) fail(`no such file: ${o.entry}`)
-if (o.cmd === 'build') build(o)
+if (o.cmd === 'bundle') fs.writeFileSync(path.resolve(o.out ?? 'main.js'), bundle(o.entry, o.dev))
+else if (o.cmd === 'build') build(o)
 else run(o)

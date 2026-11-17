@@ -86,6 +86,8 @@ pub(crate) struct WidgetSpec {
     pub text_color: Option<u32>,
     /// Its CSS `background-color` (0xAARRGGBB); None: the browser's white.
     pub field_bg: Option<u32>,
+    /// Its CSS `border-radius` in px (the largest corner); None: the browser's 2px.
+    pub radius: Option<f32>,
     /// A browser-look textarea with `field-sizing: content`: wraps at its width, and its height follows its lines.
     pub grow: bool,
     /// A textarea's `rows` attribute: the lines it shows at least (None: the browser's two).
@@ -177,6 +179,7 @@ impl WidgetSpec {
             bare: false,
             text_color: None,
             field_bg: None,
+            radius: None,
             grow: false,
             rows: None,
             pad: [0.0; 4],
@@ -576,6 +579,9 @@ fn sync(n: *mut sys::BKNode, old: Option<&WidgetSpec>, spec: &WidgetSpec) {
         }
         if old.is_none_or(|o| o.grow != spec.grow) {
             set_num(c"grow", f64::from(u8::from(spec.grow)));
+        }
+        if old.is_none_or(|o| o.radius != spec.radius) {
+            set_num(c"radius", f64::from(spec.radius.unwrap_or(-1.0)));
         }
         if old.is_none_or(|o| o.field_bg != spec.field_bg) {
             set_num(c"field_bg", f64::from(spec.field_bg.unwrap_or(0)));

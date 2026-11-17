@@ -302,7 +302,7 @@ Every widget set takes, besides its colors:
 A theme can also set `font.family`, `font.size` (points; Blender's is 11), `shadow` (`false` removes the shadow behind UI text) and `radius` (the roundness of every widget at once). Corners and borders are per widget, so `number_field` can be square on its left and `button` flat and thick-bordered.
 
 <Callout type="note" title="What a theme doesn't reach">
-Plain HTML controls (outside `styled`) draw like Chrome's and keep Chrome's colors; give them their own `color` and `font-size` in CSS. There is one theme for the whole process, as in Blender, and a corner is round or square, not a different radius.
+Plain HTML controls (outside `styled`) draw like Chrome's and keep Chrome's colors, and how much of their CSS reaches the widget depends on the control. In Rust a plain text `input` takes its CSS background (the field's fill) and `border-radius`; a plain `button` does not forward `color` or `font-size` (the kit draws its text in fixed colors), and `border-radius: 0` is dropped before it reaches the kit, which keeps its 2 px default, so a plain button cannot be made square (use `styled` or a Blender component). From other bindings, set the node's `"radius"` in px. The theme's `roundness` and `corners.*` keys apply to Blender-look widgets only. There is one theme for the whole process, as in Blender, and a corner is round or square, not a different radius.
 </Callout>
 
 ## What else you can change

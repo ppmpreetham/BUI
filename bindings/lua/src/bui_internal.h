@@ -114,6 +114,12 @@ int luabui_lookup_node(lua_State *L, BKNode *node);
 
 /* Remove a node from the map. */
 void luabui_unmap_node(lua_State *L, BKNode *node);
+/* The wrappers of a subtree the kit freed (or is about to) no longer point at it. */
+void luabui_invalidate_subtree(lua_State *L, BKNode *n);
+/* 1 while `n` is an area whose close handler is running, or an ancestor of one (its screen). The
+ * screen is still working with those nodes: freeing one from the handler would pull it from under
+ * the screen, so node:free() refuses (see l_node_free). */
+int luabui_in_close_notice(const BKNode *n);
 
 /* ------------------------------------------------------------------ */
 /* Tree item map helpers (BKTreeItem* <-> Lua userdata)               */

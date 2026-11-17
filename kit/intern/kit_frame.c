@@ -875,7 +875,7 @@ static void citem_assign(CItem *c, const BKCanvasItem *item)
     bk_image_ref_set_rgba(&c->img, item->rgba, item->iw, item->ih);
   }
   /* an effect's floats (the count is validated here, at the boundary) */
-  const int nf = item->type == BK_ITEM_EFFECT && item->effect_floats ?
+  const int nf = (item->type == BK_ITEM_EFFECT || item->type == BK_ITEM_PASS) && item->effect_floats ?
                      BK_CLAMP(item->n_effect_floats, 0, BK_EFFECT_MAX_FLOATS) :
                      0;
   if (nf > 0) {
@@ -1073,7 +1073,7 @@ void BK_canvas_add_item(BKNode *n, const BKCanvasItem *item)
 static bool citem_same(const CItem *c, const BKCanvasItem *it)
 {
   const BKCanvasItem *o = &c->it;
-  if (item_is_image(it) || o->type != it->type || o->id != it->id ||
+  if (item_is_image(it) || it->type == BK_ITEM_PASS || o->type != it->type || o->id != it->id ||
       o->ncoords != it->ncoords || o->hidden != it->hidden || o->anchor != it->anchor ||
       o->text_flags != it->text_flags || o->clip_on != it->clip_on || o->family != it->family ||
       o->width != it->width || o->radius != it->radius || o->size != it->size ||
@@ -1224,6 +1224,23 @@ static bool citem_image_resolve(const CItem *ci, float ox, float oy, BKImageDraw
   }
   return bk_image_ref_resolve(&ci->img, ci->it.ncoords >= 4 ? ci->it.fit : BK_FIT_FILL,
                               ci->it.frame, b, r);
+}
+
+/* A pass: `effect` over all of a render target (or a fill of it), not drawn into the canvas. */
+static void canvas_pass(BuiRaster *r, const CItem *ci)
+{
+  const BKCanvasItem *it = &ci->it;
+  if (it->hidden || it->effect_target <= 0) {
+    return;
+  }
+  if (it->effect == 0) {
+    if (it->effect_floats && it->n_effect_floats >= 4) {
+      BUI_raster_target_clear(r, it->effect_target, it->effect_floats);
+    }
+    return;
+  }
+  BUI_raster_effect_to(r, it->effect_target, it->effect, it->effect_inputs, it->effect_floats,
+                       it->n_effect_floats);
 }
 
 /* Draw one item into `r`. With `prep`, text uses the prepared run (safe on
@@ -1685,6 +1702,10 @@ static void canvas_draw(BKNode *n)
     bk_fill_f(n->x, n->y, n->w, n->h, n->color);
   }
   CanvasData *d = CANVAS(n);
+  /* Passes are scheduled by the invalidation, not by how much of the canvas this draw covers:
+   * once per frame that redraws the whole canvas (the first rectangle takes the flag, so
+   * several damage rectangles in one frame run them once), whatever the clip leaves. */
+  const bool whole = canvas_all_damaged(n);
   d->damaged_px = 0;
   d->all_damaged = false;
   bk_clip_push(n->x, n->y, n->w, n->h);
@@ -1708,6 +1729,13 @@ static void canvas_draw(BKNode *n)
   for (int i = 0; i < d->n; i++) {
     const BKCanvasItem *it = &d->items[i].it;
     float b[4];
+    if (it->type == BK_ITEM_PASS) { /* drawn into a render target, not here: when the whole canvas
+                                     * is redrawn it runs once, in list order */
+      if (whole) {
+        canvas_pass(bk_draw.r, &d->items[i]);
+      }
+      continue;
+    }
     if (small && citem_bbox(&d->items[i], b) &&
         (ox + b[2] < clip[0] || ox + b[0] >= clip[2] || oy + b[3] < clip[1] || oy + b[1] >= clip[3]))
     {

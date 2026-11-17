@@ -5,7 +5,7 @@
 
 #include "kit_intern.h"
 
-#if !defined(_WIN32) && !defined(BUI_WINDOW_X11) && !defined(BUI_WINDOW_COCOA)
+#if !defined(_WIN32) && !defined(BUI_WINDOW_X11) && !defined(BUI_WINDOW_COCOA) && !defined(BUI_WINDOW_ANDROID)
 
 
 int BK_window_supported(void)

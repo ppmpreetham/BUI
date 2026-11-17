@@ -785,7 +785,7 @@ void bk_textarea_html_draw(BKNode *n)
   BKContext *ctx = bk_ctx(n);
   const bool focused = ctx && ctx->focus == n;
   const bool enabled = NODE_ENABLED(n), hover = enabled && bk_hovered(n);
-  const float rad = bk_hpx(2.0f), bw = BK_MAX(1.0f, floorf(bk_hpx(1.0f)));
+  const float rad = bk_html_radius(n), bw = BK_MAX(1.0f, floorf(bk_hpx(1.0f)));
   float fill[4], border[4];
   if (!enabled) { /* lighten layer, translucent white, faded border */
     bk_argb(0x33A9A9A9u, fill);

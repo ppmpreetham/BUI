@@ -85,17 +85,21 @@ def test_splitter_sizes_and_dragging():
     ctx = buipy.KitContext(split)
     r = buipy.Raster(400, 100)
     ctx.render(400, 100, r, True)
+    pad = round(2 * buipy.kit_unit() / 20)  # Blender's area border at the window's edges
     assert left.width() == 120, left.width()
-    assert left.width() + right.width() + split.handleWidth() == 400, "the last pane takes the rest"
+    assert left.width() + right.width() + split.handleWidth() + 2 * pad == 400,         "the last pane takes the rest"
     moved = spy(split.splitterMoved)
-    sash = split._sashes[0]
-    sash._on_event(EV_PRESS, None, 1, 1)
-    sash._on_event(EV_MOTION, None, 41, 1)  # drag the region edge 40 px right
+    edge = left.x() + left.width() + split.handleWidth() // 2  # Blender's area edge
+    ctx.motion(edge, 50, 0)
+    ctx.press(edge, 50, 0)
+    ctx.motion(edge + 20, 50, 0)
+    ctx.motion(edge + 40, 50, 0)  # drag the edge 40 px right
+    ctx.release(edge + 40, 50, 0)
     ctx.render(400, 100, r, True)
-    assert left.width() == 160 and moved and moved[-1] == (160, 1)
+    assert left.width() == 160 and moved and moved[-1] == (160, 1), (left.width(), moved)
     split.setOrientation(q.Qt.Vertical)
     ctx.render(400, 300, buipy.Raster(400, 300), True)
-    assert left.height() == 160 and left.width() == 400, "vertical: the size is the height"
+    assert left.height() == 160 and left.width() == 400 - 2 * pad, "vertical: the size is the height"
 
 
 def test_toolbar_actions():

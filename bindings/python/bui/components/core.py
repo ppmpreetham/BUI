@@ -17,7 +17,9 @@ import buipy
 EV_CHANGE, EV_CLICK, EV_CALL, EV_RENAME, EV_ACTIVATE, EV_TOGGLE, EV_BROWSE = range(1, 8)
 # Raw events for nodes with the "events" property (Tk bind, Qt event handlers).
 (EV_PRESS, EV_RELEASE, EV_DOUBLE, EV_MOTION, EV_ENTER, EV_LEAVE, EV_KEY, EV_WHEEL,
- EV_SUBMIT, EV_VIEW, EV_SCROLL, EV_CONFIGURE) = range(8, 20)
+ EV_SUBMIT, EV_VIEW, EV_SCROLL, EV_CONFIGURE, EV_KEYRELEASE) = range(8, 21)
+# A screen's areas, a panel moved, a region resized: delivered to _on_area, _on_move, _on_resize.
+EV_AREA, EV_MOVE, EV_RESIZE = range(21, 24)
 
 # Modifier bits for KitContext input calls.
 SHIFT, CTRL, ALT, BUTTON1 = 1, 2, 4, 8
@@ -82,6 +84,13 @@ class Component(buipy.KitNode):
             self.set("visible", False)
         if weight != 1.0:
             self.set("weight", weight)
+
+    def _on_resize(self, size: int, hidden: int) -> None:
+        """As a region of an :class:`~bui.components.screen.Area`: the user resized, hid or
+        showed it (``on_resize(size, hidden)``, set by :class:`~bui.components.screen.Region`)."""
+        callback = getattr(self, "on_resize", None)
+        if callback is not None:
+            callback(size, bool(hidden))
 
     # -- common properties ---------------------------------------------------------
     @property

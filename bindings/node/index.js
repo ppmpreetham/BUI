@@ -398,4 +398,5 @@ class App {
   }
 }
 
-module.exports = { ...dom, App, Window, native, ...signals }
+const { AreaSplit, createScreen, editorElement } = require('./screen')
+module.exports = { ...dom, App, Window, native, ...signals, AreaSplit, createScreen, editorElement }

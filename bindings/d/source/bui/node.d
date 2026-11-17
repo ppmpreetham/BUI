@@ -580,6 +580,79 @@ final class Node {
         return wrapNode(BK_node_parent(handle));
     }
 
+    /* -- screens: an "area" in a "screen" (BK_area_*) ------------------------ */
+
+    /// Split this area: `axis` 'v' puts the new area beside it (`factor` from the left), 'h'
+    /// above or below (from the bottom); the new area is the side past 0.5, or null when this
+    /// one is too small. The screen made it: a borrowed wrapper, gone when the area closes.
+    Node split(char axis, float factor) {
+        if (axis != 'h' && axis != 'v') {
+            throw new BuiException("Node.split", "axis must be 'h' or 'v'");
+        }
+        return wrapNode(BK_area_split(handle, axis, factor));
+    }
+
+    /// `gone` joins into this area (they share an edge).
+    bool join(Node gone) {
+        return gone !is null && BK_area_join(handle, gone.handle) != 0;
+    }
+
+    /// Move this area beside `target` (`BK_DOCK_LEFT` ... taking `factor` of it) or into its
+    /// place (`BK_DOCK_CENTER`).
+    bool dock(Node target, int where, float factor = 0.5f) {
+        return target !is null && BK_area_dock(handle, target.handle, where, factor) != 0;
+    }
+
+    bool swap(Node other) {
+        return other !is null && BK_area_swap(handle, other.handle) != 0;
+    }
+
+    /// A neighbor takes this area's place. D-owned nodes inside the area are detached, not freed,
+    /// and keep their handlers: they move with the area when it survives (a D-owned area), or to
+    /// the survivors themselves when the kit frees the area (one the screen made).
+    bool close() {
+        if (handle is null) {
+            return false;
+        }
+        if (owned) {
+            stashSubtreeHandlers();
+            const closed = BK_area_close(handle) != 0;
+            rehomeSubtreeHandlers(); // the area lives on, detached: re-own them (or restore them)
+            return closed;
+        }
+        // The kit frees this area and its C-owned nodes: note them and the D-owned survivors now,
+        // as the native tree is gone after. Only pointers of freed nodes are compared, never read.
+        BKNode*[] gone;
+        Node[] survivors;
+        collectClosing(handle, gone, survivors);
+        auto owner = handlerOwner();
+        auto store = owner is null ? &store_ : &owner.store_;
+        if (BK_area_close(handle) == 0) {
+            return false;
+        }
+        foreach (survivor; survivors) {
+            survivor.store_.drop();
+            store.takeSubtree(survivor.handle, &survivor.store_);
+        }
+        foreach (node; gone) {
+            store.take(node);
+        }
+        return true;
+    }
+
+    private static void collectClosing(BKNode* h, ref BKNode*[] gone, ref Node[] survivors) {
+        gone ~= h;
+        for (int i = 0, n = BK_node_child_count(h); i < n; ++i) {
+            auto child = BK_node_child(h, i);
+            if (BK_node_ref(child) is null) {
+                collectClosing(child, gone, survivors); // freed with the area
+            }
+            else if (auto wrapper = wrapperAt(child)) {
+                survivors ~= wrapper;
+            }
+        }
+    }
+
     /// x, y, w, h in window pixels.
     int[4] rect() const {
         int[4] r;
@@ -753,6 +826,22 @@ final class Node {
 
     Node onBrowse(NodeHandler handler) {
         return on(BK_EV_BROWSE, handler);
+    }
+
+    /// A screen's areas: `BK_AREA_NEW` on the screen (`a` = the new area's index), `BK_AREA_CLOSE`
+    /// and `BK_AREA_WINDOW` on the area itself.
+    Node onArea(NodeHandler handler) {
+        return on(BK_EV_AREA, handler);
+    }
+
+    /// A panel dragged to a new place: `a` = old index, `b` = new index.
+    Node onMove(NodeHandler handler) {
+        return on(BK_EV_MOVE, handler);
+    }
+
+    /// A region resized, hidden or shown by the user: `a` = size, `b` = hidden.
+    Node onResize(NodeHandler handler) {
+        return on(BK_EV_RESIZE, handler);
     }
 
     /// The kit's `BKHost.emit` path: dispatch one event to this node's handlers.

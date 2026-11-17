@@ -182,7 +182,7 @@ if QMessageBox.question(win, "Quit", "Save changes?") == QMessageBox.Yes:
     save()
 ```
 
-- **Containers:** `QStackedWidget`, `QToolBox` (Blender panels: the Qt API keeps one open, and a click on a header opens or closes that panel on its own, as in Blender), `QSplitter` (region edges you drag), `QToolBar`, `QDockWidget`, `QTabBar`, and `QMainWindow`'s `addToolBar`, `addDockWidget` and `setStatusBar`.
+- **Containers:** `QStackedWidget`, `QToolBox` (Blender panels: the Qt API keeps one open, and a click on a header opens or closes that panel on its own, as in Blender), `QSplitter` (Blender's area edges you drag: see [Screens](../../concepts/screens/)), `QToolBar`, `QDockWidget`, `QTabBar`, and `QMainWindow`'s `addToolBar`, `addDockWidget` and `setStatusBar`.
 - **Model/view:** `QStandardItemModel`, `QStringListModel`, the abstract models to subclass, `QModelIndex`, `QItemSelectionModel`, and `QListView`, `QTreeView` and `QTableView`. One row is selected at a time, and views don't edit cells.
 - **Dialogs:** `QDialogButtonBox` (standard buttons by role), `QMessageBox` built on it with Blender's icons (the static helpers return the button clicked) and `QInputDialog` (`getText`, `getInt`, `getDouble`, `getItem`).
 - **Actions and menus:** one `QAction` serves a menu, a tool button and its shortcut, which is bound on the window it's in, as Blender's keymap is. Hidden actions leave their menus, and `QActionGroup` and `QButtonGroup` keep one checked. A checked button is drawn pressed in, as Blender draws a selected button.

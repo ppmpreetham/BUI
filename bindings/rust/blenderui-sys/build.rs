@@ -51,6 +51,19 @@ fn main() {
         config.define(option, if on { "ON" } else { "OFF" });
     }
     println!("cargo:rerun-if-changed={}", root.join("features.json").display());
+    // Android: the NDK's toolchain file (CMAKE_TOOLCHAIN_FILE in the environment, see
+    // platform/android/build.py) takes its ABI from CMake variables, not from the target triple
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("android") {
+        let abi = match std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default().as_str() {
+            "aarch64" => "arm64-v8a",
+            "arm" => "armeabi-v7a",
+            "x86" => "x86",
+            _ => "x86_64",
+        };
+        config.define("ANDROID_ABI", abi);
+        config.define("ANDROID_PLATFORM", std::env::var("ANDROID_PLATFORM").unwrap_or_else(|_| "android-26".into()));
+        println!("cargo:rerun-if-env-changed=ANDROID_PLATFORM");
+    }
     let dst = config
         .define("BUI_TEXT_GDI", if gdi { "ON" } else { "OFF" })
         .define("BUI_SLUG", if std::env::var("CARGO_FEATURE_SLUG").is_ok() { "ON" } else { "OFF" })
@@ -59,6 +72,9 @@ fn main() {
         .define("BUI_BUILD_PYTHON_BINDINGS", "OFF")
         .define("BUI_BUILD_UI", "OFF")
         .define("BUI_BUILD_QT_BACKEND", "OFF")
+        // Android: the NDK's bitcode is not rustc's (the Rust side does its own LTO)
+        .define("BUI_ANDROID_LTO", "OFF")
+        .define("BUI_BUILD_ANDROID_APP", "OFF") // cargo builds only the kit; the shell links it
         .define("BUI_IMGUI_BLENDER_WIDGETS", if std::env::var("CARGO_FEATURE_IMGUI_BLENDER_WIDGETS").is_ok() { "ON" } else { "OFF" })
         // Always optimized; on MSVC also the release C runtime Rust links.
         .profile("Release")
@@ -83,7 +99,8 @@ fn main() {
         println!("cargo:rustc-link-lib=static={lib}");
     }
     let target = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+    // Android: libc++ comes with the final link (platform/android), not libstdc++
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") && target != "android" {
         // the C++ runtime: the kit and core carry Blender C++ sources (string
         // search, expressions, ...), and Dear ImGui with `imgui` (MSVC links its own)
         println!("cargo:rustc-link-lib={}", if target == "macos" { "c++" } else { "stdc++" });

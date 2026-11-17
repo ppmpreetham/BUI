@@ -1,0 +1,25 @@
+# A Rust app for Android: a staticlib that defines `bui_app_main`, linked into the NativeActivity
+# shell by platform/android/build.py --rust. Its own workspace, so no other platform builds it.
+[package]
+name = "bui-android-rust"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+# Only what a phone app needs of the kit: no GPU renderers, ImGui or extra image formats.
+# `video` stays on: the kit's video code needs its audio code, which has no backend here.
+blenderui = { path = "../../../bindings/rust/blenderui", default-features = false, features = ["png", "svg", "freetype", "anim", "video"] }
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

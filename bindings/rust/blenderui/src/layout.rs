@@ -1237,6 +1237,9 @@ impl<'a> Builder<'a> {
                     // `styled` and for the Blender components (`bui-blender`)
                     spec.html = !self.nodes[i].styled && self.attr(i, "bui-blender").is_none();
                     spec.bare = spec.html && self.styles[style].border_drawn.iter().all(|d| !d);
+                    let own = &self.styles[style];
+                    let u = self.units(own.font_size);
+                    spec.radius = own.radius.iter().filter_map(|r| r.to_px(&u)).reduce(f32::max).filter(|r| *r > 0.0);
                     if spec.html && matches!(spec.kind, crate::widgets::WKind::TextArea) {
                         let own = &self.styles[style];
                         let argb = |c: crate::Rgba| {
@@ -1850,6 +1853,14 @@ impl<'a> Builder<'a> {
                 }
                 if s.size.height == Dimension::auto() {
                     s.size.height = Dimension::length(h);
+                    // a control's automatic minimum height is its own: a flex column with a
+                    // definite height must scroll or overflow, never squash it to nothing (unless
+                    // the author capped the height: the cap wins)
+                    if s.min_size.height == LengthPercentageAuto::auto()
+                        && s.max_size.height == LengthPercentageAuto::auto()
+                    {
+                        s.min_size.height = LengthPercentageAuto::length(h);
+                    }
                 }
                 return self.leaf(i, s);
             }

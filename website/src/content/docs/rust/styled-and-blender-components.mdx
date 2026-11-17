@@ -5,7 +5,7 @@ description: Make any part of your Rust UI look like a web page or like Blender,
 section: Rust
 order: 50
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/html.rs", "bindings/rust/blenderui/src/components.rs", "bindings/rust/blenderui/src/element.rs", "bindings/rust/blenderui/src/widgets.rs", "bindings/rust/blenderui/src/events.rs", "bindings/rust/blenderui/examples/forms.rs", "bindings/rust/blenderui/tests/basic_css.rs", "bindings/rust/blenderui/tests/effects.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/html.rs", "bindings/rust/blenderui/src/components.rs", "bindings/rust/blenderui/src/element.rs", "bindings/rust/blenderui/src/widgets.rs", "bindings/rust/blenderui/src/events.rs", "bindings/rust/blenderui/examples/forms.rs", "bindings/rust/blenderui/tests/basic_css.rs", "bindings/rust/blenderui/tests/effects.rs", "bindings/rust/blenderui/tests/app_root.rs", "bindings/rust/blenderui/src/layout.rs"]
 ---
 
 Some apps should look like a web page. Some should look like Blender. Most want a bit of both: a clean document with a few Blender sliders in it. **In BUI you choose the look per element**, and the choice flows down to everything inside.
@@ -143,6 +143,77 @@ div().styled().child(div().attr("styled", "false").child("Browser look again")) 
 - **What changes:** besides the background, text color and size, `styled` gives `pre` a dark padded block, `blockquote` a blue left bar, `kbd` a border, `mark` Blender's orange, `thead` a darker row, `fieldset` and `dialog` Blender's greys and rounded corners, and `hr` a thin grey line.
 
 Want the whole window in Blender's look? Put `styled` on the root element, as the showcase example does with `html().styled()`.
+
+For an app, `app()` is that root ready made: a `body` that is `styled`, has no margin, is as tall as the window and scrolls when its content is taller. The window is not a scrolling document, so a page that overflows needs it (or a scroll container of a definite height, such as `.css("height", "100vh")`). Without it, the default `body` margin of 8 px leaves the browser's white around a `styled` div.
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust title="src/main.rs"
+use blenderui::prelude::*;
+
+struct Page;
+
+impl Render for Page {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        rsx! {
+            <body styled m-0 h-screen overflow-y-scroll>
+                <h1>"Title"</h1>
+                <button>"Go"</button>
+            </body>
+        }
+    }
+}
+
+fn main() {
+    Application::new().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(420.0), px(260.0)),
+            })),
+            ..Default::default()
+        };
+        cx.open_window(opts, |_, cx| cx.new(|_| Page)).unwrap();
+    });
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust title="src/main.rs"
+use blenderui::prelude::*;
+
+struct Page;
+
+impl Render for Page {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        app().child(h1().child("Title")).child(button().child("Go"))
+    }
+}
+
+fn main() {
+    Application::new().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(420.0), px(260.0)),
+            })),
+            ..Default::default()
+        };
+        cx.open_window(opts, |_, cx| cx.new(|_| Page)).unwrap();
+    });
+}
+```
+
+</Tab>
+</Tabs>
+
+Two things to know about plain form controls and layout:
+
+- **Outside `styled`, a `button()` is drawn like a browser's native control** and ignores `.bg()`; a plain text `input()` does use its CSS background as the field's fill. Put a button inside `styled` (or use a Blender component) to style it.
+- **A control keeps its height in a flex column.** A `button` or `input` (browser or Blender look) is never squashed below its own height when the column is shorter than its content: the column scrolls or overflows instead.
 
 <Compare left="Plain HTML" right="Inside styled">
   <div slot="left">

@@ -57,6 +57,9 @@ BKTheme bk_theme = {
     RGBA(0xed5700ffu), /* node_selected */
     RGBA(0xffffffffu), /* node_active */
     RGBA(0x303030ffu), /* area_header */
+    RGBA(0x161616ffu), /* editor_border */
+    RGBA(0xffffff15u), /* editor_outline */
+    RGBA(0xffffff2au), /* editor_outline_active */
 };
 
 const BKTheme bk_theme_dark = {
@@ -107,6 +110,9 @@ const BKTheme bk_theme_dark = {
     RGBA(0xed5700ffu), /* node_selected */
     RGBA(0xffffffffu), /* node_active */
     RGBA(0x303030ffu), /* area_header */
+    RGBA(0x161616ffu), /* editor_border */
+    RGBA(0xffffff15u), /* editor_outline */
+    RGBA(0xffffff2au), /* editor_outline_active */
 };
 
 const BKTheme bk_theme_light = {
@@ -157,4 +163,7 @@ const BKTheme bk_theme_light = {
     RGBA(0xed5700ffu), /* node_selected */
     RGBA(0xffffffffu), /* node_active */
     RGBA(0xb3b3b3ffu), /* area_header */
+    RGBA(0x999999ffu), /* editor_border */
+    RGBA(0xb3b3b3ffu), /* editor_outline */
+    RGBA(0xccccccffu), /* editor_outline_active */
 };

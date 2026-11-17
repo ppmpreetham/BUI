@@ -104,6 +104,13 @@ NODE_COLORS = [
 ]
 TOPBAR = "topbar/ThemeTopBar/space/ThemeSpaceGeneric"
 PROPS = "properties/ThemeProperties/space/ThemeSpaceGeneric"
+# The screen's area borders (ED_screen_draw_edges): TH_EDITOR_BORDER, _OUTLINE, _OUTLINE_ACTIVE
+SCREEN_COLORS = [
+    ("editor_border", 0x161616ff, "user_interface/ThemeUserInterface@editor_border", False),
+    ("editor_outline", 0xffffff15, "user_interface/ThemeUserInterface@editor_outline", False),
+    ("editor_outline_active", 0xffffff2a,
+     "user_interface/ThemeUserInterface@editor_outline_active", False),
+]
 # derived: (field, default); computed in build()
 EXTRA = [("area_header", 0x303030ff)]  # editor headers: space header over the region back
 
@@ -151,7 +158,7 @@ def build(theme) -> dict:
             if e.get("roundness") is not None:
                 w["roundness"] = float(e.get("roundness"))
         t["wcol"][name] = w
-    for field, default, path, opaque in COLORS + FILE_COLORS + NODE_COLORS:
+    for field, default, path, opaque in COLORS + FILE_COLORS + NODE_COLORS + SCREEN_COLORS:
         v = default
         if path and theme is not None and lookup(theme, path) is not None:
             v = parse_color(lookup(theme, path), default)
@@ -189,7 +196,7 @@ def emit(name: str, t: dict, const: bool) -> str:
     out.append("    %s, /* menu_shadow_fac */" % c_float(t["menu_shadow_fac"]))
     out.append("    %d, /* menu_shadow_width */" % t["menu_shadow_width"])
     out.append("    %s, /* panel_roundness */" % c_float(t["panel_roundness"]))
-    for field, *_ in FILE_COLORS + NODE_COLORS + EXTRA:
+    for field, *_ in FILE_COLORS + NODE_COLORS + EXTRA + SCREEN_COLORS:
         out.append("    RGBA(0x%08xu), /* %s */" % (t[field], field))
     out.append("};")
     return "\n".join(out)

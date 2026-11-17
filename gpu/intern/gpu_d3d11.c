@@ -124,6 +124,7 @@ typedef struct DevTex {
   int w, h;
   ID3D11Texture2D *tex;
   ID3D11ShaderResourceView *srv;
+  ID3D11RenderTargetView *rtv; /* a render target (BUI_target_create): effects draw into it */
 } DevTex;
 
 typedef struct TriV {
@@ -144,7 +145,8 @@ typedef struct DevFx {
 
 /* One recorded effect draw. */
 typedef struct FxCall {
-  int effect;
+  int effect; /* 0: not a draw but a clear of `dst` (its 4 floats at `floats`) */
+  int dst;    /* 0: the frame; else the render target it draws into */
   float rect[4];
   int inputs[BUI_EFFECT_MAX_INPUTS];
   int clip[4];
@@ -649,9 +651,23 @@ static Batch *batch_new(BuiGpu *g, int tri, int first)
 
 static void dtex_release(DevTex *t)
 {
+  REL(t->rtv);
   REL(t->srv);
   REL(t->tex);
   t->id = 0;
+}
+
+/* The DXGI format of a render target (BUI_TARGET_*). */
+static DXGI_FORMAT target_format(int target)
+{
+  switch (target - 1) {
+    case BUI_TARGET_RGBA16F:
+      return DXGI_FORMAT_R16G16B16A16_FLOAT;
+    case BUI_TARGET_RGBA32F:
+      return DXGI_FORMAT_R32G32B32A32_FLOAT;
+    default:
+      return DXGI_FORMAT_R8G8B8A8_UNORM;
+  }
 }
 
 /* Creates or refreshes the device copy of registry texture `id`. */
@@ -705,17 +721,25 @@ static ID3D11ShaderResourceView *dtex_get(BuiGpu *g, int id)
   td.Width = (UINT)v.w;
   td.Height = (UINT)v.h;
   td.MipLevels = td.ArraySize = 1;
-  td.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  td.Format = v.target ? target_format(v.target) : DXGI_FORMAT_R8G8B8A8_UNORM;
   td.SampleDesc.Count = 1;
   td.Usage = D3D11_USAGE_DEFAULT;
-  td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+  td.BindFlags = D3D11_BIND_SHADER_RESOURCE | (v.target ? D3D11_BIND_RENDER_TARGET : 0);
   D3D11_SUBRESOURCE_DATA init = {v.rgba, (UINT)v.w * 4, 0};
-  if (FAILED(ID3D11Device_CreateTexture2D(g->dev, &td, &init, &t->tex)) ||
+  /* a render target starts as zeros (a texture made without data is undefined: it is cleared) */
+  if (FAILED(ID3D11Device_CreateTexture2D(g->dev, &td, v.target ? NULL : &init, &t->tex)) ||
       FAILED(ID3D11Device_CreateShaderResourceView(g->dev, (ID3D11Resource *)t->tex, NULL,
-                                                   &t->srv)))
+                                                   &t->srv)) ||
+      (v.target &&
+       FAILED(ID3D11Device_CreateRenderTargetView(g->dev, (ID3D11Resource *)t->tex, NULL,
+                                                  &t->rtv))))
   {
     dtex_release(t);
     return g->white_srv;
+  }
+  if (t->rtv) {
+    const float zero[4] = {0, 0, 0, 0};
+    ID3D11DeviceContext_ClearRenderTargetView(g->ctx, t->rtv, zero);
   }
   t->id = id;
   t->gen = v.gen;
@@ -1049,7 +1073,15 @@ static void dfx_sweep(BuiGpu *g)
   }
 }
 
+/* The device texture `id` is, once dtex_get made it (NULL: not live here). */
+static DevTex *dtex_dev(BuiGpu *g, int id)
+{
+  const int slot = (id & 0xFFFF) - 1;
+  return id > 0 && slot >= 0 && slot < g->n_dtex && g->dtex[slot].id == id ? &g->dtex[slot] : NULL;
+}
+
 int bui_gpu_effect(BuiGpu *g,
+                   int dst,
                    int effect,
                    const float rect[4],
                    const int inputs[BUI_EFFECT_MAX_INPUTS],
@@ -1067,6 +1099,18 @@ int bui_gpu_effect(BuiGpu *g,
     return 0;
   }
   dtex_sweep(g);
+  if (dst) {
+    dtex_get(g, dst);
+    const DevTex *d = dtex_dev(g, dst);
+    if (!d || !d->rtv) {
+      return 0; /* not a render target, or the device could not make it */
+    }
+    for (int k = 0; k < v.n_inputs; k++) {
+      if (inputs[k] == dst) {
+        return 0; /* a pass cannot sample the target it draws into */
+      }
+    }
+  }
   for (int k = 0; k < v.n_inputs; k++) {
     dtex_get(g, inputs[k]); /* may flush: before anything of this draw is recorded */
   }
@@ -1082,6 +1126,7 @@ int bui_gpu_effect(BuiGpu *g,
   b->count = 1;
   FxCall *c = &g->fx[g->n_fx++];
   c->effect = effect;
+  c->dst = dst;
   memcpy(c->rect, rect, sizeof(c->rect));
   memcpy(c->inputs, inputs, sizeof(c->inputs));
   memcpy(c->clip, clip, sizeof(c->clip));
@@ -1092,6 +1137,30 @@ int bui_gpu_effect(BuiGpu *g,
   }
   memset(g->fxf + g->n_fxf + n, 0, sizeof(float) * (size_t)(v.n_floats - n));
   g->n_fxf += v.n_floats;
+  return 1;
+}
+
+int bui_gpu_target_clear(BuiGpu *g, int target, const float rgba[4])
+{
+  dtex_sweep(g);
+  dtex_get(g, target);
+  const DevTex *d = dtex_dev(g, target);
+  if (!d || !d->rtv || !grow((void **)&g->fx, &g->cap_fx, g->n_fx + 1, sizeof(FxCall)) ||
+      !grow((void **)&g->fxf, &g->cap_fxf, g->n_fxf + 4, sizeof(float)))
+  {
+    return 0;
+  }
+  Batch *b = batch_new(g, 3, g->n_fx);
+  if (!b) {
+    return 0;
+  }
+  b->count = 1;
+  FxCall *c = &g->fx[g->n_fx++];
+  memset(c, 0, sizeof(*c));
+  c->dst = target; /* effect 0: a clear */
+  c->floats = g->n_fxf;
+  memcpy(g->fxf + g->n_fxf, rgba, sizeof(float) * 4);
+  g->n_fxf += 4;
   return 1;
 }
 
@@ -1705,16 +1774,26 @@ static void upload(BuiGpu *g, ID3D11Buffer *buf, const void *data, size_t bytes)
 /* One recorded effect draw: its shaders, floats and inputs, scissored to its clip. */
 static void fx_draw(BuiGpu *g, const FxCall *fc)
 {
+  ID3D11DeviceContext *c = g->ctx;
+  const float blend_factor[4] = {0, 0, 0, 0};
+  /* a pass into a render target: its view and size stand in for the frame's until it is drawn */
+  const DevTex *dst = fc->dst ? dtex_dev(g, fc->dst) : NULL;
+  if (fc->dst && (!dst || !dst->rtv)) {
+    return;
+  }
+  if (!fc->effect) { /* a clear of the target */
+    ID3D11DeviceContext_ClearRenderTargetView(c, dst->rtv, g->fxf + fc->floats);
+    return;
+  }
   const int slot = BUI_EFFECT_SLOT(fc->effect);
   const DevFx *f = slot >= 0 && slot < g->n_dfx ? &g->dfx[slot] : NULL;
   if (!f || f->id != fc->effect || !f->ps) {
     return;
   }
-  ID3D11DeviceContext *c = g->ctx;
   float data[8 + 4 * BUI_EFFECT_MAX_FLOATS] = {0};
   memcpy(data, fc->rect, sizeof(fc->rect));
-  data[4] = 2.0f / (float)g->tw;
-  data[5] = 2.0f / (float)g->th;
+  data[4] = 2.0f / (float)(dst ? dst->w : g->tw);
+  data[5] = 2.0f / (float)(dst ? dst->h : g->th);
   for (int i = 0; i < f->n_floats; i++) { /* HLSL gives each element of an array a register */
     data[8 + 4 * i] = g->fxf[fc->floats + i];
   }
@@ -1722,6 +1801,15 @@ static void fx_draw(BuiGpu *g, const FxCall *fc)
   ID3D11ShaderResourceView *srv[BUI_EFFECT_MAX_INPUTS];
   for (int k = 0; k < f->n_inputs; k++) {
     srv[k] = dtex_srv(g, fc->inputs[k]);
+  }
+  if (dst) {
+    /* nothing the last draw bound may be the target about to be written */
+    ID3D11ShaderResourceView *none[BUI_EFFECT_MAX_INPUTS] = {0};
+    ID3D11DeviceContext_PSSetShaderResources(c, 8, BUI_EFFECT_MAX_INPUTS, none);
+    ID3D11DeviceContext_OMSetRenderTargets(c, 1, (ID3D11RenderTargetView *const *)&dst->rtv, NULL);
+    ID3D11DeviceContext_OMSetBlendState(c, NULL, blend_factor, 0xffffffffu);
+    const D3D11_VIEWPORT vp = {0, 0, (float)dst->w, (float)dst->h, 0, 1};
+    ID3D11DeviceContext_RSSetViewports(c, 1, &vp);
   }
   if (f->n_inputs > 0) {
     ID3D11DeviceContext_PSSetShaderResources(c, 8, (UINT)f->n_inputs, srv);
@@ -1733,6 +1821,14 @@ static void fx_draw(BuiGpu *g, const FxCall *fc)
   const D3D11_RECT sr = {fc->clip[0], fc->clip[1], fc->clip[2], fc->clip[3]};
   ID3D11DeviceContext_RSSetScissorRects(c, 1, &sr);
   ID3D11DeviceContext_Draw(c, 4, 0);
+  if (dst) { /* back to the frame: its view, its size and its blending */
+    ID3D11ShaderResourceView *none[BUI_EFFECT_MAX_INPUTS] = {0};
+    ID3D11DeviceContext_PSSetShaderResources(c, 8, BUI_EFFECT_MAX_INPUTS, none);
+    ID3D11DeviceContext_OMSetRenderTargets(c, 1, &g->rtv, NULL);
+    ID3D11DeviceContext_OMSetBlendState(c, g->blend, blend_factor, 0xffffffffu);
+    const D3D11_VIEWPORT vp = {0, 0, (float)g->tw, (float)g->th, 0, 1};
+    ID3D11DeviceContext_RSSetViewports(c, 1, &vp);
+  }
 }
 
 static void flush(BuiGpu *g)
@@ -2163,6 +2259,7 @@ void bui_gpu_mesh(BuiGpu *g,
   (void)clip;
 }
 int bui_gpu_effect(BuiGpu *g,
+                   int dst,
                    int effect,
                    const float rect[4],
                    const int inputs[BUI_EFFECT_MAX_INPUTS],
@@ -2171,12 +2268,20 @@ int bui_gpu_effect(BuiGpu *g,
                    const int clip[4])
 {
   (void)g;
+  (void)dst;
   (void)effect;
   (void)rect;
   (void)inputs;
   (void)floats;
   (void)n_floats;
   (void)clip;
+  return 0;
+}
+int bui_gpu_target_clear(BuiGpu *g, int target, const float rgba[4])
+{
+  (void)g;
+  (void)target;
+  (void)rgba;
   return 0;
 }
 void bui_gpu_clear(BuiGpu *g, int x, int y, int w, int h)

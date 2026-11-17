@@ -83,6 +83,22 @@ void luabui_report_error(lua_State *L) {
   lua_pop(L, 1);
 }
 
+/* The areas whose close handler is running, innermost first (handlers may close other areas). */
+typedef struct CloseNotice {
+  const BKNode *area;
+  const struct CloseNotice *outer;
+} CloseNotice;
+static const CloseNotice *g_closing;
+
+int luabui_in_close_notice(const BKNode *n) {
+  for (const CloseNotice *c = g_closing; c; c = c->outer) {
+    for (const BKNode *p = c->area; p; p = BK_node_parent(p)) {
+      if (p == n) return 1;
+    }
+  }
+  return 0;
+}
+
 static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, double b) {
   lua_State *L = g_host_L;
   if (!L) return;
@@ -112,14 +128,23 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
   lua_rawget(L, -2);
 
   if (lua_isfunction(L, -1)) {
+    /* The screen frees a closed area after this notice: a handler that frees it (or its screen)
+     * would release the node the screen is still using. It is guarded until the handler returns. */
+    const CloseNotice notice = {node, g_closing};
+    const int closing = kind == BK_EV_AREA && (int)b == BK_AREA_CLOSE;
+    if (closing) g_closing = &notice;
     lua_pushvalue(L, -3);
     lua_pushnumber(L, a);
     lua_pushnumber(L, b);
     if (lua_pcall(L, 3, 0, 0) != LUA_OK) {
       luabui_report_error(L);
     }
+    if (closing) g_closing = notice.outer;
   }
   lua_settop(L, top);
+  if (kind == BK_EV_AREA && (int)b == BK_AREA_CLOSE) {
+    luabui_invalidate_subtree(L, node); /* the screen frees a closed area after this */
+  }
 }
 
 /* ------------------------------------------------------------------ */

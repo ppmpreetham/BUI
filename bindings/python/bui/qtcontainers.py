@@ -1,5 +1,5 @@
 """Qt's container widgets on the kit, drawn the Blender way: QStackedWidget, QToolBox (Blender
-panels), QSplitter (region edges you drag), QToolBar (a row of tool buttons), QDockWidget (a
+panels), QSplitter (Blender's area edges you drag), QToolBar (a row of tool buttons), QDockWidget (a
 panel beside the central widget of a QMainWindow), QTabBar, QFrame (a box or a separator line),
 QGroupBox (checkable), QScrollArea and QStatusBar.
 
@@ -9,8 +9,9 @@ SPDX-License-Identifier: GPL-2.0-or-later
 import buipy
 
 from bui.qtactions import QAction, QToolButton
+from bui.components.core import EV_CONFIGURE
+from bui.components.screen import Panes
 from bui.qtsyntax import EV_CHANGE, PACK, QWidget, Qt, Signal, _kids, _timers
-from bui.tksyntax._widgets import _Sash
 
 
 def _detach(w):
@@ -194,8 +195,9 @@ class QToolBox(QWidget):
 
 
 class QSplitter(QWidget):
-    """Widgets side by side (or stacked) with Blender's region edges between them to drag."""
-    KIND = "frame"
+    """Widgets side by side (or stacked) with Blender's area edges between them to drag: a
+    screen whose only operation is moving its edges (bui.components.screen.Panes)."""
+    KIND = "screen"
     splitterMoved = Signal(int, int)
 
     def __init__(self, orientation=None, parent=None):
@@ -205,61 +207,63 @@ class QSplitter(QWidget):
         super().__init__(parent)
 
     def _setup(self):
-        self._panes = []
-        self._sashes = []
-        self._sizes = {}
+        self._panes = Panes(self, "v" if self._orientation == Qt.Horizontal else "h",
+                            on_moved=self.splitterMoved.emit)
         self._stretch = {}
-        self._handle = 4
         self._collapsible = True
 
-    def _horizontal(self):
-        return self._orientation == Qt.Horizontal
+    def _on_event(self, kind, ref, a, b):
+        if kind == EV_CONFIGURE:
+            self._panes.on_configure()
+        elif kind == EV_CHANGE:
+            self._panes.on_change()
+        super()._on_event(kind, ref, a, b)
 
     def orientation(self):
         return self._orientation
 
     def setOrientation(self, orientation):  # noqa: N802
-        self._orientation = orientation
-        self._relayout()
+        if orientation != self._orientation:
+            sizes = self._panes.sizes()
+            self._orientation = orientation
+            self._panes.axis = "v" if orientation == Qt.Horizontal else "h"
+            self._panes.set_sizes(sizes)
 
     def addWidget(self, w):  # noqa: N802
-        self.insertWidget(len(self._panes), w)
+        self.insertWidget(len(self._panes.panes), w)
 
     def insertWidget(self, index, w):  # noqa: N802
-        if w in self._panes:
-            self._panes.remove(w)
-        _detach(w)
-        self._panes.insert(max(0, min(int(index), len(self._panes))), w)
-        self._relayout()
+        if w not in self._panes.panes:
+            _detach(w)
+        self._panes.insert(index, w)
 
     def replaceWidget(self, index, w):  # noqa: N802
-        old = self._panes[index]
-        self.remove(old)
-        self._sizes.pop(old, None)
-        self._panes[index] = w
+        old = self._panes.panes[index]
+        sizes = self._panes.sizes()
+        self._panes.remove(old)
         _detach(w)
-        self._relayout()
+        self._panes.insert(index, w)
+        self._panes.set_sizes(sizes)
         return old
 
     def count(self):
-        return len(self._panes)
+        return len(self._panes.panes)
 
     def widget(self, index):
-        return self._panes[index] if 0 <= index < len(self._panes) else None
+        panes = self._panes.panes
+        return panes[index] if 0 <= index < len(panes) else None
 
     def indexOf(self, w):  # noqa: N802
-        return self._panes.index(w) if w in self._panes else -1
+        return self._panes.panes.index(w) if w in self._panes.panes else -1
 
     def handleWidth(self):  # noqa: N802
-        return self._handle
+        return self._panes.handle
 
     def setHandleWidth(self, width):  # noqa: N802
-        self._handle = int(width)
-        self._relayout()
+        pass  # Blender's area edges are the theme's width
 
     def setStretchFactor(self, index, stretch):  # noqa: N802
-        self._stretch[self._panes[index]] = int(stretch)
-        self._relayout()
+        self._stretch[index] = int(stretch)  # edges move as Blender's: proportionally
 
     def childrenCollapsible(self):  # noqa: N802
         return self._collapsible
@@ -268,39 +272,10 @@ class QSplitter(QWidget):
         self._collapsible = bool(b)
 
     def sizes(self):
-        return [p.width() if self._horizontal() else p.height() for p in self._panes]
+        return self._panes.sizes()
 
     def setSizes(self, sizes):  # noqa: N802
-        for i, size in enumerate(sizes[:len(self._panes)]):
-            self._set_pane_size(i, size, emit=False)
-
-    def _relayout(self):
-        for node in self._sashes + [p for p in self._panes if p.parent is self]:
-            self.remove(node)
-        self._sashes = []
-        h = self._horizontal()
-        side = 2 if h else 0
-        # without stretch factors the last pane takes the rest of the space, as Qt's does
-        stretchy = [p for p in self._panes if self._stretch.get(p, 0)] or self._panes[-1:]
-        for i, pane in enumerate(self._panes):
-            if i:
-                sash = _Sash(self, i - 1)
-                sash.set("cursor", 1.0 if h else 2.0)
-                self.add(sash)
-                sash.geom(PACK, side=side, fill=2 if h else 1,
-                          **{"reqwidth" if h else "reqheight": self._handle})
-                self._sashes.append(sash)
-            self.add(pane)
-            pane.geom(PACK, side=side, fill=3, expand=1 if pane in stretchy else 0,
-                      **{"reqwidth" if h else "reqheight": int(self._sizes.get(pane, 0))})
-
-    def _set_pane_size(self, index, size, emit=True):
-        pane = self._panes[index]
-        size = max(0 if self._collapsible else 1, int(size))
-        self._sizes[pane] = size
-        pane.geom(PACK, **{"reqwidth" if self._horizontal() else "reqheight": size})
-        if emit:
-            self.splitterMoved.emit(size, index + 1)
+        self._panes.set_sizes(sizes)
 
 
 class QToolBar(QWidget):

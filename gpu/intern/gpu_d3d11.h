@@ -121,18 +121,26 @@ void bui_gpu_mesh(BuiGpu *g,
  * is created on first use (gpu_effect.h; the log goes to BUI_effect_error). 0 when this device
  * cannot run it: nothing is recorded and the caller draws a fallback. */
 int bui_gpu_effect(BuiGpu *g,
+                   int dst,
                    int effect,
                    const float rect[4],
                    const int inputs[BUI_EFFECT_MAX_INPUTS],
                    const float *floats,
                    int n_floats,
                    const int clip[4]);
+/* `dst` 0 draws into the frame; a target id (BUI_target_create, GPU_raster.h) draws into that
+ * target, `rect` and `clip` being its pixels. */
+
+/* Fills a whole render target with rgba, in paint order. 0 when this device cannot. */
+int bui_gpu_target_clear(BuiGpu *g, int target, const float rgba[4]);
 
 /* Texture registry shared by the renderers (gpu_raster.c). */
 typedef struct BuiTexView {
   int w, h;
-  const uint8_t *rgba; /* w * 4 bytes per row */
+  const uint8_t *rgba; /* w * 4 bytes per row; NULL for a render target */
   unsigned gen;        /* bumped by every update */
+  int target;          /* 0: a CPU texture (RGBA8); else 1 + BUI_TARGET_* of a render target */
+  int linear;          /* a target's filter */
 } BuiTexView;
 int bui_texture_view(int tex, BuiTexView *r_view); /* 0 when not live */
 /* Rects (x, y, w, h) updated after `since`; -1 when the log no longer

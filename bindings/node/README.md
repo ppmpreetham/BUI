@@ -103,6 +103,7 @@ win.body.appendChild(button)
 npx bui build app.js           # app.exe: BUI + embedded QuickJS, ~5 MB
 npx bui build app.js --bun     # app.exe: Bun, with Node's APIs and a JIT, ~115 MB
 npx bui run app.js             # run on the QuickJS runtime, no build
+npx bui bundle app.jsx -o main.js  # the one script QuickJS runs (Android: platform/android/build.py --js)
 ```
 
 Options:

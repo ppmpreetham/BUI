@@ -80,6 +80,8 @@ static int l_node_remove(lua_State *L) {
   luabui_Node *child  = CHECK_NODE(L, 2);
   if (!parent->node || !child->node)
     return luaL_error(L, "attempt to use freed node");
+  if (luabui_in_close_notice(child->node))
+    return luaL_error(L, "cannot detach a node while its area is closing (the screen removes it)");
   BK_node_remove(parent->node, child->node);
   /* Detach only: the C tree owns nodes, remove never frees (BK_node_remove
    * just unlinks; cf. buipy_kit.c kitnode_remove). The child wrapper stays
@@ -148,18 +150,19 @@ static int l_node_set(lua_State *L) {
   if (!ud->node) return luaL_error(L, "attempt to use freed node");
   const char *key = luaL_checkstring(L, 2);
   int t = lua_type(L, 3);
+  int ok = 1; /* false: the node doesn't take this key or value (validated by the kit) */
 
   switch (t) {
     case LUA_TSTRING: {
-      BK_set_str(ud->node, key, lua_tostring(L, 3));
+      ok = BK_set_str(ud->node, key, lua_tostring(L, 3));
       break;
     }
     case LUA_TNUMBER: {
-      BK_set_num(ud->node, key, lua_tonumber(L, 3));
+      ok = BK_set_num(ud->node, key, lua_tonumber(L, 3));
       break;
     }
     case LUA_TBOOLEAN: {
-      BK_set_num(ud->node, key, lua_toboolean(L, 3) ? 1.0 : 0.0);
+      ok = BK_set_num(ud->node, key, lua_toboolean(L, 3) ? 1.0 : 0.0);
       break;
     }
     case LUA_TTABLE: {
@@ -178,7 +181,7 @@ static int l_node_set(lua_State *L) {
             (float)lua_tonumber(L, -2),
             (float)lua_tonumber(L, -1)
           };
-          BK_set_color(ud->node, key, rgba);
+          ok = BK_set_color(ud->node, key, rgba);
           lua_pop(L, 4);
           break;
         }
@@ -190,7 +193,7 @@ static int l_node_set(lua_State *L) {
         lua_rawgeti(L, 3, i + 1);
         vals[i] = lua_tostring(L, -1);
       }
-      BK_set_strs(ud->node, key, vals, len);
+      ok = BK_set_strs(ud->node, key, vals, len);
       /* Pop the string values */
       for (int i = 0; i < len; i++) lua_pop(L, 1);
       break;
@@ -198,7 +201,8 @@ static int l_node_set(lua_State *L) {
     default:
       return luaL_typeerror(L, 3, "string, number, boolean, or table");
   }
-  return 0;
+  lua_pushboolean(L, ok);
+  return 1;
 }
 
 static int l_node_get(lua_State *L) {
@@ -272,13 +276,13 @@ static int l_node_relayout(lua_State *L) {
 /* BK_node_free() recurses into ref-less (plain) children, so every live
  * wrapper in the subtree must be invalidated first — otherwise methods on
  * stale userdata would dereference freed BKNodes. */
-static void invalidate_node_subtree(lua_State *L, BKNode *n) {
+void luabui_invalidate_subtree(lua_State *L, BKNode *n) {
   const int nkids = BK_node_child_count(n);
   for (int i = 0; i < nkids; i++) {
     BKNode *c = BK_node_child(n, i);
     if (!c || BK_node_ref(c))
       continue; /* host-owned: BK_node_free leaves it alive */
-    invalidate_node_subtree(L, c);
+    luabui_invalidate_subtree(L, c);
   }
   if (luabui_lookup_node(L, n)) {
     luabui_Node *cud = (luabui_Node *)lua_touserdata(L, -1);
@@ -291,12 +295,65 @@ static void invalidate_node_subtree(lua_State *L, BKNode *n) {
 
 static int l_node_free(lua_State *L) {
   luabui_Node *ud = CHECK_NODE(L, 1);
+  if (ud->node && luabui_in_close_notice(ud->node)) {
+    /* the area's close handler is running: its screen frees the area right after (and nodes above it
+     * are in use): freeing here would leave the screen with a dangling pointer */
+    return luaL_error(L, "cannot free a node while its area is closing (the screen frees it)");
+  }
   if (ud->node) {
     BKNode *n = ud->node; /* keep it: invalidation NULLs this wrapper too */
-    invalidate_node_subtree(L, n);
+    luabui_invalidate_subtree(L, n);
     BK_node_free(n);
   }
   return 0;
+}
+
+/* -- screen operations on an area (BK_area_*) ----------------------------- */
+
+/* Push the wrapper of a node the kit made (a new area), mapping it. */
+static void push_node(lua_State *L, BKNode *n) {
+  if (!luabui_push_node(L, n)) lua_pushnil(L);
+}
+
+static BKNode *live_node(lua_State *L, int idx) {
+  luabui_Node *ud = CHECK_NODE(L, idx);
+  if (!ud->node) luaL_error(L, "attempt to use freed node");
+  return ud->node;
+}
+
+/* area:split("h"|"v", factor) -> the new area or nil */
+static int l_node_split(lua_State *L) {
+  BKNode *area = live_node(L, 1);
+  const char *axis = luaL_checkstring(L, 2);
+  const double factor = luaL_checknumber(L, 3);
+  if ((axis[0] != 'h' && axis[0] != 'v') || axis[1])
+    return luaL_argerror(L, 2, "'h' or 'v'");
+  push_node(L, BK_area_split(area, (BKScreenAxis)axis[0], (float)factor));
+  return 1;
+}
+
+static int l_node_join(lua_State *L) {
+  lua_pushboolean(L, BK_area_join(live_node(L, 1), live_node(L, 2)));
+  return 1;
+}
+
+/* area:dock(target, "left"|"right"|"top"|"bottom"|"center", factor=0.5) */
+static int l_node_dock(lua_State *L) {
+  static const char *const where[] = {"left", "right", "top", "bottom", "center", NULL};
+  BKNode *area = live_node(L, 1), *target = live_node(L, 2);
+  const int w = luaL_checkoption(L, 3, "center", where);
+  lua_pushboolean(L, BK_area_dock(area, target, (BKDock)w, (float)luaL_optnumber(L, 4, 0.5)));
+  return 1;
+}
+
+static int l_node_swap(lua_State *L) {
+  lua_pushboolean(L, BK_area_swap(live_node(L, 1), live_node(L, 2)));
+  return 1;
+}
+
+static int l_node_close(lua_State *L) {
+  lua_pushboolean(L, BK_area_close(live_node(L, 1)));
+  return 1;
 }
 
 static int l_node_on(lua_State *L) {
@@ -1287,6 +1344,11 @@ static const luaL_Reg node_methods[] = {
   {"invalidate",   l_node_invalidate},
   {"relayout",     l_node_relayout},
   {"free",         l_node_free},
+  {"split",        l_node_split},
+  {"join",         l_node_join},
+  {"dock",         l_node_dock},
+  {"swap",         l_node_swap},
+  {"close",        l_node_close},
   {"on",           l_node_on},
   {"off",          l_node_off},
   {"geom",         l_node_geom},

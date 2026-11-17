@@ -383,6 +383,42 @@ int BUI_raster_effect(BuiRaster *r,
                       const float *floats,
                       int n_floats);
 
+/* -- render targets: effects that draw into textures -------------------------------
+ * As Blender draws into a GPUTexture created with GPU_TEXTURE_USAGE_ATTACHMENT through a
+ * GPUFramebuffer (gpu/GPU_texture.hh, gpu/GPU_framebuffer.hh), a *target* is a texture an effect
+ * draws into instead of the raster's frame. It is a registry texture: its id is a BUI texture id,
+ * BUI_texture_free frees it, BUI_texture_size reads its size and an effect samples it as any input.
+ * It has no CPU copy (BUI_texture_update does nothing to it) and is made on the device on first
+ * use, so it belongs to the device that draws into it.
+ *
+ * The formats are the ones simulations need: RGBA16F and RGBA32F keep values a byte cannot (a
+ * slow burn, a velocity). Effects read a target bilinearly with input_raw and exactly with
+ * input_load (gpu_effect.c); input_color premultiplies, which data does not want.
+ *
+ * Passes are recorded in order with the frame's other draws, so what fills a target comes before
+ * what samples it, and a feedback loop ping-pongs between two targets (a pass must not sample the
+ * target it draws into). BUI_raster_effect_to draws the whole target; the effect's `p` is the pixel
+ * in the target (row 0 first, as everywhere in BUI) and `box_size` its size. Nothing is blended:
+ * the target takes the shader's RGBA as it is (not premultiplied, not clamped for float formats).
+ * Both return 0 when this raster cannot (software raster, no GPU, no compiler, a compile error):
+ * nothing was drawn. */
+enum {
+  BUI_TARGET_RGBA8 = 0,
+  BUI_TARGET_RGBA16F = 1,
+  BUI_TARGET_RGBA32F = 2,
+};
+/* A w x h target of `format`, transparent black until drawn into; 0 on failure. */
+int BUI_target_create(int w, int h, int format);
+/* Draws `effect` over all of `target`, sampling `inputs` (BUI textures, targets included). */
+int BUI_raster_effect_to(BuiRaster *r,
+                         int target,
+                         int effect,
+                         const int inputs[BUI_EFFECT_MAX_INPUTS],
+                         const float *floats,
+                         int n_floats);
+/* Fills all of `target` with rgba as given (nothing is premultiplied or clamped). */
+int BUI_raster_target_clear(BuiRaster *r, int target, const float rgba[4]);
+
 /* A BuiGpuSink that renders into `r` (user pointer is the raster). */
 const BuiGpuSink *BUI_raster_sink(BuiRaster *r);
 

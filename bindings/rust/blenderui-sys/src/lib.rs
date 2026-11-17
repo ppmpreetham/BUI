@@ -52,6 +52,16 @@ pub const BK_EV_VIEW: c_int = 17;
 pub const BK_EV_SCROLL: c_int = 18;
 pub const BK_EV_CONFIGURE: c_int = 19;
 pub const BK_EV_KEYRELEASE: c_int = 20;
+/// A screen's areas: a = the area's child index, b = `BK_AREA_*`.
+pub const BK_EV_AREA: c_int = 21;
+/// A panel dragged to a new place: a = old index, b = new index.
+pub const BK_EV_MOVE: c_int = 22;
+/// An area's region resized, hidden or shown: a = size, b = hidden.
+pub const BK_EV_RESIZE: c_int = 23;
+/// `BK_EV_AREA`'s b: a new area (on the screen), one leaving or opened in a window (on the area).
+pub const BK_AREA_NEW: c_int = 1;
+pub const BK_AREA_CLOSE: c_int = 2;
+pub const BK_AREA_WINDOW: c_int = 3;
 
 // Modifier bits for input calls.
 pub const BK_SHIFT: c_int = 1;
@@ -80,9 +90,15 @@ pub const BK_ITEM_IMAGE: c_int = 6;
 pub const BK_ITEM_ROUNDRECT: c_int = 7;
 /// A GPU shader over the item's box (`BUI_effect_create`); the item's image is the fallback.
 pub const BK_ITEM_EFFECT: c_int = 8;
+/// A GPU pass into a render target (`BUI_target_create`): see `effect_target`.
+pub const BK_ITEM_PASS: c_int = 9;
 
 /// The most textures an effect samples, the most floats it reads, the longest source (bytes).
 pub const BK_EFFECT_MAX_INPUTS: usize = 8;
+/// Render target formats (`BUI_target_create`).
+pub const BUI_TARGET_RGBA8: c_int = 0;
+pub const BUI_TARGET_RGBA16F: c_int = 1;
+pub const BUI_TARGET_RGBA32F: c_int = 2;
 pub const BK_EFFECT_MAX_FLOATS: usize = 256;
 pub const BK_EFFECT_MAX_SOURCE: usize = 65536;
 
@@ -133,6 +149,8 @@ pub struct BKCanvasItem {
     pub effect_inputs: [c_int; BK_EFFECT_MAX_INPUTS],
     pub effect_floats: *const c_float,
     pub n_effect_floats: c_int,
+    /// `BK_ITEM_PASS`: the render target the effect draws into (`effect` 0: a clear to the floats).
+    pub effect_target: c_int,
 }
 
 /// A `<video>` (`BKVideo`): the kit's player (OS decoders; frames in one GPU
@@ -269,6 +287,15 @@ unsafe extern "C" {
     pub fn BK_node_child(node: *const BKNode, i: c_int) -> *mut BKNode;
     pub fn BK_node_remove(parent: *mut BKNode, child: *mut BKNode);
     pub fn BK_node_rect(node: *const BKNode, r_rect: *mut c_int);
+    pub fn BK_node_child_count(node: *const BKNode) -> c_int;
+    pub fn BK_node_parent(node: *const BKNode) -> *mut BKNode;
+
+    // screens, areas and regions (Blender's editors/screen); axis: b'h' or b'v', where: BKDock
+    pub fn BK_area_split(area: *mut BKNode, axis: c_int, factor: c_float) -> *mut BKNode;
+    pub fn BK_area_join(keep: *mut BKNode, gone: *mut BKNode) -> c_int;
+    pub fn BK_area_dock(area: *mut BKNode, target: *mut BKNode, where_: c_int, factor: c_float) -> c_int;
+    pub fn BK_area_swap(a: *mut BKNode, b: *mut BKNode) -> c_int;
+    pub fn BK_area_close(area: *mut BKNode) -> c_int;
     pub fn BK_node_natural(node: *mut BKNode, r_size: *mut c_int);
     pub fn BK_node_set_image(node: *mut BKNode, rgba: *const c_uchar, w: c_int, h: c_int);
     pub fn BK_node_set_imbuf(node: *mut BKNode, ib: *const BKImBuf);
@@ -388,6 +415,8 @@ unsafe extern "C" {
     pub fn BK_release(ctx: *mut BKContext, x: c_int, y: c_int, mods: c_int) -> c_int;
     pub fn BK_motion(ctx: *mut BKContext, x: c_int, y: c_int, mods: c_int) -> c_int;
     pub fn BK_wheel(ctx: *mut BKContext, x: c_int, y: c_int, delta: c_int, mods: c_int) -> c_int;
+    pub fn BK_scroll_px(ctx: *mut BKContext, x: c_int, y: c_int, dx: f32, dy: f32, mods: c_int)
+        -> c_int;
     pub fn BK_key(ctx: *mut BKContext, text: *const c_char, keysym: *const c_char, mods: c_int)
         -> c_int;
     pub fn BK_key_release(ctx: *mut BKContext, keysym: *const c_char, mods: c_int) -> c_int;
@@ -445,6 +474,13 @@ unsafe extern "C" {
     /// An application shader over a box, on the GPU: 1 when drawn, 0 when it cannot run (the caller draws its fallback).
     pub fn BUI_raster_effect(r: *mut BuiRaster, x: c_float, y: c_float, w: c_float, h: c_float, effect: c_int,
                              inputs: *const c_int, floats: *const c_float, n_floats: c_int) -> c_int;
+    /// A render target (BUI texture id): effects draw into it with `BUI_raster_effect_to`; `format` is `BUI_TARGET_*`.
+    pub fn BUI_target_create(w: c_int, h: c_int, format: c_int) -> c_int;
+    /// An effect over all of a render target: 1 when drawn, 0 when it cannot run here.
+    pub fn BUI_raster_effect_to(r: *mut BuiRaster, target: c_int, effect: c_int, inputs: *const c_int,
+                                floats: *const c_float, n_floats: c_int) -> c_int;
+    /// Fill a whole render target with rgba (4 floats, as given).
+    pub fn BUI_raster_target_clear(r: *mut BuiRaster, target: c_int, rgba: *const c_float) -> c_int;
     pub fn BUI_text_measure(family: *const c_char, flags: c_int, size: c_float,
                             utf8: *const c_char, len: c_int, r_width: *mut c_float) -> c_int;
     /// Registers a TrueType/OpenType font (copied) for `family` + style flags.

@@ -1,0 +1,136 @@
+---
+title: Android
+description: Run BUI on a phone from C, Lua or Rust with the same code as on a desktop. One NativeActivity, no Java and no Gradle, damage-driven software rendering, touch that scrolls, the soft keyboard, and an APK of about 1 to 2 MB.
+section: Concepts
+order: 69
+sources: ["kit/intern/kit_window_android.c", "platform/android/bui_android.c", "platform/android/bui_app.h", "platform/android/fonts.c", "platform/android/demo.c", "platform/android/lua_app.c", "platform/android/rust/src/lib.rs", "platform/android/js/src/lib.rs", "platform/android/imgui_app.cpp", "bindings/rust/blenderui-qjs/src/lib.rs", "platform/android/CMakeLists.txt", "platform/android/AndroidManifest.xml", "platform/android/build.py", "examples/android/main.lua", "docs/android.md"]
+---
+
+On Android the kit's window is the activity's surface (`kit/intern/kit_window_android.c`, which implements `BK_window_*` like the Windows and Linux hosts do). An app opens a window and runs it exactly as on a desktop, so Rust, Lua and C apps are the code they would be anywhere else. Nothing changes for other platforms: the Android code is in `platform/android`, the kit's Android-only branches and `if(ANDROID)` blocks.
+
+```bash
+python platform/android/build.py                       # the C demo: arm64-v8a + x86_64
+python platform/android/build.py --lua examples/android        # a Lua app
+python platform/android/build.py --rust platform/android/rust  # a Rust app
+python platform/android/build.py --js app.jsx          # JavaScript: React, Vue, Svelte
+python platform/android/build.py --imgui                  # Dear ImGui (C++)
+python platform/android/build.py --install             # install and start it
+```
+
+You need the Android SDK (`ANDROID_HOME`), an NDK, CMake and a JDK for `keytool`; Rust also needs the Android targets (`rustup target add aarch64-linux-android x86_64-linux-android`).
+
+## Your app
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust title="src/lib.rs"
+use blenderui::prelude::*;
+
+struct MyApp;
+
+impl Render for MyApp {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        app().child(h1().child("Hello, Android")).child(button().child("Go"))
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn bui_app_main() {
+    Application::new().run(|cx: &mut App| {
+        cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| MyApp)).unwrap();
+    });
+}
+```
+
+A `staticlib` crate (see `platform/android/rust`). Give the root a definite height (`.css("height", "100vh")`) with `overflow_y_scroll()` to scroll.
+</Tab>
+<Tab label="Lua">
+
+```lua title="main.lua"
+local bui = require("bui")
+local root = bui.Node("column")
+local hello = bui.Node("label")
+hello:set("text", "Hello, Android")
+root:add(hello)
+bui.open({ root = root })
+```
+
+`assets/main.lua` is an ordinary BUI Lua script; `require` finds your other `.lua` files and `bui.lua` in the APK.
+</Tab>
+<Tab label="JavaScript">
+
+```jsx
+import { render, useState } from "@blender-ui/react"
+
+function Counter() {
+  const [n, setN] = useState(0)
+  return <button onClick={() => setN(n + 1)}>Clicks: {n}</button>
+}
+render(<Counter />, { title: "App" })
+```
+
+`build.py --js app.jsx` bundles it (with `bui bundle`, which needs Bun) and QuickJS runs it as `assets/main.js`, as `bui build` does on a desktop. React, Vue (`.vue`) and Svelte (`.svelte`) all run; `console.log` goes to logcat (tag `bui-js`). The APK is about 2.8 MB (arm64-v8a: the 5.6 MB library plus the bundle; React is 200 KB).
+</Tab>
+<Tab label="Dear ImGui">
+
+```cpp title="app.cpp"
+#include "BUI_kit.h"
+#include "bui_app.h"
+#include "imgui.h"
+#include "imgui_impl_bui.h"
+
+static void frame(void *) { ImGui::ShowDemoWindow(); }
+
+void bui_app_main(void) {
+  ImGui::CreateContext();
+  ImGui_ImplBUI_App *app = ImGui_ImplBUI_CreateApp("App", 360, 720, frame, nullptr);
+  BK_window_wm(ImGui_ImplBUI_AppWindow(app), "touch_drag", 1, 0);  // a drag is ImGui's
+  ImGui_ImplBUI_RunApp(app);
+}
+```
+
+`build.py --imgui app.cpp` (no file: the demo in `platform/android/imgui_app.cpp`). About 1.8 MB.
+</Tab>
+<Tab label="C">
+
+```c title="app.c"
+#include "BUI_kit.h"
+#include "bui_app.h"
+
+static BKNode *build_ui(void) {
+  BKNode *page = BK_node_new("column");
+  BK_set_num(page, "padding", 12);
+  BKNode *hello = BK_node_new("label");
+  BK_set_str(hello, "text", "Hello, Android");
+  BK_node_add(page, hello, -1);
+  return page;
+}
+
+void bui_app_main(void) {
+  BKContext *ctx = BK_context_new(build_ui());
+  BKWindow *win = BK_window_new(ctx, "App", 360, 720);
+  BK_window_show(win);
+  BK_window_run();
+  BK_window_free(win);
+  BK_context_free(ctx);
+}
+```
+</Tab>
+</LangTabs>
+
+Python, Qt, tkinter and D need their runtime on the device and are not available on Android.
+
+## How it behaves
+
+- **Damage driven.** The thread sleeps until a touch, key, timer or frame request, and only the damaged rectangles are converted and locked. An idle app uses no CPU.
+- **Scale.** A CSS pixel is a dp, as in Chrome on Android.
+- **Touch.** One finger is the pointer and a tap is a click. A drag that starts on a widget that drags (sliders, text, scrollbars) drags it; anywhere else it scrolls, following the finger exactly and carrying on after it lifts with the deceleration of iOS's scroll views. A touch at the right edge of a custom node drags the app's scrollbar, so a list of millions of rows can be dragged to any place. Two fingers always scroll.
+- **Keyboard.** It opens while a text field is edited (through the input method manager, since the activity's view is not a text editor); keys arrive as key events. Predictive keyboards and IME composition are not wired up yet.
+- **Big lists.** The Rust demo scrolls a list of 10 million rows and a chat of 100 000 messages (`blenderui::vlist`): only the rows in view exist, so a frame costs the visible rows, not the list.
+- **Fonts.** The system's Roboto is used (Inter is left out, 0.8 MB). Register your own with `BUI_text_add_font` and select it with `BK_set_font`.
+- **Size.** About 1.1 MB per ABI for the C demo, 1.4 MB with Lua and 2.0 MB with Rust (arm64-v8a).
+
+<Callout type="note" title="What is tested">
+The C, Lua, Rust and JavaScript (React, Vue, Svelte) apps run on an x86_64 emulator (API 33). The arm64 builds compile and link but were not run on a device. There is no GPU renderer, long-press, pinch or IME composition yet.
+</Callout>

@@ -189,6 +189,11 @@ if(BUI_BUILD_TESTS AND NOT BUI_LUA_ROCK)
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
   set_tests_properties(bui_lua_theme PROPERTIES TIMEOUT 30)
 
+  add_test(NAME bui_lua_screen
+    COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_screen.lua
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+  set_tests_properties(bui_lua_screen PROPERTIES TIMEOUT 30)
+
   add_test(NAME bui_lua_anim
     COMMAND bui-lua ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_anim.lua
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})

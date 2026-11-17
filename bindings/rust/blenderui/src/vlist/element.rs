@@ -133,8 +133,9 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                 .on_scroll_wheel(move |e, w, cx| {
                     wh.update(cx, |s, _| {
                         // Blender's wheel scrolls at once, a notch or a touchpad fraction alike: no easing
-                        let lines = f64::from(e.delta);
-                        s.view.wheel(-lines * WHEEL_NOTCH_PX, true);
+                        // a touch drag moves the list exactly as far as the finger went
+                        let by = e.pixels.map_or(f64::from(e.delta) * WHEEL_NOTCH_PX, f64::from);
+                        s.view.wheel(-by, true);
                     });
                     w.request_animation_frame();
                 })

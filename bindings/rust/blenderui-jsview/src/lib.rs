@@ -409,6 +409,9 @@ impl JsView {
         for &c in &n.children {
             d = d.child(self.build(c));
         }
+        if n.tag == "bui-screen" {
+            d = blenderui::screen::screen_element(d); // Blender's screen: the kit lays its areas out
+        }
         d.into_any_element()
     }
 

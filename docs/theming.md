@@ -125,7 +125,9 @@ A color (`"#rrggbb"`, with an optional alpha) or a number in `colors` whose key 
 ## What a theme does not reach
 
 - **Browser-look controls.** Plain HTML inputs and buttons draw like Chrome's, with Chrome's colors, outside
-  `styled`. Their text takes the CSS `color` and `font-size` you give them. Inside `styled`, and for
+  `styled`. Their text takes the CSS `color` and `font-size` you give them, and their corners the CSS
+  `border-radius` (Rust; other bindings set the node's `"radius"`, in px). The theme's `roundness` and
+  `corners.*` keys apply to the Blender look only. Inside `styled`, and for
   Blender's own components, the theme applies. The `styled` sheet follows the theme's background, text
   and (dark base) accent colors.
 - **One theme for the whole process**, as in Blender. Two windows cannot differ.

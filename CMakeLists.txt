@@ -68,6 +68,19 @@ endif()
 
 set(BUI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
+if(ANDROID)
+  # Small and fast on a phone: -O2 and link-time optimization over the whole kit, no embedded Inter
+  # (the system's Roboto is used: platform/android/fonts.c), and the app library's own flags in
+  # platform/android.
+  option(BUI_ANDROID_LTO "Link-time optimization (off when rustc links the kit: it cannot read the NDK's bitcode)" ON)
+  add_compile_options(-O2 -fno-unwind-tables -fno-asynchronous-unwind-tables)
+  if(BUI_ANDROID_LTO)
+    add_compile_options(-flto)
+    add_link_options(-flto)
+  endif()
+  add_compile_definitions(BUI_NO_INTER)
+endif()
+
 # Dependency order matters: each layer may only use layers above it in this list.
 add_subdirectory(core)   # pure C foundation
 add_subdirectory(types)  # BUI-owned shared data types
@@ -118,6 +131,10 @@ if(BUI_BUILD_TESTS)
   add_executable(bui_version_test tests/version_test.c)
   target_link_libraries(bui_version_test PRIVATE bui::kit bui_api)
   add_test(NAME bui_version_test COMMAND bui_version_test)
+  # screens, areas and regions: splits, joins, docking, edge and region drags, layouts
+  add_executable(bui_screen_test tests/screen_test.c)
+  target_link_libraries(bui_screen_test PRIVATE bui::kit)
+  add_test(NAME bui_screen_test COMMAND bui_screen_test)
   add_executable(bui_vector_test tests/vector_test.c)
   target_link_libraries(bui_vector_test PRIVATE bui::kit)
   add_test(NAME bui_vector_test COMMAND bui_vector_test)
@@ -143,6 +160,11 @@ if(BUI_BUILD_TESTS)
   # (exits 77, skipped, when BUI_ANIM is off)
   add_executable(bui_anim_test tests/anim_test.c)
   target_link_libraries(bui_anim_test PRIVATE bui::kit)
+  if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+    # GCC 15.2 (MinGW) -O3 miscompiles the test's nested settle loop with the SLP vectorizer
+    # (a wild pointer in test_settle_closed_form); the library itself is unaffected.
+    target_compile_options(bui_anim_test PRIVATE -fno-tree-slp-vectorize)
+  endif()
   add_test(NAME bui_anim_test COMMAND bui_anim_test)
   set_tests_properties(bui_anim_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
   if(WIN32) # the thumbnail-grid benchmark (bench/images/image_grid.c; not a test)
@@ -170,6 +192,14 @@ if(BUI_BUILD_LUA_BINDINGS)
   else()
     message(STATUS "BUI: bindings/lua not in this source tree; no Lua host")
   endif()
+endif()
+
+# after the bindings an Android app can link (Lua)
+if(ANDROID)
+  option(BUI_BUILD_ANDROID_APP "The NativeActivity shell and an app (off when cargo builds only the kit)" ON)
+endif()
+if(ANDROID AND BUI_BUILD_ANDROID_APP)
+  add_subdirectory(platform/android) # the NativeActivity host and an app
 endif()
 
 if(BUI_BUILD_QT_BACKEND)

@@ -17,6 +17,8 @@
  *   vec4 input_color(int i, vec2 t) input texture i at texel position t: bilinear, edge-clamped,
  *                                  premultiplied
  *   vec2 input_size(int i)         its size in texels
+ *   vec4 input_raw(int i, vec2 t)  like input_color, not premultiplied: data (render targets), not pictures
+ *   vec4 input_load(int i, vec2 t) the one texel containing t, exactly (no filtering)
  *   types float int bool vec2 vec3 vec4 (also float2 float3 float4); no matrices, no arrays of
  *   other than U; the GLSL built-ins mix fract mod clamp step smoothstep abs sign floor ceil min
  *   max pow exp exp2 log sqrt inversesqrt sin cos tan asin acos atan length distance dot
@@ -255,8 +257,19 @@ static void hlsl_prelude(StrBuf *s, const BuiEffectView *e)
   sb_each(s, e->n_inputs, "  if (i == ", ") return bui_fetch(bui_t", ", q);\n");
   sb_add(s, "  return float4(0.0, 0.0, 0.0, 0.0);\n}\nfloat2 input_size(int i) {\n");
   sb_each(s, e->n_inputs, "  if (i == ", ") return bui_dim(bui_t", ");\n");
+  /* data, not pictures (render targets): bilinear without premultiplying, and an exact texel */
   sb_add(s,
          "  return float2(1.0, 1.0);\n}\n"
+         "float4 bui_raw(Texture2D t, float2 q) { return t.SampleLevel(bui_smp, q / bui_dim(t), 0); }\n"
+         "float4 bui_texel(Texture2D t, float2 q) {\n"
+         "  const float2 d = bui_dim(t);\n"
+         "  return t.Load(int3(int2(clamp(floor(q), float2(0.0, 0.0), d - 1.0)), 0));\n}\n"
+         "float4 input_raw(int i, float2 q) {\n");
+  sb_each(s, e->n_inputs, "  if (i == ", ") return bui_raw(bui_t", ", q);\n");
+  sb_add(s, "  return float4(0.0, 0.0, 0.0, 0.0);\n}\nfloat4 input_load(int i, float2 q) {\n");
+  sb_each(s, e->n_inputs, "  if (i == ", ") return bui_texel(bui_t", ", q);\n");
+  sb_add(s,
+         "  return float4(0.0, 0.0, 0.0, 0.0);\n}\n"
          "float4 bui_effect_main(float2 p);\n"
          "float4 bui_ps(float4 pos : SV_Position) : SV_Target {\n"
          "  return bui_effect_main(pos.xy - bui_box.xy);\n}\n"
@@ -380,6 +393,15 @@ static void glsl_prelude(StrBuf *s, const BuiEffectView *e)
   sb_each(s, e->n_inputs, "  if (i == ", ") return vec2(textureSize(bui_t", ", 0));\n");
   sb_add(s,
          "  return vec2(1.0);\n}\n"
+         "vec4 bui_raw(sampler2D t, vec2 q) { return textureLod(t, q / vec2(textureSize(t, 0)), 0.0); }\n"
+         "vec4 bui_texel(sampler2D t, vec2 q) {\n"
+         "  return texelFetch(t, clamp(ivec2(floor(q)), ivec2(0), textureSize(t, 0) - 1), 0);\n}\n"
+         "vec4 input_raw(int i, vec2 q) {\n");
+  sb_each(s, e->n_inputs, "  if (i == ", ") return bui_raw(bui_t", ", q);\n");
+  sb_add(s, "  return vec4(0.0);\n}\nvec4 input_load(int i, vec2 q) {\n");
+  sb_each(s, e->n_inputs, "  if (i == ", ") return bui_texel(bui_t", ", q);\n");
+  sb_add(s,
+         "  return vec4(0.0);\n}\n"
          "vec4 effect(vec2 p);\nout vec4 bui_frag;\n"
          "void main() { bui_frag = effect(gl_FragCoord.xy - bui_box.xy); }\n"
          "#line 1\n");

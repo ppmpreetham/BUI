@@ -17,6 +17,10 @@ import { mount, unmount, flushSync } from 'svelte'
 import native from '@blender-ui/native'
 import host from '@blender-ui/native/host'
 import Widget from './Widget.svelte'
+import Screen from './Screen.svelte'
+import Editor from './Editor.svelte'
+import Region from './Region.svelte'
+import screen from '@blender-ui/native/screen'
 
 // Components' scoped stylesheets (their <style> blocks)
 const styles = host.styleRegistry()
@@ -67,6 +71,10 @@ export function act (fn) {
 // lowercase HTML counterparts look like a browser's (Blender's inside `styled`).
 export const { Button, Checkbox, Radio, NumberField, NumberSlider, TextField, TextArea, ColorSwatch, Dropdown,
   ProgressBar } = host.blenderWidgets((tag) => (anchor, props) => Widget(anchor, withTag(props, tag)))
+
+// Blender's screen: <Screen>, <Editor>, <Region> (the elements blenderui lays out; see Screen.svelte)
+export { Screen, Editor, Region }
+export const AreaSplit = screen.AreaSplit
 
 /** `props` with `tag` added; reads stay live (Svelte's props are getters). */
 function withTag (props, tag) {

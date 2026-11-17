@@ -268,6 +268,14 @@ div().styled().child(div().attr("styled", "false"))   // opt a subtree back out
 Your own CSS still wins over either set of defaults. From JavaScript use
 `el.setAttribute('styled', '')`, or `<div styled>` in JSX.
 
+**An app's root: `app()`.** A `body` that is `styled`, has no margin, is as tall as
+the window and scrolls when its content is taller (the window is not a scrolling
+document, so an overflowing page needs it, or a scroll container of a definite
+height such as `.css("height", "100vh")`). `app().child(h1().child("Title"))`.
+Outside `styled`, a `button()` / `input()` is a browser-look control and ignores
+`.bg()`. A control keeps its own height in a flex column that is shorter than its
+content (the column scrolls or overflows, it never squashes the control).
+
 **Dark or light.** `styled` follows Blender's theme, which is Dark by default.
 Switch every window to Blender's Light preset with
 `Application::new().theme("light")`, `blenderui::set_theme("light")` at run
@@ -464,6 +472,30 @@ On the `Window` (listeners get it): `selected_text() -> Option<String>`,
 (fires for the user's changes) and `read_clipboard()` / `write_clipboard(text)`.
 `examples/selectable.rs` is a page of paragraphs; `tests/selection.rs` drives it
 headlessly with `simulate_drag`, `simulate_click` and `simulate_key_with`.
+## Screens, areas and regions
+
+Blender's editor layout (`blenderui::screen`): areas the user resizes, splits, joins and docks,
+with headers, toolbars and sidebars that resize and hide. The kit lays them out; your HTML goes in
+the regions.
+
+```rust
+use blenderui::screen::{AreaRef, AreaSplit, Editor, Editors, Region, Screen};
+
+let editors = Editors::new()
+    .editor("3D Viewport", "VIEW3D", |_: &AreaRef| {
+        Editor::new(div().child("viewport"))
+            .header(div().child("View"))
+            .sidebar(Region::new(div().child("Item")).size(280).hotkey("n"))
+    })
+    .editor("Outliner", "OUTLINER", |a| Editor::new(div().child(a.editor().to_owned())));
+Screen().editors(editors).layout(AreaSplit::v(0.75, "3D Viewport", "Outliner"))
+    .on_change(|e, _, _| println!("{}", e.layout()))
+```
+
+`Region` takes `size`, `hidden`, `side`, `overlap`, `resizable`, `maxsize`, `hotkey`, `on_resize`;
+`AreaRef` has `split`, `join`, `dock`, `swap`, `close`, `maximize`, `focus`, `restore`. See
+[Screens, areas and regions](https://bui.preetham.top/docs/concepts/screens/).
+
 ## Images
 
 `<img src>` and CSS background images read every format the kit reads (PNG,

@@ -1,0 +1,28 @@
+# A JavaScript app for Android: QuickJS (bindings/rust/blenderui-qjs) running assets/main.js, a
+# staticlib that defines `bui_app_main`, linked into the NativeActivity shell by
+# platform/android/build.py --js. Its own workspace, so no other platform builds it.
+[package]
+name = "bui-android-js"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+blenderui-qjs = { path = "../../../bindings/rust/blenderui-qjs", default-features = false }
+# rquickjs-sys ships no bindings for Android targets: bindgen makes them (build.py points it at the NDK's libclang)
+rquickjs-sys = { version = "0.14", features = ["bindgen"] }
+# the kit features, as for the Rust app (the same crate as blenderui-qjs's, so these are the ones used)
+blenderui = { path = "../../../bindings/rust/blenderui", default-features = false, features = ["png", "svg", "freetype", "anim", "video"] }
+
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"

@@ -63,6 +63,9 @@ pub struct ScrollWheelEvent {
     pub position: Point<Pixels>,
     /// Lines: positive scrolls the content up (wheel away from the user).
     pub delta: f32,
+    /// The exact distance in logical pixels (same sign as `delta`) when the host knows it, as for
+    /// a touch drag; `None` for a wheel notch. A view that scrolls itself follows it 1:1.
+    pub pixels: Option<f32>,
     pub modifiers: Modifiers,
 }
 

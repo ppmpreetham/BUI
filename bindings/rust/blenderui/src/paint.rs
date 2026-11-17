@@ -8,7 +8,7 @@ use taffy::prelude::*;
 
 use crate::color::Rgba;
 use crate::geometry::{rect, Bounds, Length, Units};
-use crate::shader::ShaderEffect;
+use crate::shader::{RenderTarget, ShaderEffect};
 use crate::layout::{BoxNode, Content, Frame, Key, Replaced, StyleStore};
 use crate::style::{key_hasher, BorderStyle, BoxEdge, Computed, DecoStyle, DisplayKind, TextAlign, WhiteSpace};
 use crate::text::{self, TextCache};
@@ -240,6 +240,17 @@ enum Kind {
     Video(std::rc::Rc<crate::video::Video>, i32),
     /// A GPU shader over the box (see [`crate::shader`]).
     Effect(Box<EffectItem>),
+    /// A GPU pass into a render target (see [`Painter::effect_to`]): not drawn into the canvas.
+    Pass(Box<PassItem>),
+}
+
+/// What [`Painter::effect_to`] records: the render target, the effect (0: a fill), its textures and floats.
+#[derive(Clone)]
+struct PassItem {
+    target: i32,
+    effect: i32,
+    inputs: [i32; sys::BK_EFFECT_MAX_INPUTS],
+    floats: Vec<f32>,
 }
 
 /// What [`Painter::effect`] records: the effect, its textures and floats, and the image drawn where
@@ -578,6 +589,28 @@ impl Painter {
         self.push(Kind::Effect(Box::new(item)), Self::corners(bounds), Rgba::TRANSPARENT);
     }
 
+    /// A pass of a GPU effect into `target` instead of the window (see [`RenderTarget`]): `effect` over
+    /// all of it, sampling `inputs` with `floats` as [`effect`](Self::effect) does. `bounds` is the
+    /// canvas's own box. The pass runs when the whole canvas is redrawn, once, in the order the passes
+    /// are recorded and before the items after it (which may sample what it drew). Where the GPU cannot
+    /// run it nothing happens.
+    pub fn effect_to(&mut self, bounds: Bounds<f32>, target: &RenderTarget, effect: &ShaderEffect, inputs: &[i32],
+                     floats: &[f32]) {
+        let mut slots = [0; sys::BK_EFFECT_MAX_INPUTS];
+        for (slot, id) in slots.iter_mut().zip(inputs) {
+            *slot = *id;
+        }
+        let floats = floats[..floats.len().min(ShaderEffect::MAX_FLOATS)].to_vec();
+        let item = PassItem { target: target.texture(), effect: effect.id(), inputs: slots, floats };
+        self.push(Kind::Pass(Box::new(item)), Self::corners(bounds), Rgba::TRANSPARENT);
+    }
+
+    /// Fill all of `target` with `rgba` as given (a pass: see [`effect_to`](Self::effect_to)).
+    pub fn clear_target(&mut self, bounds: Bounds<f32>, target: &RenderTarget, rgba: [f32; 4]) {
+        let item = PassItem { target: target.texture(), effect: 0, inputs: [0; sys::BK_EFFECT_MAX_INPUTS], floats: rgba.to_vec() };
+        self.push(Kind::Pass(Box::new(item)), Self::corners(bounds), Rgba::TRANSPARENT);
+    }
+
     fn file(&mut self, bounds: Bounds<f32>, src: &str, fit: i32, frame: Option<u32>) {
         if !src.is_empty() {
             let start = self.text.len() as u32;
@@ -666,6 +699,14 @@ impl Painter {
                 ci.n_effect_floats = e.floats.len() as i32;
                 ci.fit = sys::BK_FIT_FILL;
                 ci.imbuf = e.fallback.as_ref().map_or(std::ptr::null(), |img| img.as_ptr());
+            }
+            Kind::Pass(p) => {
+                ci.type_ = sys::BK_ITEM_PASS;
+                ci.effect = p.effect;
+                ci.effect_inputs = p.inputs;
+                ci.effect_floats = p.floats.as_ptr();
+                ci.n_effect_floats = p.floats.len() as i32;
+                ci.effect_target = p.target;
             }
             Kind::File { start, fit, frame } => {
                 ci.type_ = sys::BK_ITEM_IMAGE;
@@ -790,6 +831,10 @@ impl Painter {
                 Kind::Image(img) => (6u8, Arc::as_ptr(img) as usize).hash(h),
                 Kind::File { start, fit, frame } => (7u8, self.arena_str(*start), fit, frame).hash(h),
                 Kind::Video(v, fit) => (8u8, std::rc::Rc::as_ptr(v) as usize, fit).hash(h),
+                Kind::Pass(p) => {
+                    (10u8, p.target, p.effect, p.inputs).hash(h);
+                    p.floats.iter().for_each(|v| v.to_bits().hash(h));
+                }
                 Kind::Effect(e) => {
                     // the floats move every frame: a changed value is a changed layer
                     let fallback = e.fallback.as_ref().map_or(0, |img| Arc::as_ptr(img) as usize);

@@ -2018,8 +2018,9 @@ void BUI_raster_points(BuiRaster *r,
 typedef struct BuiTexture {
   int id;
   int w, h;
-  uint8_t *rgba;
-  unsigned gen; /* bumped by every update */
+  uint8_t *rgba; /* NULL for a render target */
+  int target;    /* 0: a CPU texture; else 1 + BUI_TARGET_* (BUI_target_create) */
+  unsigned gen;  /* bumped by every update */
   struct {
     unsigned gen; /* the generation this update produced */
     int rect[4];
@@ -2063,22 +2064,9 @@ static void tex_copy(BuiTexture *t, int x, int y, int w, int h, const uint8_t *s
   }
 }
 
-int BUI_texture_create(int w, int h, const void *rgba, int pitch)
+/* Gives `t` (w, h, rgba and target set) a slot and an id; frees it and returns 0 when there is none. */
+static int tex_register(BuiTexture *t)
 {
-  if (w <= 0 || h <= 0 || w > 16384 || h > 16384) {
-    return 0;
-  }
-  BuiTexture *t = (BuiTexture *)calloc(1, sizeof(BuiTexture));
-  if (!t || !(t->rgba = (uint8_t *)calloc((size_t)w * h, 4))) {
-    free(t);
-    return 0;
-  }
-  t->w = w;
-  t->h = h;
-  t->gen = 1;
-  if (rgba) {
-    tex_copy(t, 0, 0, w, h, (const uint8_t *)rgba, pitch > 0 ? pitch : w * 4);
-  }
   int slot = 0;
   while (slot < g_tex_slots && g_tex[slot]) {
     slot++;
@@ -2115,11 +2103,48 @@ int BUI_texture_create(int w, int h, const void *rgba, int pitch)
   return t->id;
 }
 
+int BUI_texture_create(int w, int h, const void *rgba, int pitch)
+{
+  if (w <= 0 || h <= 0 || w > 16384 || h > 16384) {
+    return 0;
+  }
+  BuiTexture *t = (BuiTexture *)calloc(1, sizeof(BuiTexture));
+  if (!t || !(t->rgba = (uint8_t *)calloc((size_t)w * h, 4))) {
+    free(t);
+    return 0;
+  }
+  t->w = w;
+  t->h = h;
+  t->gen = 1;
+  if (rgba) {
+    tex_copy(t, 0, 0, w, h, (const uint8_t *)rgba, pitch > 0 ? pitch : w * 4);
+  }
+  return tex_register(t);
+}
+
+int BUI_target_create(int w, int h, int format)
+{
+  if (w <= 0 || h <= 0 || w > 16384 || h > 16384 || format < BUI_TARGET_RGBA8 ||
+      format > BUI_TARGET_RGBA32F)
+  {
+    return 0;
+  }
+  BuiTexture *t = (BuiTexture *)calloc(1, sizeof(BuiTexture));
+  if (!t) {
+    return 0;
+  }
+  t->w = w;
+  t->h = h;
+  t->gen = 1;
+  t->target = 1 + format;
+  return tex_register(t); /* no CPU copy: the device makes it on first use */
+}
+
 int BUI_texture_update(int tex, int x, int y, int w, int h, const void *rgba, int pitch)
 {
   BuiTexture *t = tex_get(tex);
-  if (!t || !rgba) {
-    return 0;
+  if (!t || !t->rgba || !rgba) {
+    return 0; /* a render target has no CPU copy */
   }
   if (w <= 0 || h <= 0 || x >= t->w || y >= t->h || x + w <= 0 || y + h <= 0) {
     return 1;
@@ -2171,6 +2196,7 @@ int bui_texture_view(int tex, BuiTexView *r_view)
   r_view->h = t->h;
   r_view->rgba = t->rgba;
   r_view->gen = t->gen;
+  r_view->target = t->target;
   return 1;
 }
 
@@ -2416,6 +2442,9 @@ void BUI_raster_mesh(BuiRaster *r,
     return;
   }
   const BuiTexture *t = tex ? tex_get(tex) : NULL;
+  if (t && !t->rgba) {
+    t = NULL; /* a render target: nothing to sample on the CPU */
+  }
   const uint16_t *i16 = (const uint16_t *)idx;
   const uint32_t *i32 = (const uint32_t *)idx;
   for (int i = 0; i + 2 < n_idx; i += 3) {
@@ -2451,7 +2480,28 @@ int BUI_raster_effect(BuiRaster *r,
     return 0; /* the software raster has no shaders: the caller draws its fallback */
   }
   const float rect[4] = {x, y, w, h};
-  return bui_gpu_effect(r->gpu, effect, rect, inputs, floats, n_floats, box);
+  return bui_gpu_effect(r->gpu, 0, effect, rect, inputs, floats, n_floats, box);
+}
+
+int BUI_raster_effect_to(BuiRaster *r,
+                         int target,
+                         int effect,
+                         const int inputs[BUI_EFFECT_MAX_INPUTS],
+                         const float *floats,
+                         int n_floats)
+{
+  int w, h;
+  if (!r->gpu || !inputs || target <= 0 || !BUI_texture_size(target, &w, &h)) {
+    return 0;
+  }
+  const float rect[4] = {0.0f, 0.0f, (float)w, (float)h};
+  const int box[4] = {0, 0, w, h};
+  return bui_gpu_effect(r->gpu, target, effect, rect, inputs, floats, n_floats, box);
+}
+
+int BUI_raster_target_clear(BuiRaster *r, int target, const float rgba[4])
+{
+  return r->gpu && rgba && target > 0 ? bui_gpu_target_clear(r->gpu, target, rgba) : 0;
 }
 
 /** \} */

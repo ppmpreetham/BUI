@@ -137,7 +137,7 @@ BK_set_strs(dropdown, "items", modes, 3);
 - **Unknown keys** make a setter return 0, so typos don't pass silently if you check.
 - **`"value"` vs `"set_value"`:** setting `"value"` changes the value quietly. Setting `"set_value"` changes it *and* notifies your host, as if the user had done it.
 - **Common keys:** `"value"`, `"text"`, `"label"`, `"min"`, `"max"`, `"items"`, `"enabled"`, `"visible"`.
-- **The browser look:** `"html"` set to 1 draws a node like a browser's form control instead of Blender's. Values, events and the other properties behave the same.
+- **The browser look:** `"html"` set to 1 draws a node like a browser's form control instead of Blender's. Values, events and the other properties behave the same. `"radius"` (CSS px, negative for the default 2px) sets its corner radius; the Blender look takes its roundness from the theme instead.
 
 The full list of keys lives in `kit_props` in `kit/intern/kit_core.c`.
 

@@ -61,6 +61,8 @@ One source runs on every renderer. It is GLSL with a small set of compatibility 
 | `float U[i]` | The floats you pass, `i` below the `n_floats` you declared. |
 | `vec4 input_color(int i, vec2 texel)` | Input texture `i` at a position in texels: bilinear, clamped at the edges, premultiplied. |
 | `vec2 input_size(int i)` | Its size in texels. |
+| `vec4 input_raw(int i, vec2 texel)` | Like `input_color`, but not premultiplied: for data (a render target), not pictures. |
+| `vec4 input_load(int i, vec2 texel)` | The one texel containing `texel`, exactly (no filtering; clamped to the texture). |
 | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4` | Types (`float2`, `float3`, `float4` work too). One-scalar constructors such as `vec3(0.5)` work on both renderers. |
 | `mix fract mod clamp step smoothstep abs sign floor ceil min max pow exp exp2 log sqrt inversesqrt sin cos tan asin acos atan length distance dot normalize` | The usual built-ins. Use `atan2(y, x)` for the two-argument arc tangent. |
 
@@ -77,6 +79,86 @@ effect(1,40-53): error X3004: undeclared identifier 'no_such_symbol'
 Line numbers count from the first line of your source. A failed effect draws its fallback (nothing without one), never crashes, and is not retried. The fallback is also what the software renderer, a Windows system without `d3dcompiler_47.dll` and an off-screen CSS effect layer draw.
 
 `Painter::is_gpu()` tells a paint callback whether its window is drawn by the GPU, so code that has both a shader and a CPU renderer can choose. `GpuTarget` renders effects off-screen into pixels, for tests and thumbnails.
+
+## Render targets: draw into a texture
+
+A **render target** is a texture an effect draws into instead of the window, the way Blender draws into a `GPUTexture` attachment through a `GPUFramebuffer`. It is what a simulation needs: state that feeds back into itself every frame, in a format a byte cannot be (`Rgba16F`, `Rgba32F`).
+
+```rust title="src/main.rs"
+use std::rc::Rc;
+use std::time::Instant;
+
+use blenderui::prelude::*;
+
+// a spot circles the box; what was there fades by 2 % per frame: a trail
+const STEP: &str = "
+vec4 effect(vec2 p) {
+    vec4 old = input_load(0, p);                       // last frame's state, exactly
+    vec2 c = (vec2(0.5) + 0.35 * vec2(cos(U[1]), sin(U[1]))) * box_size;
+    float spot = smoothstep(24.0, 0.0, distance(p, c));
+    return vec4(old.rgb * (1.0 - 2.0 * U[0]) + vec3(spot, 0.5 * spot, 0.2 * spot), 1.0);
+}";
+const SHOW: &str = "vec4 effect(vec2 p) { return vec4(input_raw(0, p).rgb, 1.0); }";
+
+struct Trails {
+    start: Instant,
+    last: f32,
+    flip: bool,
+    targets: [Rc<RenderTarget>; 2], // the state, and what it becomes: swapped every frame
+    step: Rc<ShaderEffect>,
+    show: Rc<ShaderEffect>,
+}
+
+impl Render for Trails {
+    fn render(&mut self, w: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        w.request_animation_frame(); // the simulation runs every frame
+        let t = self.start.elapsed().as_secs_f32();
+        let dt = t - self.last; // seconds since the last frame
+        self.last = t;
+        let (src, dst) = if self.flip { (1, 0) } else { (0, 1) };
+        self.flip = !self.flip;
+        let (a, b) = (self.targets[src].clone(), self.targets[dst].clone());
+        let (step, show) = (self.step.clone(), self.show.clone());
+        body().m_0().w(px(640.0)).h(px(400.0)).child(canvas(move |bounds, p| {
+            p.effect_to(bounds, &b, &step, &[a.texture()], &[dt, t]); // b = step(a)
+            p.effect(bounds, &show, &[b.texture()], &[], None);       // the window shows b
+        }).w(px(640.0)).h(px(400.0)))
+    }
+}
+
+fn main() {
+    Application::new().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(640.0), px(400.0)),
+            })),
+            gpu: Some(true),
+            ..Default::default()
+        };
+        cx.open_window(opts, |_, cx| {
+            let target = || Rc::new(RenderTarget::new(640, 400, TargetFormat::Rgba16F).expect("render target"));
+            cx.new(|_| Trails {
+                start: Instant::now(),
+                last: 0.0,
+                flip: false,
+                targets: [target(), target()],
+                step: Rc::new(ShaderEffect::new("step", STEP, 1, 2).expect("step")),
+                show: Rc::new(ShaderEffect::new("show", SHOW, 1, 0).expect("show")),
+            })
+        })
+        .unwrap();
+    });
+}
+```
+
+{/* IMAGE: shots/rust-gpu-render-target-dark.png — the 640 x 400 window of the example above on a GPU renderer: a bright orange-pink spot circling the center with a fading trail behind it on a black background. */}
+
+- It is a BUI texture: its `texture()` id goes in the `inputs` of any effect, read with `input_raw` (bilinear) or `input_load` (exact). `input_color` premultiplies, which data does not want.
+- `Painter::effect_to` records a pass in paint order, so a pass comes before the passes and items that sample it. Nothing is blended: the target takes the shader's RGBA as it is (not clamped for the float formats). `p` is the pixel in the target and `box_size` its size.
+- A pass cannot sample the target it draws into: a feedback loop swaps two, as above. Such a pass is refused (`GpuTarget::draw_to` returns `false`).
+- Passes run when the whole canvas is redrawn, once, in order, before the canvas's ordinary items. A canvas that animates every frame redraws whole; a partial redraw does not step a simulation.
+- A target has no CPU copy and is made on the device that first draws into it, cleared to zero. `GpuTarget::draw_to` and `clear_target` draw into one off-screen.
 
 ## Limits
 

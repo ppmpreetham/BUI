@@ -61,6 +61,19 @@ pub fn tag_kind(tag: &str) -> TagKind {
     TAGS.iter().find(|(t, _)| *t == tag).map(|(_, k)| *k).unwrap_or(TagKind::Box)
 }
 
+/// The root of an app: a `<body styled>` with no margin, as tall as the window, scrolling when its
+/// content is taller (the window is not a scrolling document, so a page that overflows needs this
+/// or a definite-height scroll container). Blender's theme covers the whole window, and the
+/// controls inside are Blender's widgets.
+///
+/// ```ignore
+/// app().child(h1().child("Title")).child(button().child("Go"))
+/// ```
+pub fn app() -> Div {
+    use crate::Styled;
+    body().styled().m_0().css("height", "100vh").overflow_y_scroll()
+}
+
 /// A custom element (`custom("my-widget")`), laid out like a `<span>`.
 pub fn custom(tag: &'static str) -> Div {
     Div::new(tag)

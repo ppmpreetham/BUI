@@ -220,6 +220,20 @@ Vue 3.5 or newer; Node.js 22.15 or newer.
   `v-bind()` in `<style>`, which are compile errors), TypeScript enums on Node.js
   (it strips types only), and libraries built on the DOM (Vuetify, Element Plus).
 
+## Screens, areas and regions
+
+React, Vue and Svelte export `Screen`, `Editor`, `Region` and `AreaSplit` (the native API:
+`createScreen`, `editorElement`): Blender's editor layout, areas the user resizes, splits, joins and
+docks.
+
+```jsx
+<Screen editors={{ View: { icon: 'VIEW3D', render: area =>
+          <Editor sidebar={<Region size={280} hotkey="n"><div>Item</div></Region>}><div>view</div></Editor> } }}
+        layout={AreaSplit.v(0.75, 'View', 'View')} onChange={e => save(e.layout)} />
+```
+
+See [Screens, areas and regions](https://bui.preetham.top/docs/concepts/screens/).
+
 ## Bindings for other frameworks
 
 React, Svelte and Vue are thin adapters over one shared layer, and a new binding

@@ -25,6 +25,66 @@ use std::marker::PhantomData;
 
 use crate::sys;
 
+/// The pixel format of a [`RenderTarget`]. The float formats keep what a byte cannot (a slow burn, a
+/// velocity): simulations want [`Rgba16F`](TargetFormat::Rgba16F).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TargetFormat {
+    /// 8 bits per channel.
+    Rgba8,
+    /// Half floats.
+    Rgba16F,
+    /// Single floats.
+    Rgba32F,
+}
+
+/// A texture effects draw into instead of the window (`BUI_target_create`; Blender's attachment
+/// texture of a `GPUFramebuffer`). Its [`texture`](Self::texture) id goes in the `inputs` of any effect
+/// (read with `input_raw` / `input_load`); [`Painter::effect_to`](crate::Painter::effect_to) draws
+/// into it, in paint order, so a pass comes before the passes that sample it. A pass cannot sample
+/// its own target: a feedback loop swaps two. It belongs to the thread and the device that draw into
+/// it, and is freed on drop.
+#[derive(Debug)]
+pub struct RenderTarget {
+    id: c_int,
+    size: (u32, u32),
+    _thread: PhantomData<*const ()>,
+}
+
+impl RenderTarget {
+    /// A `width` x `height` target (at most 16384), transparent black until drawn into. `None` when
+    /// the size is not acceptable.
+    #[must_use]
+    pub fn new(width: u32, height: u32, format: TargetFormat) -> Option<Self> {
+        let format = match format {
+            TargetFormat::Rgba8 => sys::BUI_TARGET_RGBA8,
+            TargetFormat::Rgba16F => sys::BUI_TARGET_RGBA16F,
+            TargetFormat::Rgba32F => sys::BUI_TARGET_RGBA32F,
+        };
+        // SAFETY: plain numbers; the registry copies nothing from the caller.
+        let id = unsafe { sys::BUI_target_create(c_int::try_from(width).ok()?, c_int::try_from(height).ok()?, format) };
+        (id > 0).then_some(Self { id, size: (width, height), _thread: PhantomData })
+    }
+
+    /// Its BUI texture id: what an effect lists in its `inputs` to sample it.
+    #[must_use]
+    pub const fn texture(&self) -> i32 {
+        self.id
+    }
+
+    /// Its size in pixels.
+    #[must_use]
+    pub const fn size(&self) -> (u32, u32) {
+        self.size
+    }
+}
+
+impl Drop for RenderTarget {
+    fn drop(&mut self) {
+        // SAFETY: the target is ours; passes that still name it do nothing.
+        unsafe { sys::BUI_texture_free(self.id) };
+    }
+}
+
 /// A shader declared with the kit (`BUI_effect_create`); freed on drop. Effects belong to the
 /// thread that draws.
 #[derive(Debug)]
@@ -151,6 +211,37 @@ impl GpuTarget {
             sys::BUI_raster_begin_frame(self.raster.as_ptr(), w as c_int, h as c_int);
             let ok = sys::BUI_raster_effect(self.raster.as_ptr(), 0.0, 0.0, w as f32, h as f32, effect.id(),
                                             slots.as_ptr(), floats.as_ptr(), n as c_int);
+            sys::BUI_raster_end_frame(self.raster.as_ptr());
+            ok != 0
+        }
+    }
+
+    /// Draw `effect` over all of the render target `dst` (see [`RenderTarget`]) instead of the frame,
+    /// sampling `inputs` (targets included). `false` when it cannot run (see [`ShaderEffect::error`]).
+    pub fn draw_to(&mut self, dst: &RenderTarget, effect: &ShaderEffect, inputs: &[i32], floats: &[f32]) -> bool {
+        let mut slots = [0; sys::BK_EFFECT_MAX_INPUTS];
+        for (slot, id) in slots.iter_mut().zip(inputs) {
+            *slot = *id;
+        }
+        let (w, h) = self.size;
+        let n = floats.len().min(ShaderEffect::MAX_FLOATS);
+        // SAFETY: the raster is live; the arrays outlive the call (the kit copies the floats).
+        unsafe {
+            sys::BUI_raster_begin_frame(self.raster.as_ptr(), w as c_int, h as c_int);
+            let ok = sys::BUI_raster_effect_to(self.raster.as_ptr(), dst.texture(), effect.id(), slots.as_ptr(),
+                                               floats.as_ptr(), n as c_int);
+            sys::BUI_raster_end_frame(self.raster.as_ptr());
+            ok != 0
+        }
+    }
+
+    /// Fill all of the render target `dst` with `rgba` as given.
+    pub fn clear_target(&mut self, dst: &RenderTarget, rgba: [f32; 4]) -> bool {
+        let (w, h) = self.size;
+        // SAFETY: the raster is live; the array outlives the call.
+        unsafe {
+            sys::BUI_raster_begin_frame(self.raster.as_ptr(), w as c_int, h as c_int);
+            let ok = sys::BUI_raster_target_clear(self.raster.as_ptr(), dst.texture(), rgba.as_ptr());
             sys::BUI_raster_end_frame(self.raster.as_ptr());
             ok != 0
         }

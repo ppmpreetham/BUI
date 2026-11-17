@@ -10,6 +10,10 @@ authors.workspace = true
 rust-version.workspace = true
 publish = false
 
+[lib]
+name = "blenderui_qjs"
+path = "src/lib.rs"
+
 [[bin]]
 name = "bui-runtime"
 path = "src/main.rs"

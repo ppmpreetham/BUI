@@ -96,6 +96,8 @@ typedef ptrdiff_t GLintptr;
 #  define GL_UNSIGNED_INT_8_8_8_8_REV 0x8367
 #  define GL_TEXTURE0 0x84C0
 #  define GL_RGBA32F 0x8814
+#  define GL_RGBA16F 0x881A
+#  define GL_HALF_FLOAT 0x140B
 #  define GL_ARRAY_BUFFER 0x8892
 #  define GL_ELEMENT_ARRAY_BUFFER 0x8893
 #  define GL_STREAM_DRAW 0x88E0
@@ -911,6 +913,8 @@ typedef struct DevTex {
   int w, h;
   int nearest; /* the filter it is set to */
   GLuint tex;
+  GLuint fbo; /* a render target (BUI_target_create): effects draw into it */
+  int target;
 } DevTex;
 
 typedef struct TriV {
@@ -930,7 +934,8 @@ typedef struct DevFx {
 
 /* One recorded effect draw. */
 typedef struct FxCall {
-  int effect;
+  int effect; /* 0: not a draw but a clear of `dst` (its 4 floats at `floats`) */
+  int dst;    /* 0: the frame; else the render target it draws into */
   float rect[4];
   int inputs[BUI_EFFECT_MAX_INPUTS];
   int clip[4];
@@ -1705,6 +1710,10 @@ static Batch *batch_new(BuiGpu *g, int tri, int first)
 
 static void dtex_release(BuiGpu *g, DevTex *t)
 {
+  if (t->fbo) {
+    GL(glDeleteFramebuffers)(1, &t->fbo);
+  }
+  t->fbo = 0;
   if (t->tex) {
     GL(glDeleteTextures)(1, &t->tex);
   }
@@ -1764,11 +1773,37 @@ static void dtex_get(BuiGpu *g, int id)
     flush(g);
     dtex_release(g, t);
   }
-  t->tex = tex_create(g, GL_RGBA8, v.w, v.h, GL_RGBA, GL_UNSIGNED_BYTE);
-  if (!t->tex) {
-    return;
+  if (v.target) { /* a render target: made without data, then cleared */
+    const int fmt = v.target - 1;
+    t->tex = tex_create(g, fmt == BUI_TARGET_RGBA32F ? GL_RGBA32F : fmt == BUI_TARGET_RGBA16F ? GL_RGBA16F : GL_RGBA8,
+                        v.w, v.h, GL_RGBA,
+                        fmt == BUI_TARGET_RGBA32F ? GL_FLOAT : fmt == BUI_TARGET_RGBA16F ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE);
+    if (!t->tex) {
+      return;
+    }
+    GL(glGenFramebuffers)(1, &t->fbo);
+    GL(glBindFramebuffer)(GL_FRAMEBUFFER, t->fbo);
+    GL(glFramebufferTexture2D)(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->tex, 0);
+    const int ok = GL(glCheckFramebufferStatus)(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (ok) {
+      GL(glDisable)(GL_SCISSOR_TEST);
+      GL(glClearColor)(0, 0, 0, 0);
+      GL(glClear)(GL_COLOR_BUFFER_BIT);
+    }
+    GL(glBindFramebuffer)(GL_FRAMEBUFFER, g->fbo);
+    if (!ok) {
+      dtex_release(g, t);
+      return;
+    }
   }
-  dtex_upload(g, &v, 0, 0, v.w, v.h);
+  else {
+    t->tex = tex_create(g, GL_RGBA8, v.w, v.h, GL_RGBA, GL_UNSIGNED_BYTE);
+    if (!t->tex) {
+      return;
+    }
+    dtex_upload(g, &v, 0, 0, v.w, v.h);
+  }
+  t->target = v.target;
   t->id = id;
   t->gen = v.gen;
   t->w = v.w;
@@ -2064,7 +2099,17 @@ static void dfx_sweep(BuiGpu *g)
   }
 }
 
+/* The device texture `id` is, once dtex_get made it (NULL: not live here). */
+static DevTex *dtex_dev(BuiGpu *g, int id)
+{
+  const int slot = (id & 0xFFFF) - 1;
+  return id > 0 && slot >= 0 && slot < g->n_dtex && g->dtex[slot].id == id && g->dtex[slot].tex ?
+             &g->dtex[slot] :
+             NULL;
+}
+
 int bui_gpu_effect(BuiGpu *g,
+                   int dst,
                    int effect,
                    const float rect[4],
                    const int inputs[BUI_EFFECT_MAX_INPUTS],
@@ -2082,6 +2127,18 @@ int bui_gpu_effect(BuiGpu *g,
     return 0;
   }
   dtex_sweep(g);
+  if (dst) {
+    dtex_get(g, dst);
+    const DevTex *d = dtex_dev(g, dst);
+    if (!d || !d->fbo) {
+      return 0; /* not a render target, or the context could not make it */
+    }
+    for (int k = 0; k < v.n_inputs; k++) {
+      if (inputs[k] == dst) {
+        return 0; /* a pass cannot sample the target it draws into */
+      }
+    }
+  }
   for (int k = 0; k < v.n_inputs; k++) {
     dtex_get(g, inputs[k]); /* may flush: before anything of this draw is recorded */
   }
@@ -2097,6 +2154,7 @@ int bui_gpu_effect(BuiGpu *g,
   b->count = 1;
   FxCall *c = &g->fx[g->n_fx++];
   c->effect = effect;
+  c->dst = dst;
   memcpy(c->rect, rect, sizeof(c->rect));
   memcpy(c->inputs, inputs, sizeof(c->inputs));
   memcpy(c->clip, clip, sizeof(c->clip));
@@ -2107,6 +2165,33 @@ int bui_gpu_effect(BuiGpu *g,
   }
   memset(g->fxf + g->n_fxf + n, 0, sizeof(float) * (size_t)(v.n_floats - n));
   g->n_fxf += v.n_floats;
+  return 1;
+}
+
+int bui_gpu_target_clear(BuiGpu *g, int target, const float rgba[4])
+{
+  if (!make_current(g)) {
+    return 0;
+  }
+  dtex_sweep(g);
+  dtex_get(g, target);
+  const DevTex *d = dtex_dev(g, target);
+  if (!d || !d->fbo || !grow((void **)&g->fx, &g->cap_fx, g->n_fx + 1, sizeof(FxCall)) ||
+      !grow((void **)&g->fxf, &g->cap_fxf, g->n_fxf + 4, sizeof(float)))
+  {
+    return 0;
+  }
+  Batch *b = batch_new(g, 3, g->n_fx);
+  if (!b) {
+    return 0;
+  }
+  b->count = 1;
+  FxCall *c = &g->fx[g->n_fx++];
+  memset(c, 0, sizeof(*c));
+  c->dst = target; /* effect 0: a clear */
+  c->floats = g->n_fxf;
+  memcpy(g->fxf + g->n_fxf, rgba, sizeof(float) * 4);
+  g->n_fxf += 4;
   return 1;
 }
 
@@ -2634,10 +2719,32 @@ static int ensure_target(BuiGpu *g)
 /* One recorded effect draw: its program, floats and inputs, scissored to its clip. */
 static void fx_draw(BuiGpu *g, const FxCall *fc, float sx, float sy)
 {
+  /* a pass into a render target: its framebuffer and size stand in for the frame's until drawn */
+  const DevTex *dst = fc->dst ? dtex_dev(g, fc->dst) : NULL;
+  if (fc->dst && (!dst || !dst->fbo)) {
+    return;
+  }
+  if (!fc->effect) { /* a clear of the target */
+    const float *c = g->fxf + fc->floats;
+    GL(glBindFramebuffer)(GL_FRAMEBUFFER, dst->fbo);
+    GL(glDisable)(GL_SCISSOR_TEST);
+    GL(glClearColor)(c[0], c[1], c[2], c[3]);
+    GL(glClear)(GL_COLOR_BUFFER_BIT);
+    GL(glEnable)(GL_SCISSOR_TEST);
+    GL(glBindFramebuffer)(GL_FRAMEBUFFER, g->fbo);
+    return;
+  }
   const int slot = BUI_EFFECT_SLOT(fc->effect);
   const DevFx *f = slot >= 0 && slot < g->n_dfx ? &g->dfx[slot] : NULL;
   if (!f || f->id != fc->effect || !f->prog) {
     return;
+  }
+  if (dst) {
+    GL(glBindFramebuffer)(GL_FRAMEBUFFER, dst->fbo);
+    GL(glViewport)(0, 0, dst->w, dst->h);
+    GL(glDisable)(GL_BLEND);
+    sx = 2.0f / (float)dst->w;
+    sy = 2.0f / (float)dst->h;
   }
   GL(glUseProgram)(f->prog);
   GL(glUniform4f)(f->box, fc->rect[0], fc->rect[1], fc->rect[2], fc->rect[3]);
@@ -2650,6 +2757,11 @@ static void fx_draw(BuiGpu *g, const FxCall *fc, float sx, float sy)
   }
   GL(glScissor)(fc->clip[0], fc->clip[1], fc->clip[2] - fc->clip[0], fc->clip[3] - fc->clip[1]);
   GL(glDrawArrays)(GL_TRIANGLE_STRIP, 0, 4);
+  if (dst) { /* back to the frame: its framebuffer, size and blending */
+    GL(glBindFramebuffer)(GL_FRAMEBUFFER, g->fbo);
+    GL(glViewport)(0, 0, g->tw, g->th);
+    GL(glEnable)(GL_BLEND);
+  }
 }
 
 static void flush(BuiGpu *g)
