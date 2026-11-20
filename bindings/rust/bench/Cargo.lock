@@ -713,34 +713,54 @@ dependencies = [
 
 [[package]]
 name = "blenderui"
-version = "0.1.0"
+version = "0.5.1"
 dependencies = [
  "blenderui-macros",
  "blenderui-sys",
+ "blenderui-table",
  "blenderui-tailwind",
+ "blenderui-vlist",
+ "foldhash 0.2.0",
  "paste",
- "png 0.17.16",
  "smallvec",
  "taffy 0.15.0",
 ]
 
 [[package]]
 name = "blenderui-macros"
-version = "0.1.0"
+version = "0.5.1"
 dependencies = [
  "blenderui-tailwind",
 ]
 
 [[package]]
+name = "blenderui-paint"
+version = "0.5.1"
+
+[[package]]
 name = "blenderui-sys"
-version = "0.1.0"
+version = "0.5.1"
 dependencies = [
  "cmake",
 ]
 
 [[package]]
+name = "blenderui-table"
+version = "0.5.1"
+dependencies = [
+ "blenderui-paint",
+]
+
+[[package]]
 name = "blenderui-tailwind"
-version = "0.1.0"
+version = "0.5.1"
+
+[[package]]
+name = "blenderui-vlist"
+version = "0.5.1"
+dependencies = [
+ "blenderui-paint",
+]
 
 [[package]]
 name = "block"

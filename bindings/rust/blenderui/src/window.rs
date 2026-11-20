@@ -21,6 +21,7 @@ use crate::prof::{self, span, Phase};
 use crate::window_kind::{WindowDecorations, WindowKind};
 use crate::paint::{paint_frame, Painter};
 use crate::selection::{Cx, Selector};
+use crate::style::KeySet;
 use crate::widgets::{WKind, Widgets};
 use blenderui_sys as sys;
 
@@ -1687,7 +1688,7 @@ impl Window {
     fn update_hover(&mut self, app: &mut App, fire: bool) {
         let (path, over_text) = self.hover_target(fire);
         self.set_cursor(&path, over_text);
-        let now: std::collections::HashSet<Key> = path.iter().copied().collect();
+        let now: KeySet<Key> = path.iter().copied().collect();
         if now == self.state.hovered {
             return;
         }

@@ -4,7 +4,7 @@
 //! properties in [`Computed`]. Shorthands call the longhand handlers, so
 //! each property has exactly one implementation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasher, Hasher};
 use std::sync::OnceLock;
 
@@ -785,6 +785,9 @@ pub(crate) fn key_hasher() -> impl Hasher {
 }
 
 pub(crate) type KeyMap<K, V> = HashMap<K, V, KeyState>;
+
+/// A set with the same hasher as [`KeyMap`].
+pub(crate) type KeySet<K> = HashSet<K, KeyState>;
 
 fn handlers() -> &'static KeyMap<&'static str, Handler> {
     static MAP: OnceLock<KeyMap<&'static str, Handler>> = OnceLock::new();

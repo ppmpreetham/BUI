@@ -25,6 +25,7 @@ static char g_font_family[64] = "";
 void BK_set_scale(float scale)
 {
   bk_scale_fac = BK_CLAMP(scale, 0.5f, 4.0f);
+  bk_measure_reset();
 }
 float BK_scale(void)
 {
@@ -40,6 +41,7 @@ void BK_set_font(const char *family)
 {
   strncpy(g_font_family, family ? family : "", sizeof(g_font_family) - 1);
   measure_cache_clear(); /* the cached widths are of the old family */
+  bk_measure_reset();
 }
 
 /* wm_window.cc WM_window_dpi_set_userdef: U.dpi = int(72 * ui_scale), pixelsize =
@@ -77,6 +79,7 @@ static float g_ui_points = 11.0f; /* UI_DEFAULT_TEXT_POINTS; a theme may change 
 void BK_set_font_size(float points)
 {
   g_ui_points = BK_CLAMP(points, 6.0f, 48.0f);
+  bk_measure_reset();
 }
 float BK_font_size_points(void)
 {

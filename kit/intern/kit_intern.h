@@ -315,6 +315,7 @@ typedef struct BKClass {
    * ANIMATION_TIME, eased (do_animate) */
   double anim_time;
   int drag_group;  /* drag-toggle group (0 = none) */
+  float overhang;  /* draw goes this far outside the node's rect, in units (bk_unit) */
   void (*init)(BKNode *n);
   void (*free_ext)(BKNode *n);
   void (*measure)(BKNode *n, int *r_w, int *r_h);
@@ -400,6 +401,7 @@ enum {
   NF_DEFAULT_SET = 1 << 27, /* `defval` was set: by "default", or by the first "value" a widget got */
   NF_BARE = 1 << 28,        /* "bare": an HTML text field with no frame (CSS `border-style: none`) */
   NF_SELECT = 1 << 29,      /* "select": held selected by the host (UI_SELECT: a checked push button) */
+  NF_ARRANGE = 1 << 30,     /* arrange again: it or a node under it measured again since its arrange */
 };
 
 #define BK_HTML(n) (((n)->flags & NF_HTML) != 0)
@@ -419,6 +421,7 @@ struct BKNode {
   void *bref;          /* borrowed host wrapper (C-owned node), retained */
 
   int x, y, w, h;
+  BKRect shown; /* where the last layout put it on screen (empty when not shown): damage on change */
   int nat_w, nat_h, nat_gen;
   float weight;
   int fill; /* in a column: takes a share of the spare height (a region filling its area) */
@@ -492,6 +495,8 @@ void bk_node_add(BKNode *parent, BKNode *child);
 BKContext *bk_ctx(const BKNode *n);
 void bk_invalidate(BKNode *n);
 void bk_relayout(BKNode *n);
+void bk_stale(BKNode *n);      /* n and its ancestors measure again */
+void bk_measure_reset(void);   /* every node measures again (theme, scale, font) */
 void bk_natural(BKNode *n, int *r_w, int *r_h);
 void bk_arrange(BKNode *n, int x, int y, int w, int h);
 void bk_draw_tree(BKNode *n);
@@ -606,6 +611,7 @@ struct BKContext {
   int scroll_alpha; /* View2D.alpha_vert of the region scrollbar (0..255) */
   /* damage */
   bool layout_dirty, full_dirty;
+  int arrange_epoch; /* the measure epoch of the last layout: another one arranges every node */
   BKRect dirty[BK_MAX_DIRTY];
   int ndirty;
   BKKeyBinding keys[BK_MAX_KEYS];

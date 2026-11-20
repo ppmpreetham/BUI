@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "BLI_task.h"
 #include "kit_intern.h"
 
 #ifdef _WIN32
@@ -24,11 +25,9 @@
 #  ifndef NOMINMAX
 #    define NOMINMAX
 #  endif
-#  if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0601
-#    undef _WIN32_WINNT
-#    define _WIN32_WINNT 0x0601 /* thread pool work objects */
-#  endif
 #  include <windows.h>
+#else
+#  include <time.h>
 #endif
 
 static int u(void)
@@ -1388,6 +1387,8 @@ static void canvas_item_draw(BuiRaster *r, const CItem *ci, float ox, float oy, 
  * polygons use the kit's global drawing state and keep a canvas serial. */
 
 #define PAR_MIN_ITEMS 64
+/* More bands than threads: balances uneven rows. */
+#define BANDS_PER_THREAD 3
 /* Every extra thread costs CPU (wake-ups, bands overlapping items), so an
  * animation uses the fewest threads that still meet the frame deadline, and
  * all of them only when it can't be met. */
@@ -1414,7 +1415,9 @@ static double now_ms(void)
   QueryPerformanceCounter(&t);
   return (double)t.QuadPart * 1000.0 / (double)freq.QuadPart;
 #else
-  return 0.0;
+  struct timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+  return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec / 1e6;
 #endif
 }
 
@@ -1497,7 +1500,6 @@ typedef struct BandJob {
   int nbands, band_h;
   const int *start; /* band b draws items idx[start[b] .. start[b + 1]) */
   const int *idx;
-  volatile long next;
 } BandJob;
 
 static void band_draw(const BandJob *j, int b)
@@ -1531,37 +1533,24 @@ static void band_draw(const BandJob *j, int b)
   free(view);
 }
 
+/* Threads the canvas may draw with: the pool's, or fewer with BUI_RASTER_THREADS. */
 static int par_threads(void)
 {
   static int n = -1;
   if (n < 0) {
     const char *env = getenv("BUI_RASTER_THREADS");
-    n = env ? atoi(env) : 0;
-#ifdef _WIN32
-    if (n <= 0) {
-      SYSTEM_INFO si;
-      GetSystemInfo(&si);
-      n = (int)si.dwNumberOfProcessors;
-    }
-#endif
-    n = BK_CLAMP(n, 1, 8);
+    const int want = env ? atoi(env) : 0;
+    n = BLI_task_scheduler_num_threads();
+    n = want > 0 ? BK_MIN(want, n) : n;
   }
   return n;
 }
 
-#ifdef _WIN32
-static BandJob g_job;
-static VOID CALLBACK band_worker(PTP_CALLBACK_INSTANCE inst, PVOID ctx, PTP_WORK work)
+static void band_task(void *__restrict userdata, const int b, const TaskParallelTLS *__restrict tls)
 {
-  (void)inst;
-  (void)work;
-  BandJob *j = (BandJob *)ctx;
-  long b;
-  while ((b = InterlockedIncrement(&j->next) - 1) < j->nbands) {
-    band_draw(j, (int)b);
-  }
+  (void)tls;
+  band_draw((const BandJob *)userdata, b);
 }
-#endif
 
 /* Draw `d` in bands on several threads; false when it has to be drawn serially. */
 static bool canvas_draw_parallel(const CanvasData *d, float ox, float oy, int threads)
@@ -1574,7 +1563,6 @@ static bool canvas_draw_parallel(const CanvasData *d, float ox, float oy, int th
       return false;
     }
   }
-#ifdef _WIN32
   ItemPrep *prep = (ItemPrep *)malloc(sizeof(ItemPrep) * (size_t)d->n);
   if (!prep) {
     return false;
@@ -1593,22 +1581,15 @@ static bool canvas_draw_parallel(const CanvasData *d, float ox, float oy, int th
     return false;
   }
   /* phase 2: bands on the pool, this thread included */
-  static PTP_WORK work = NULL;
-  if (!work) {
-    work = CreateThreadpoolWork(band_worker, &g_job, NULL);
-    if (!work) {
-      free(prep);
-      return false;
-    }
-  }
-  BandJob *j = &g_job;
+  BandJob job;
+  BandJob *j = &job;
   j->d = d;
   j->prep = prep;
   j->base = bk_draw.r;
   memcpy(j->clip, bk_draw.clip, sizeof(j->clip));
   j->ox = ox;
   j->oy = oy;
-  j->nbands = threads * 3; /* more bands than threads: balances uneven rows */
+  j->nbands = threads * BANDS_PER_THREAD;
   j->band_h = BK_MAX(1, (j->clip[3] - j->clip[1] + j->nbands - 1) / j->nbands);
   /* bucket items by band once (in list order), so each band reads only its
    * own items instead of scanning the whole list */
@@ -1662,21 +1643,15 @@ static bool canvas_draw_parallel(const CanvasData *d, float ox, float oy, int th
   free(range);
   j->start = start;
   j->idx = idx;
-  j->next = 0;
-  for (int t = 1; t < threads; t++) {
-    SubmitThreadpoolWork(work);
-  }
-  band_worker(NULL, j, NULL);
-  WaitForThreadpoolWorkCallbacks(work, FALSE);
+  /* nb = threads * BANDS_PER_THREAD: the pool uses `threads` threads, not more */
+  TaskParallelSettings settings;
+  BLI_parallel_range_settings_defaults(&settings);
+  settings.min_iter_per_thread = BANDS_PER_THREAD;
+  BLI_task_parallel_range(0, nb, j, band_task, &settings);
   free(start);
   free(idx);
   free(prep);
   return true;
-#else
-  (void)ox;
-  (void)oy;
-  return false;
-#endif
 }
 
 static void canvas_draw(BKNode *n)

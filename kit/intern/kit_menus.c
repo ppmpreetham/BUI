@@ -518,13 +518,13 @@ static void menu_filter(BKNode *n)
     free(all);
   }
   n->hot = (m->query[0] && m->nfiltered) ? 0 : -1;
+  bk_relayout(n); /* before the placing: it reads the natural size */
   BKContext *ctx = bk_ctx(n);
   if (ctx) {
     bk_close_popups_after(ctx, n);
     bk_invalidate(n); /* old size */
     bk_popup_place(n, ctx->win_w, ctx->win_h);
   }
-  bk_relayout(n);
   bk_invalidate(n);
 }
 

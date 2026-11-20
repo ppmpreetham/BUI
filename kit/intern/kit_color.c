@@ -778,7 +778,7 @@ static void ramp_draw(BKNode *n)
     const float dark[4] = {0, 0, 0, 0.6f}, white[4] = {1, 1, 1, 1}, black[4] = {0, 0, 0, 0.8f};
     bk_fill_f(sx - 1, n->y, 3, bh, dark);
     bk_fill_f(sx, n->y, 1, bh, active ? white : black);
-    const float ty = n->y + bh + 1, ts = 0.28f * uu;
+    const float ty = n->y + bh + 1, ts = n->cls->overhang * uu;
     const float tri[3][2] = {{sx - ts, ty + ts * 1.6f}, {sx + ts, ty + ts * 1.6f}, {sx, ty}};
     const float frame[4] = {active ? 1.0f : 0.1f, active ? 1.0f : 0.1f, active ? 1.0f : 0.1f, 1};
     bk_polygon(tri, 3, frame);
@@ -849,6 +849,7 @@ static int ramp_color_set(BKNode *n, const float c[4])
 
 const BKClass bk_cls_ramp = {.name = "ramp",
                              .flags = CLS_INTERACTIVE,
+                             .overhang = 0.28f, /* half the width of a stop marker: it goes out at the ends */
                              .init = ramp_init,
                              .free_ext = ramp_free,
                              .measure = ramp_measure,

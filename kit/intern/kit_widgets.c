@@ -196,17 +196,14 @@ static void column_measure(BKNode *n, int *rw, int *rh)
 static void column_arrange(BKNode *n)
 {
   const int gap = stack_gap(n, false), p = n->padding;
-  int count = 0;
-  for (int i = 0; i < n->nkids; i++) {
-    count += NODE_VISIBLE(n->kids[i]);
-  }
   /* spare height goes to the children marked `fill` */
-  int used = 0, fills = 0;
+  int count = 0, used = 0, fills = 0;
   for (int i = 0; i < n->nkids; i++) {
     BKNode *c = n->kids[i];
     if (NODE_VISIBLE(c)) {
       int cw, ch;
       bk_natural(c, &cw, &ch);
+      count++;
       used += ch;
       fills += c->fill != 0;
     }

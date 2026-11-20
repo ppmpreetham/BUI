@@ -12,7 +12,6 @@
 //! widths and images. Boxes refer to each other by index; nothing is
 //! reference-counted.
 
-use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -20,14 +19,15 @@ use taffy::prelude::*;
 use taffy::style::Overflow;
 
 use crate::css::{Decl, Prop, Rule, Stylesheet, Subject};
-use crate::element::{AnyElement, Div, Listeners, PaintFn, ParentElement, ReplacedSource, SharedString};
+use crate::element::{recycle_children, recycle_decls, AnyElement, Div, Listeners, PaintFn, ParentElement, ReplacedSource, SharedString};
 use crate::geometry::{rect, Bounds, Units};
 use crate::html::{tag_kind, ua_styled_stylesheet, ua_stylesheet, TagKind};
 use crate::paint::{Image, ImageCache, ImageFile};
 use crate::prof::{span, Phase};
 use crate::style::ContentPart;
-use crate::style::{apply, key_hasher, Computed, DisplayKind, KeyMap, TextAlign, TextTransform, VAlign, WhiteSpace};
+use crate::style::{apply, key_hasher, Computed, DisplayKind, KeyMap, KeySet, TextAlign, TextTransform, VAlign, WhiteSpace};
 use crate::text::{self, TextCache};
+use crate::tree::StyleIx;
 use crate::widgets::{WidgetAsk, WidgetSpec};
 
 // ==========================================================================
@@ -61,16 +61,16 @@ pub(crate) const ROOT_KEY: Key = 0x68746d6c; // "html"
 /// Interaction state the cascade reads (`:hover`, `:active`, `:focus`, `details[open]`).
 #[derive(Default)]
 pub(crate) struct UiState {
-    pub hovered: HashSet<Key>,
-    pub active: HashSet<Key>,
+    pub hovered: KeySet<Key>,
+    pub active: KeySet<Key>,
     pub focused: Option<Key>,
     /// The focused element and its ancestors (`:focus-within`).
-    pub focus_path: HashSet<Key>,
+    pub focus_path: KeySet<Key>,
     /// The `.id()` of the focused element.
     pub focused_id: Option<String>,
-    pub details_open: HashMap<Key, bool>,
-    pub scroll: HashMap<Key, (f32, f32)>,
-    pub checked: HashMap<Key, bool>,
+    pub details_open: KeyMap<Key, bool>,
+    pub scroll: KeyMap<Key, (f32, f32)>,
+    pub checked: KeyMap<Key, bool>,
 }
 
 // ==========================================================================
@@ -104,11 +104,13 @@ pub(crate) struct StyleStore {
     /// The author sheet whose `@property` initial values seed the root
     /// style's variables.
     seeded: u64,
+    /// Counts the times the store was emptied: a [`StyleId`] means the same style within one epoch.
+    epoch: u32,
 }
 
 impl Default for StyleStore {
     fn default() -> Self {
-        StyleStore { styles: vec![Computed::default()], cache: Default::default(), vars: Default::default(), seeded: 0 }
+        StyleStore { styles: vec![Computed::default()], cache: Default::default(), vars: Default::default(), seeded: 0, epoch: 0 }
     }
 }
 
@@ -134,6 +136,7 @@ impl StyleStore {
             self.cache.clear();
             self.vars.clear();
             self.seeded = 0;
+            self.epoch += 1;
         }
     }
 
@@ -155,6 +158,7 @@ impl StyleStore {
         self.styles.truncate(1);
         self.cache.clear();
         self.vars.clear();
+        self.epoch += 1;
         self.styles[0].vars = if map.is_empty() { 0 } else { self.vars.add(map.into_boxed_slice()) };
     }
 
@@ -230,9 +234,10 @@ pub(crate) enum Content {
     /// `start..end` of the text of box `src`.
     Word { src: u32, start: u32, end: u32 },
     /// A whole text run in a flex/grid container (wraps when measured).
-    Text(String),
+    Text(SharedString),
     LineBreak,
-    Widget(WidgetSpec),
+    /// Boxed: a widget's spec is large and few boxes are widgets.
+    Widget(Box<WidgetSpec>),
     Replaced(Replaced),
     /// An anonymous line container (inline content between blocks).
     Anon,
@@ -314,7 +319,7 @@ pub(crate) struct Frame {
     pub nodes: Vec<BoxNode>,
     els: Vec<ElData>,
     pub title: Option<String>,
-    by_key: std::cell::OnceCell<HashMap<Key, usize>>,
+    by_key: std::cell::OnceCell<KeyMap<Key, usize>>,
 }
 
 /// Measure contexts of taffy leaves. Compared across frames: an unchanged
@@ -324,10 +329,41 @@ pub(crate) enum Measure {
     /// Text of the box registered under `key` this frame (already
     /// whitespace-processed and transformed); `hash` identifies the text.
     Text { key: Key, hash: u64, size: f32, flags: i32, line: f32, nowrap: bool, brk: u8 },
+    /// One word (nothing to wrap): measured when built. Compared by size, not text, so a new
+    /// word of the same width keeps the cached layout of the leaf and of its ancestors.
+    Word { width: f32, line: f32 },
     /// A textarea with `field-sizing: content`: its height is asked of the kit at the width it gets;
     /// `hash` identifies the text.
     Area { key: Key, hash: u64 },
 }
+
+/// The computed style a taffy style was made from, and how: boxes with the same shape have the
+/// same taffy style, so they share one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct Shape {
+    epoch: u32,
+    style: StyleId,
+    form: Form,
+}
+
+/// How the taffy style of a box follows from its computed style.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Form {
+    Plain,
+    /// A box with its lone text: one block leaf.
+    Folded,
+    /// A block container of line boxes.
+    Lines,
+}
+
+/// A taffy style as a box makes it.
+enum Made {
+    Shared(StyleIx),
+    Own(Style),
+}
+
+/// The styles a layout tree holds before it drops those no node uses.
+const STYLES_MAX: usize = 4096;
 
 /// The persistent taffy tree's nodes by box key (with the frame they were
 /// last used in). Reconciling instead of rebuilding lets taffy's cache skip
@@ -338,6 +374,9 @@ struct Recon {
     stamp: u32,
     /// Nodes for duplicate keys this frame: removed next frame.
     extra: Vec<NodeId>,
+    /// The root and viewport (bits) of the last computed layout: with nothing changed since,
+    /// the layouts in the tree are still current and taffy is not run.
+    laid: Option<(NodeId, (u32, u32))>,
 }
 
 /// Everything layout keeps across frames, owned by the window.
@@ -359,6 +398,8 @@ pub(crate) struct LayoutCaches {
     recon: Recon,
     /// Measured text leaves: key -> box index, this frame.
     text_box: KeyMap<Key, usize>,
+    /// The table entry of each shape's taffy style.
+    shapes: KeyMap<Shape, StyleIx>,
     /// Content widths of blocks with `overflow-wrap: anywhere` from the last
     /// layout: their long words are split to fit before layout.
     wrap_widths: KeyMap<Key, f32>,
@@ -462,6 +503,7 @@ impl Default for LayoutCaches {
             matched: MatchCache::default(),
             recon: Recon::default(),
             text_box: KeyMap::default(),
+            shapes: KeyMap::default(),
             wrap_widths: KeyMap::default(),
             tw: TwJit::default(),
             containers: Containers::default(),
@@ -480,6 +522,7 @@ struct Builder<'a> {
     matched: &'a mut MatchCache,
     recon: &'a mut Recon,
     text_box: &'a mut KeyMap<Key, usize>,
+    shapes: &'a mut KeyMap<Shape, StyleIx>,
     /// Set when a node changed while building the current subtree.
     changed: bool,
     /// `tpos` for the element about to be built.
@@ -797,24 +840,23 @@ impl Subject for DivSubject<'_, '_> {
 // -- building -------------------------------------------------------------------------------
 
 fn collect_styles(el: &AnyElement, css: &mut String, title: &mut Option<String>, jit: &mut TwJit) {
-    if let AnyElement::Element(d) = el {
-        if jit.on {
-            if let Some((_, classes)) = d.attrs.iter().find(|(k, _)| k.as_ref() == "class") {
-                jit.scan(classes);
-            }
-        }
-        let text = || d.children.iter().filter_map(|c| match c {
-            AnyElement::Text(t) => Some(t.as_ref()),
-            _ => None,
-        }).collect::<String>();
-        match d.tag {
-            "style" => css.push_str(&text()),
-            "title" if title.is_none() => *title = Some(text()),
-            _ => {}
-        }
-        for c in &d.children {
-            collect_styles(c, css, title, jit);
-        }
+    let AnyElement::Element(d) = el else { return };
+    if jit.on
+        && let Some((_, classes)) = d.attrs.iter().find(|(k, _)| k.as_ref() == "class")
+    {
+        jit.scan(classes);
+    }
+    let text = || d.children.iter().filter_map(|c| match c {
+        AnyElement::Text(t) => Some(t.as_ref()),
+        _ => None,
+    }).collect::<String>();
+    match d.tag {
+        "style" => css.push_str(&text()),
+        "title" if title.is_none() => *title = Some(text()),
+        _ => {}
+    }
+    for c in &d.children {
+        collect_styles(c, css, title, jit);
     }
 }
 
@@ -1221,6 +1263,7 @@ impl<'a> Builder<'a> {
         let style = self.cascade(i, &div, parent_style, fixup);
         if self.styles[style].display == DisplayKind::None || kind == TagKind::Metadata {
             self.pop();
+            recycle_decls(std::mem::take(&mut div.decls));
             return None;
         }
         let style = self.animate(i, &div, parent_style, style);
@@ -1267,7 +1310,7 @@ impl<'a> Builder<'a> {
                         spec.field_bg = argb(own.background);
                         spec.font_px = (own.font_size != up.font_size).then_some(own.font_size);
                     }
-                    self.nodes[i].content = Content::Widget(spec);
+                    self.nodes[i].content = Content::Widget(Box::new(spec));
                 } else {
                     self.children(i, div.children);
                 }
@@ -1319,6 +1362,7 @@ impl<'a> Builder<'a> {
         while self.counters.last().is_some_and(|c| c.2 == i) {
             self.counters.pop();
         }
+        recycle_decls(std::mem::take(&mut div.decls));
         Some(i)
     }
 
@@ -1430,7 +1474,7 @@ impl<'a> Builder<'a> {
         self.nodes[g].el = self.els.len() as u32;
         self.els.push(ElData { tag, id: None, attrs: Vec::new(), listeners: None, has: 0, reactive: false });
         if !text.is_empty() {
-            self.push(Some(g), Content::Text(text), Some(g), sid, child_key(key, "#text", 1), true);
+            self.push(Some(g), Content::Text(text.into()), Some(g), sid, child_key(key, "#text", 1), true);
         }
     }
 
@@ -1470,7 +1514,7 @@ impl<'a> Builder<'a> {
         }
         let (mut k, mut n) = (0, 0);
         let parent_key = self.nodes[i].key;
-        for child in children {
+        for child in children.drain(..) {
             n += 1;
             match child {
                 AnyElement::Element(d) => {
@@ -1489,11 +1533,12 @@ impl<'a> Builder<'a> {
                 AnyElement::Text(t) if t.is_empty() => {}
                 AnyElement::Text(t) => {
                     let style = self.nodes[i].style;
-                    self.push(Some(i), Content::Text(t.into_owned()), Some(i), style,
+                    self.push(Some(i), Content::Text(t), Some(i), style,
                               child_key(parent_key, "#text", n), true);
                 }
             }
         }
+        recycle_children(children);
     }
 
     // -- taffy ------------------------------------------------------------------------------
@@ -1732,6 +1777,13 @@ impl<'a> Builder<'a> {
     /// children: last frame's node, updated only where something differs
     /// (which marks it dirty), or a new one.
     fn node(&mut self, key: Key, style: Style, ctx: Option<Measure>, children: &[NodeId]) -> NodeId {
+        self.node_from(key, None, |_| style, ctx, children)
+    }
+
+    /// The taffy node of `key`, written only where it differs from last frame's. With a `shape`,
+    /// `style` is called once per shape, and the nodes of a shape share its result.
+    fn node_from(&mut self, key: Key, shape: Option<(StyleId, Form)>, style: impl FnOnce(&Self) -> Style,
+                 ctx: Option<Measure>, children: &[NodeId]) -> NodeId {
         let stamp = self.recon.stamp;
         let reuse = match self.recon.map.get_mut(&key) {
             Some((id, st)) if *st != stamp => {
@@ -1740,34 +1792,83 @@ impl<'a> Builder<'a> {
             }
             _ => None,
         };
-        let t = &mut *self.taffy;
-        if let Some(id) = reuse {
-            if *t.style(id) != style {
-                t.set_style(id, style);
-                self.changed = true;
-            }
-            if t.children(id) != children {
-                t.set_children(id, children);
-                self.changed = true;
-            }
-            if t.context(id) != ctx.as_ref() {
-                t.set_context(id, ctx);
-                self.changed = true;
+        let made = match shape {
+            Some((style_id, form)) => Made::Shared(self.shared_style(Shape { epoch: self.styles.epoch, style: style_id, form }, style)),
+            None => Made::Own(style(self)),
+        };
+        let Some(id) = reuse else {
+            let style = match made {
+                Made::Shared(ix) => ix,
+                Made::Own(s) => self.taffy.intern(s),
+            };
+            let id = match ctx {
+                Some(m) => self.taffy.new_leaf_with_context(style, m),
+                None => self.taffy.new_with_children(style, children),
+            };
+            self.changed = true;
+            match self.recon.map.entry(key) {
+                std::collections::hash_map::Entry::Occupied(_) => self.recon.extra.push(id), // duplicate key
+                std::collections::hash_map::Entry::Vacant(v) => {
+                    v.insert((id, stamp));
+                }
             }
             return id;
-        }
-        let id = match ctx {
-            Some(m) => t.new_leaf_with_context(style, m),
-            None => t.new_with_children(style, children),
         };
-        self.changed = true;
-        match self.recon.map.entry(key) {
-            std::collections::hash_map::Entry::Occupied(_) => self.recon.extra.push(id), // duplicate key
-            std::collections::hash_map::Entry::Vacant(v) => {
-                v.insert((id, stamp));
+        match made {
+            Made::Shared(new) if new != self.taffy.style_ix(id) => {
+                if self.taffy.has_style(id, new) {
+                    self.taffy.replace_style(id, new);
+                } else {
+                    self.taffy.set_style(id, new);
+                    self.changed = true;
+                }
+            }
+            Made::Shared(_) => {}
+            Made::Own(new) => {
+                if *self.taffy.style(id) != new {
+                    let ix = self.taffy.intern(new);
+                    self.taffy.set_style(id, ix);
+                    self.changed = true;
+                }
             }
         }
+        let t = &mut *self.taffy;
+        if t.children(id) != children {
+            t.set_children(id, children);
+            self.changed = true;
+        }
+        if t.context(id) != ctx.as_ref() {
+            t.set_context(id, ctx);
+            self.changed = true;
+        }
         id
+    }
+
+    /// The table entry of `shape`'s taffy style: the shared one, made when there is none.
+    fn shared_style(&mut self, shape: Shape, style: impl FnOnce(&Self) -> Style) -> StyleIx {
+        if let Some(&ix) = self.shapes.get(&shape) {
+            return ix;
+        }
+        let ix = self.taffy.intern(style(self));
+        self.shapes.insert(shape, ix);
+        ix
+    }
+
+    /// The shape of box `i`'s taffy style when it follows from its computed style alone.
+    fn shape(&self, i: usize, form: Form) -> Option<(StyleId, Form)> {
+        let table = matches!(self.st(i).display, DisplayKind::Table | DisplayKind::TableRowGroup
+                             | DisplayKind::TableRow | DisplayKind::TableCell);
+        (i != 0 && !table).then_some((self.nodes[i].style, form))
+    }
+
+    /// The taffy style of box `i`: its computed layout, and the root filling the viewport.
+    fn box_style(&self, i: usize) -> Style {
+        let mut base = self.base_style(i);
+        if i == 0 {
+            base.min_size = Size { width: LengthPercentageAuto::length(self.viewport.0),
+                                   height: LengthPercentageAuto::length(self.viewport.1) };
+        }
+        base
     }
 
     fn leaf(&mut self, i: usize, style: Style) -> NodeId {
@@ -1788,21 +1889,25 @@ impl<'a> Builder<'a> {
             };
             let changed = text::bidi_visual(changed.as_deref().unwrap_or(t), rtl, ovr).or(changed);
             if let Some(t) = changed {
-                self.nodes[k].content = Content::Text(t);
+                self.nodes[k].content = Content::Text(t.into());
             }
         }
     }
 
     /// The measure context for the text of box `node`, registered under `key`.
     fn text_measure(&mut self, key: Key, node: usize, c: StyleId, nowrap: bool) -> Measure {
-        self.text_box.insert(key, node);
-        let hash = match &self.nodes[node].content {
-            Content::Text(t) => hash_parts(&[t.as_bytes()]),
-            _ => 0,
-        };
         let c = &self.styles[c];
-        Measure::Text { key, hash, size: c.font_size, flags: text::flags(c), line: c.line_px(), nowrap,
-                        brk: text::break_mode(c) }
+        let (size, flags, line, brk) = (c.font_size, text::flags(c), c.line_px(), text::break_mode(c));
+        let t = match &self.nodes[node].content {
+            Content::Text(t) => t.as_ref(),
+            _ => "",
+        };
+        if brk == 0 && !t.contains([' ', '\n']) {
+            return Measure::Word { width: self.text.width(t, size, flags).ceil(), line };
+        }
+        let hash = hash_parts(&[t.as_bytes()]);
+        self.text_box.insert(key, node);
+        Measure::Text { key, hash, size, flags, line, nowrap, brk }
     }
 
     /// The taffy node for box `i` (and its subtree). Marks it dirty when
@@ -1822,17 +1927,11 @@ impl<'a> Builder<'a> {
         if self.st(i).display == DisplayKind::Table {
             self.table_columns(i);
         }
-        let mut base = self.base_style(i);
-        if i == 0 {
-            // the root fills the viewport
-            base.min_size = Size { width: LengthPercentageAuto::length(self.viewport.0),
-                                   height: LengthPercentageAuto::length(self.viewport.1) };
-        }
         let sid = self.nodes[i].style;
         match &self.nodes[i].content {
             Content::Widget(spec) => {
                 let (w, h) = (self.widgets)(self.nodes[i].key, WidgetAsk::Ensure(spec));
-                let mut s = base;
+                let mut s = self.box_style(i);
                 if s.size.width == Dimension::auto() {
                     s.size.width = Dimension::length(w);
                 }
@@ -1861,7 +1960,7 @@ impl<'a> Builder<'a> {
                     _ => (300.0, 150.0),
                 };
                 let attr = |n: &str| self.attr(i, n).and_then(|v| v.trim_end_matches("px").parse::<f32>().ok());
-                let mut s = base;
+                let mut s = self.box_style(i);
                 let (aw, ah) = (attr("width"), attr("height"));
                 if s.size.width == Dimension::auto() {
                     s.size.width = Dimension::length(aw.unwrap_or(match ah {
@@ -1902,9 +2001,8 @@ impl<'a> Builder<'a> {
             let nowrap = self.styles[sid].white_space == WhiteSpace::NoWrap;
             let key = self.nodes[i].key;
             let m = self.text_measure(key, k, sid, nowrap);
-            let mut s = base;
-            s.display = Display::Block;
-            let id = self.node(key, s, Some(m), &[]);
+            let shape = self.shape(i, Form::Folded);
+            let id = self.node_from(key, shape, |b| Style { display: Display::Block, ..b.box_style(i) }, Some(m), &[]);
             self.nodes[i].taffy = Some(id);
             self.nodes[i].fold = Some(k);
             self.nodes[k].folded = true;
@@ -1933,15 +2031,16 @@ impl<'a> Builder<'a> {
                 }
                 self.child_nodes(k, &mut out);
             }
-            let id = self.node(self.nodes[i].key, base, None, &out);
+            let shape = self.shape(i, Form::Plain);
+            let id = self.node_from(self.nodes[i].key, shape, |b| b.box_style(i), None, &out);
             self.nodes[i].taffy = Some(id);
             return id;
         }
         // block container: runs of inline content become line boxes
         if list.iter().all(|&k| !self.is_block_level(k)) {
             self.inline_items(&list, i, &mut out, true);
-            let line = Self::line_style(&self.styles[sid], base);
-            let id = self.node(self.nodes[i].key, line, None, &out);
+            let shape = self.shape(i, Form::Lines);
+            let id = self.node_from(self.nodes[i].key, shape, |b| Self::line_style(&b.styles[sid], b.box_style(i)), None, &out);
             self.nodes[i].taffy = Some(id);
             return id;
         }
@@ -1955,7 +2054,8 @@ impl<'a> Builder<'a> {
             }
         }
         self.flush_run(i, &mut run, &mut out);
-        let id = self.node(self.nodes[i].key, base, None, &out);
+        let shape = self.shape(i, Form::Plain);
+        let id = self.node_from(self.nodes[i].key, shape, |b| b.box_style(i), None, &out);
         self.nodes[i].taffy = Some(id);
         id
     }
@@ -2069,15 +2169,15 @@ impl<'a> Builder<'a> {
         let Content::Text(raw) = std::mem::replace(&mut self.nodes[src].content, Content::Anon) else { return };
         let mut text = match transform(&raw, tt, ws, tab) {
             std::borrow::Cow::Borrowed(_) => raw,
-            std::borrow::Cow::Owned(s) => s,
+            std::borrow::Cow::Owned(s) => s.into(),
         };
         // bidirectional text: laid out in visual order
         let (rtl, ovr) = (c.layout.direction == taffy::style::Direction::Rtl, c.bidi_override);
         if let Some(v) = text::bidi_visual(&text, rtl, ovr) {
-            text = v;
+            text = v.into();
         }
         if ws == WhiteSpace::NoWrap {
-            text = collapse(&text);
+            text = collapse(&text).into();
         }
         // pieces: byte range, trailing space, forced break after
         let mut pieces: smallvec::SmallVec<[(usize, usize, bool, bool); 16]> = smallvec::SmallVec::new();
@@ -2302,6 +2402,10 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     }
     caches.recon.stamp = caches.recon.stamp.wrapping_add(1);
     caches.text_box.clear();
+    if caches.taffy.style_count() >= STYLES_MAX {
+        caches.taffy.compact_styles();
+        caches.shapes.clear();
+    }
     let Frame { mut nodes, mut els, .. } = recycle;
     nodes.clear();
     els.clear();
@@ -2311,7 +2415,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     }
     caches.images.videos.begin_pass();
     let ua_styled = ua_styled_stylesheet();
-    let LayoutCaches { styles, text, images, author, taffy, box_of, acc, matched, recon, text_box, containers,
+    let LayoutCaches { styles, text, images, author, taffy, box_of, acc, matched, recon, text_box, shapes, containers,
                        wrap_widths, anim, .. } = caches;
     let mut b = Builder {
         nodes,
@@ -2323,6 +2427,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         matched,
         recon,
         text_box,
+        shapes,
         containers,
         wrap_widths,
         changed: false,
@@ -2373,38 +2478,38 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     });
     let avail = Size { width: AvailableSpace::Definite(viewport.0),
                        height: AvailableSpace::Definite(viewport.1) };
+    let laid = Some((root_id, (viewport.0.to_bits(), viewport.1.to_bits())));
+    let stale = std::mem::replace(&mut b.recon.laid, laid) != laid || b.changed;
     let Builder { nodes, els, taffy, styles, text: tc, title, text_box, widgets, .. } = b;
-    taffy.compute(root_id, avail, |known, available, ctx| {
-            match ctx {
-                Measure::Area { key, .. } => {
-                    let w = known.width.unwrap_or(match available.width {
-                        AvailableSpace::Definite(w) => w,
-                        _ => 0.0,
-                    });
-                    Size { width: known.width.unwrap_or(w), height: known.height.unwrap_or_else(|| widgets(*key, WidgetAsk::Height(w)).1) }
-                }
-                Measure::Text { key, size, flags, line, nowrap, brk, .. } => {
-                    let text = match text_box.get(key).map(|&k| &nodes[k].content) {
-                        Some(Content::Text(t)) => t.as_str(),
-                        _ => "",
-                    };
-                    if !text.contains([' ', '\n']) && *brk == 0 {
-                        // one word: no wrapping to do
-                        let w = tc.width(text, *size, *flags);
-                        return Size { width: known.width.unwrap_or(w.ceil()),
-                                      height: known.height.unwrap_or(*line) };
+    if stale {
+        taffy.compute(root_id, avail, |known, available, ctx| {
+                match ctx {
+                    Measure::Area { key, .. } => {
+                        let w = known.width.unwrap_or(match available.width {
+                            AvailableSpace::Definite(w) => w,
+                            _ => 0.0,
+                        });
+                        Size { width: known.width.unwrap_or(w), height: known.height.unwrap_or_else(|| widgets(*key, WidgetAsk::Height(w)).1) }
                     }
-                    let max_w = known.width.unwrap_or(match available.width {
-                        AvailableSpace::Definite(w) => w,
-                        AvailableSpace::MinContent => 0.0,
-                        AvailableSpace::MaxContent => f32::INFINITY,
-                    });
-                    let wrapped = tc.wrap(text, *size, *flags, if *nowrap { f32::INFINITY } else { max_w }, *brk);
-                    Size { width: known.width.unwrap_or(wrapped.width.ceil()),
-                           height: known.height.unwrap_or(*line * wrapped.lines.len().max(1) as f32) }
+                    Measure::Word { width, line } => Size { width: known.width.unwrap_or(*width),
+                                                            height: known.height.unwrap_or(*line) },
+                    Measure::Text { key, size, flags, line, nowrap, brk, .. } => {
+                        let text = match text_box.get(key).map(|&k| &nodes[k].content) {
+                            Some(Content::Text(t)) => t.as_ref(),
+                            _ => "",
+                        };
+                        let max_w = known.width.unwrap_or(match available.width {
+                            AvailableSpace::Definite(w) => w,
+                            AvailableSpace::MinContent => 0.0,
+                            AvailableSpace::MaxContent => f32::INFINITY,
+                        });
+                        let wrapped = tc.wrap(text, *size, *flags, if *nowrap { f32::INFINITY } else { max_w }, *brk);
+                        Size { width: known.width.unwrap_or(wrapped.width.ceil()),
+                               height: known.height.unwrap_or(*line * wrapped.lines.len().max(1) as f32) }
+                    }
                 }
-            }
-        });
+            });
+    }
     drop(s);
     let _s = span(Phase::Place);
     let mut frame = Frame { nodes, els, title, by_key: Default::default() };
@@ -2650,7 +2755,7 @@ fn finish(nodes: &mut [BoxNode], styles: &StyleStore, acc: &mut Vec<Option<Bound
 impl Frame {
     /// Element boxes by key, built on first use (events and tests need it,
     /// rendering doesn't).
-    pub(crate) fn by_key(&self) -> &HashMap<Key, usize> {
+    pub(crate) fn by_key(&self) -> &KeyMap<Key, usize> {
         self.by_key.get_or_init(|| {
             self.nodes.iter().enumerate().filter(|(_, n)| n.el != NONE).map(|(i, n)| (n.key, i)).collect()
         })
@@ -2761,5 +2866,16 @@ fn load_font_faces(sheet: &Stylesheet) {
         if loaded {
             LOADED.lock().unwrap_or_else(|e| e.into_inner()).push(key);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BoxNode;
+
+    /// A box is made for every element and text run: a widget's spec lives behind a pointer.
+    #[test]
+    fn box_node_stays_small() {
+        assert!(std::mem::size_of::<BoxNode>() <= 256, "{}", std::mem::size_of::<BoxNode>());
     }
 }

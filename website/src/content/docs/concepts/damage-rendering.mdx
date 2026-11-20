@@ -27,7 +27,7 @@ On the full components demo (520×900, Ryzen 7 5800U laptop), that's the differe
 
 1. **A widget marks itself dirty.**
 
-   When a value, text or state changes, the kit marks that node's rectangle as dirty, plus a few pixels of margin. Popups get a wider margin, to cover their shadow. Nothing is drawn yet.
+   When a value, text or state changes, the kit marks that node's rectangle as dirty, plus a few pixels of margin. Popups get a wider margin, to cover their shadow. A widget that draws past its own edges, like the color ramp's stop markers, gets a margin that covers them. Nothing is drawn yet.
 
 2. **Dirty rectangles merge.**
 
@@ -41,7 +41,9 @@ On the full components demo (520×900, Ryzen 7 5800U laptop), that's the differe
 
    For each dirty rectangle, the kit draws the widgets that touch it, clipped to the rectangle. Everything outside keeps last frame's pixels.
 
-   If the layout changed (the window resized, or a widget was added), positions may have moved everywhere, so the whole window is redrawn once.
+   If the layout changed (a widget was added or removed, a label grew, a panel collapsed), BUI compares where each widget is now with where the last frame drew it, the way Blender tags a region for redraw. Only widgets that moved, resized, appeared or disappeared are damaged, at their old place and their new one. Only a window resize redraws everything.
+
+   Set `BUI_CHECK_DAMAGE=1` to check this: each partial frame is drawn again in full, and any pixels the damage missed are reported.
 
 5. **The renderer finds what actually changed.**
 

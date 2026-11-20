@@ -5,6 +5,11 @@
 //! [`Decl`]s applied by one property table (`style.rs`).
 
 use std::borrow::Cow;
+use std::hash::{BuildHasher, Hash, Hasher};
+
+use crate::calc::Calc;
+use crate::config::FINGERPRINT_MULTIPLIER;
+use crate::style::KeyState;
 
 // ==========================================================================
 // Tokens
@@ -85,6 +90,45 @@ impl std::hash::Hash for Tok {
             Tok::Delim(c) => c.hash(h),
             Tok::Calc(c) => (*c as *const crate::calc::Calc as usize).hash(h),
             Tok::Comma | Tok::Slash => {}
+        }
+    }
+}
+
+/// Mixes `value` into `acc`: cheap and well spread, not a secure hash.
+const fn fold(acc: u64, value: u64) -> u64 {
+    (acc.rotate_left(5) ^ value).wrapping_mul(FINGERPRINT_MULTIPLIER)
+}
+
+/// Two floats as one number.
+fn pair_bits(a: f32, b: f32) -> u64 {
+    u64::from(a.to_bits()) << 32 | u64::from(b.to_bits())
+}
+
+/// Text as one number: eight bytes at a time. Equal text gives an equal
+/// number, whether it is borrowed or owned.
+fn text_bits(s: &str) -> u64 {
+    s.as_bytes()
+        .chunks(8)
+        .fold(s.len() as u64, |acc, chunk| fold(acc, chunk.iter().fold(0, |word, &b| word << 8 | u64::from(b))))
+}
+
+impl Tok {
+    /// One number for this token. Equal tokens give equal numbers (a hash
+    /// bucket, never an identity: the cache compares the tokens too).
+    fn fingerprint(&self) -> u64 {
+        match self {
+            Tok::Num(v) => fold(1, u64::from(v.to_bits())),
+            Tok::Pct(v) => fold(2, u64::from(v.to_bits())),
+            Tok::Dim(v, unit) => fold(fold(3, u64::from(v.to_bits())), text_bits(unit)),
+            Tok::Ident(s) => fold(4, text_bits(s)),
+            Tok::Hash(s) => fold(5, text_bits(s)),
+            Tok::Str(s) => fold(6, text_bits(s)),
+            Tok::Color(c) => fold(fold(7, pair_bits(c.r, c.g)), pair_bits(c.b, c.a)),
+            Tok::Delim(c) => fold(8, u64::from(*c)),
+            Tok::Calc(c) => fold(9, std::ptr::from_ref::<Calc>(c).addr() as u64),
+            Tok::Comma => 10,
+            Tok::Slash => 11,
+            Tok::Func(_) => fold(12, KeyState::default().hash_one(self)),
         }
     }
 }
@@ -387,14 +431,12 @@ impl Decl {
     /// A cheap hash for style sharing: fixed values (parsed once, unique per
     /// program) by address, others by content. Equal declarations may hash
     /// differently across variants; that only costs a cache miss.
-    pub(crate) fn probe_hash<H: std::hash::Hasher>(&self, h: &mut H) {
-        use std::hash::Hash;
-        self.prop.hash(h);
-        self.important.hash(h);
-        match &self.value {
-            Value::Static(s) => (s.as_ptr() as usize).hash(h),
-            v => (**v).hash(h),
-        }
+    pub(crate) fn probe_hash<H: Hasher>(&self, h: &mut H) {
+        let head = fold(u64::from(self.prop.0), u64::from(self.important));
+        h.write_u64(match &self.value {
+            Value::Static(s) => fold(head, s.as_ptr().addr() as u64),
+            value => value.iter().fold(head, |acc, tok| fold(acc, tok.fingerprint())),
+        });
     }
 
     /// Parse `value` for `prop` (the run-time path: `.css()`, stylesheets).
@@ -455,6 +497,59 @@ pub(crate) use crate::selector::Matches;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::color::rgb;
+    use crate::style::key_hasher;
+
+    fn probe(d: &Decl) -> u64 {
+        let mut h = key_hasher();
+        d.probe_hash(&mut h);
+        h.finish()
+    }
+
+    fn width(tok: Tok) -> Decl {
+        Decl::one(Prop::lookup("width"), tok)
+    }
+
+    #[test]
+    fn equal_declarations_hash_equal() {
+        // the same text, borrowed from the binary or owned
+        let borrowed = width(Tok::Dim(12.0, Cow::Borrowed("px")));
+        let owned = width(Tok::Dim(12.0, Cow::Owned(String::from("px"))));
+        assert_eq!(borrowed, owned);
+        assert_eq!(probe(&borrowed), probe(&owned));
+        // parsed CSS and typed values of the same declaration
+        let parsed = Decl::new("width", "12px");
+        assert_eq!(probe(&parsed), probe(&borrowed));
+        // every token kind is stable
+        let kinds = [Tok::Num(1.5), Tok::Pct(50.0), Tok::Ident("auto".into()), Tok::Color(rgb(0x4772b3)), Tok::Delim('/')];
+        kinds.into_iter().for_each(|t| assert_eq!(probe(&width(t.clone())), probe(&width(t))));
+    }
+
+    #[test]
+    fn different_declarations_hash_apart() {
+        let base = width(Tok::Dim(12.0, "px".into()));
+        let others = [
+            width(Tok::Dim(13.0, "px".into())),
+            width(Tok::Dim(12.0, "em".into())),
+            width(Tok::Pct(12.0)),
+            width(Tok::Num(12.0)),
+            Decl::one(Prop::lookup("height"), Tok::Dim(12.0, "px".into())),
+            Decl { important: true, ..base.clone() },
+            width(Tok::Color(rgb(0x4772b3))),
+            width(Tok::Color(rgb(0x4772b4))),
+        ];
+        others.iter().for_each(|d| assert_ne!(probe(d), probe(&base), "{d:?}"));
+        // text longer than eight bytes counts in full
+        let (long, longer) = (Tok::Ident("flex-direction-a".into()), Tok::Ident("flex-direction-b".into()));
+        assert_ne!(probe(&width(long)), probe(&width(longer)));
+    }
+
+    #[test]
+    fn functions_hash_by_arguments() {
+        let (a, b) = (Decl::new("width", "calc(1px + 2px)"), Decl::new("width", "calc(1px + 3px)"));
+        assert_ne!(probe(&a), probe(&b));
+        assert_eq!(probe(&a), probe(&Decl::new("width", "calc(1px + 2px)")));
+    }
 
     #[test]
     fn tokenizes_values() {

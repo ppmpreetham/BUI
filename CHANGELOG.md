@@ -84,6 +84,48 @@ All notable changes to **blenderui** (BUI). The format follows
   - Examples: `examples/animation/` (a hero intro, a card grid, magnetic buttons, a marquee with drag and an equalizer).
 
 ### Changed
+- **Kit: a layout arranges only the nodes that changed.** A node is arranged again when it or a node under it measured again, or when its place changed; the rest keep their places. A frame where one label changes among 3300 nodes: 0.26 ms instead of 0.31 ms. A change of theme, scale or font still arranges every node.
+- **Kit: a layout change redraws only what moved.** A layout used to redraw the whole window. Now each widget's
+  place on screen is compared with where the last frame drew it, and only widgets that moved, resized, appeared or
+  disappeared are damaged, at both places (only a window resize still redraws everything). One label that grows in
+  a 1280×1440 column: 0.14 ms instead of 4.5 ms. `BUI_CHECK_DAMAGE=1` draws each partial frame again in full and
+  reports missed pixels; `tests/damage_test.c` checks added, removed, hidden, collapsed and tab-switched widgets.
+- **Kit: a changed node measures again, not the whole tree.** The natural-size cache no longer restarts on every layout. A property write, a value change, an animation step or a child change marks the node and its ancestors stale; theme, scale and font changes still reset every node. A frame where one label changes does about 20% less work (3000 rows, measured by instruction count); a frame where every label changes is unchanged, because each label is measured once either way. No extra memory: `nat_gen` is the mark.
+- **Rust: layout styles by index, declarations in one allocation.** The layout tree held its shared taffy styles
+  behind reference counts; they are entries of a table the tree owns, and a node holds an index (the table drops
+  the styles no node uses once it holds 4,096). An element's style calls reserve room for twelve declarations
+  instead of eight, so the nine of a typical cell are one allocation, not two. A grid of 3,000 cells runs 2.0%
+  fewer instructions per frame and touches 130 fewer pages. Nothing changes in the API or in what is drawn;
+  `compacting_the_style_table_keeps_frames_equal` checks frames while the table is compacted.
+- **Rust: declaration and child buffers are reused between frames.** An element's style calls and child list
+  each took a heap allocation that the next frame's build freed; the built elements now give the buffers back
+  (up to 8,192 of each, a few bytes per element) and the next render takes them. A grid of 3,000 cells that
+  changes every frame runs 2.1% fewer instructions and uses 8% less CPU per frame. Nothing changes in the API or
+  in what is drawn. A pointer shortcut for equal CSS strings saved 0.35% of the instructions and was not kept.
+- **Rust: boxes outside the view are not painted.** A box whose bounds, with its shadows, outline and (for text) a
+  margin of one em per byte, lie outside the window and its clip makes no paint items. Frames with effect layers,
+  an active text selection, list markers and widgets are painted as before. A page of 3,000 cells in a clipped
+  container uses 6% less CPU per frame; a page that fits the window is unchanged. The paint order is kept between
+  frames, not allocated again. `boxes_outside_the_view_leave_the_view_unchanged` compares the view with the same
+  page drawn with all of it in view.
+- **Rust: smaller boxes and layout nodes.** A box held its widget spec inline (320 bytes) although few boxes are
+  widgets: it is behind a pointer now, and a box is 240 bytes instead of 528. Layout nodes shared nothing: each
+  held its own 560-byte taffy style; nodes with the same computed style and form point at one (`Rc`, in our own
+  tree, taffy is not changed), and a node is 696 bytes instead of 1,248. A grid of 3,000 cells touches 9% fewer
+  pages and 3 MB less memory, and its first frame takes about 3 ms less (47.5 to 44.4 ms median); a frame that
+  follows runs 2.6% fewer instructions. `box_node_stays_small` and `node_stays_small` keep the sizes.
+- **Rust: the interaction state uses the crate's fast hasher.** The hover, active and focus sets, the scroll,
+  checked and `details` maps and the box-by-key map used the standard library's SipHash, looked up about three
+  times per element per frame; they use foldhash like every other map now (`KeySet` next to `KeyMap`). A grid of
+  3,000 cells runs 1.4% fewer instructions per frame.
+- **Rust: style sharing hashes a declaration as one number.** The cascade looked a style up by hashing every
+  declaration token by token (about 140 instructions each, with the unit text hashed byte by byte); each declaration
+  is one cheap fingerprint now, and equal declarations still hash equal, borrowed text or owned. A grid of 3,000
+  cells runs about 6% fewer instructions per frame; the GPU renderer's frame time drops by about 4%, the CPU
+  renderer's does not change within the measurement noise.
+- **Rust: an element's first child reserves one slot, not four.** `.child()` on an element without children
+  allocated four 136-byte slots (544 bytes) for the common single text child; a leaf now takes 136 bytes. A grid of
+  3,000 cells allocates 1.2 MB less per frame.
 - **Breaking default: videos play with sound.** A `<video>` / `BK_video` autoplays with its audio track now (it
   was silent): set `muted` (HTML attribute, `BK_video_set_muted`, `Video(muted=True)`, `Video::set_muted`) for a
   silent one. Closing a video no longer waits for its audio device (the stream is released on a thread of its
@@ -92,6 +134,8 @@ All notable changes to **blenderui** (BUI). The format follows
   audio track plays and each video with sound owns one stream and thread.
 
 ### Fixed
+- **Kit: the color ramp's end stops leave no marks.** A stop marker at either end of the band draws past the widget, outside the area that was redrawn; the damage now covers it (`BUI_CHECK_DAMAGE=1` found 9 pixels in the component tests).
+- **Kit: a menu search placed the popup with the old size.** `menu_filter` placed the popup before it marked the layout, so the popup used the size from before the new filter.
 - **Rust: Tailwind `text-sm` / `text-xs` / `text-lg` line heights.** A unitless `calc()` line height (`calc(1.25 / 0.875)`, what the Tailwind theme sets) was read as pixels (1.4 px), so the text sat about 9 px above its box and a parent with `overflow: hidden` (`truncate`) cut it. It is now a factor of the font size, like a number.
 - **Rust: `text-overflow: ellipsis` on a clipping block.** A `nowrap` text in a block with `overflow: hidden` (`truncate`) was laid out as line-box words, so it was clipped without the `…`. A block holding only text now lays it out as one measured run whatever its `overflow` (except scrolling ones), clips it to the content box and ends it with `…`; `text-overflow` takes effect only when `overflow-x` is not `visible`, as in CSS.
 - **Windows window exposure and resizing:** a window dragged back from outside the screen, restored from minimize or uncovered

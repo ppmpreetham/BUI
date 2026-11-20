@@ -359,3 +359,131 @@ fn canvas_image_and_video_sources() {
         assert_eq!(pixel(&img, s, s), 0x0000ff, "the image's pixel shows");
     });
 }
+
+/// Fixed cells, auto-width chips and a wrapping line, all showing numbers that change.
+#[derive(Clone)]
+struct Cells {
+    cells: Vec<(u32, u32)>,
+    chips: Vec<u32>,
+    line: u32,
+}
+
+impl Render for Cells {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        body().m_0()
+            .child(div().flex().flex_wrap().gap(px(2.0)).children(self.cells.iter().map(|&(color, label)| {
+                div().w(px(40.0)).h(px(20.0)).bg(rgb(color)).flex().items_center().justify_center()
+                    .text_size(px(12.0)).child(label.to_string())
+            })))
+            .child(div().flex().gap(px(4.0)).children(self.chips.iter().map(|n| {
+                div().px(px(3.0)).bg(rgb(0x335577)).text_size(px(12.0)).child(format!("{n}"))
+            })))
+            .child(p().w(px(150.0)).child("word ".repeat(self.line as usize % 9 + 1)))
+    }
+}
+
+/// A fixed-seed generator: the history of a test must repeat.
+fn next(seed: &mut u64) -> u32 {
+    *seed ^= *seed << 13;
+    *seed ^= *seed >> 7;
+    *seed ^= *seed << 17;
+    (*seed >> 32) as u32
+}
+
+/// Random histories of changes: every incremental frame is the frame a fresh window draws.
+#[test]
+fn random_histories_match_fresh_renders() {
+    Application::headless().run(|cx| {
+        let mut seed = 0x2545_F491_4F6C_DD1D_u64;
+        let mut model = Cells { cells: (0..24).map(|i| (0x203040 + i * 0x010101, i)).collect(), chips: (0..6).collect(), line: 0 };
+        let live = open(cx, 400.0, 200.0, model.clone());
+        cx.draw(live.id);
+        for step in 0..60 {
+            for _ in 0..=next(&mut seed) % 5 {
+                match next(&mut seed) % 4 {
+                    0 => { let i = next(&mut seed) as usize % model.cells.len(); model.cells[i].1 = next(&mut seed) % 2000; }
+                    1 => { let i = next(&mut seed) as usize % model.cells.len(); model.cells[i].0 = next(&mut seed) & 0xffffff; }
+                    2 => { let i = next(&mut seed) as usize % model.chips.len(); model.chips[i] = next(&mut seed) % 100_000; }
+                    _ => model.line = next(&mut seed),
+                }
+            }
+            let next_model = model.clone();
+            live.root().update(cx, |m, _| *m = next_model);
+            cx.notify_all();
+            let incremental = cx.draw(live.id);
+            let fresh = open(cx, 400.0, 200.0, model.clone());
+            let reference = cx.draw(fresh.id);
+            assert!(incremental.2 == reference.2, "step {step}: incremental frame differs from a fresh render");
+        }
+    });
+}
+
+/// Every frame makes new layout styles: the table that holds them is compacted along the way.
+struct Widths {
+    step: u32,
+}
+
+impl Render for Widths {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let step = self.step;
+        body().m_0().children((0..40).map(move |i| {
+            div().w(px(10.0 + ((step * 40 + i) % 300) as f32 * 0.5 + step as f32 * 0.001)).h(px(4.0)).bg(rgb(0x336699))
+        }))
+    }
+}
+
+#[test]
+fn compacting_the_style_table_keeps_frames_equal() {
+    Application::headless().run(|cx| {
+        let live = open(cx, 300.0, 300.0, Widths { step: 0 });
+        cx.draw(live.id);
+        for step in 1..140 {
+            live.root().update(cx, |w, _| w.step = step);
+            cx.notify_all();
+            let incremental = cx.draw(live.id);
+            if step % 20 == 0 || step > 130 {
+                let fresh = open(cx, 300.0, 300.0, Widths { step });
+                assert!(incremental.2 == cx.draw(fresh.id).2, "step {step}: incremental frame differs from a fresh render");
+            }
+        }
+    });
+}
+
+/// Boxes at fixed places, some just outside the view: with shadows, outlines and text that spills in.
+/// `off` moves the page, so a bigger window can show all of it.
+struct Spill {
+    off: i32,
+}
+
+impl Render for Spill {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let off = self.off;
+        let at = move |x: i32, y: i32, css: &str| {
+            div().style(format!("position: absolute; left: {}px; top: {}px; {css}", x + off, y + off))
+        };
+        body().m_0().style(format!("position: relative; width: {}px; height: {}px", 400 + off, 300 + off)).children([
+            at(-60, 10, "width: 50px; height: 20px; background: #c03030; box-shadow: 30px 0 8px #3030c0"),
+            at(210, 40, "width: 40px; height: 20px; background: #30c030; outline: 12px solid #c0c030"),
+            at(10, -30, "width: 30px; height: 20px; background: #3030c0; box-shadow: 0 25px 6px #c03030"),
+            at(-200, 70, "white-space: nowrap; font-size: 14px; color: #202020").child("a long line that runs far to the right"),
+            at(30, 120, "width: 60px; height: 10px; background: #808080"),
+            at(150, 90, "width: 30px; height: 30px; overflow: hidden").child(
+                div().style("position: absolute; left: -40px; top: 5px; width: 80px; height: 8px; background: #309090")),
+        ])
+    }
+}
+
+/// A box outside the view is not painted: the view shows what the same page shows when all of it is in view.
+#[test]
+fn boxes_outside_the_view_leave_the_view_unchanged() {
+    Application::headless().run(|cx| {
+        let small = open(cx, 200.0, 100.0, Spill { off: 0 });
+        let big = open(cx, 700.0, 600.0, Spill { off: 250 });
+        let (s, b) = (cx.draw(small.id), cx.draw(big.id));
+        for y in 0..s.1 {
+            for x in 0..s.0 {
+                assert_eq!(pixel(&s, x, y), pixel(&b, x + 250, y + 250), "pixel ({x}, {y})");
+            }
+        }
+    });
+}

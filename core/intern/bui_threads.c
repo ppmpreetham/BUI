@@ -181,9 +181,180 @@ int BLI_system_thread_count(void)
 #endif
 }
 
-/* BLI_task.h stub backend: parallel mempool iteration is not scheduled. */
 #include "BLI_mempool.h"
 #include "BLI_task.h"
+
+/* -- parallel range (Blender's BLI_task_parallel_range) ----------------------------
+ * One job at a time on a persistent pool: workers sleep on `g_work`, take iterations
+ * under the mutex, and the last one out wakes the caller on `g_done`. */
+
+#define RANGE_THREADS_MAX 8
+
+typedef struct RangeJob {
+  TaskParallelRangeFunc func;
+  void *userdata;
+  int next, stop;
+  int want;     /* workers that may still join this job */
+  int busy;     /* workers inside this job */
+  unsigned gen; /* moves for every job */
+  bool running;
+} RangeJob;
+
+static ThreadMutex g_range_mutex;
+static ThreadCondition g_range_work, g_range_done;
+static RangeJob g_range;
+static int g_range_workers = -1;
+
+/* Run iterations until none is left. The mutex is held on entry and on exit. */
+static void range_drain(const TaskParallelTLS *tls)
+{
+  while (g_range.next < g_range.stop) {
+    const int i = g_range.next++;
+    BLI_mutex_unlock(&g_range_mutex);
+    g_range.func(g_range.userdata, i, tls);
+    BLI_mutex_lock(&g_range_mutex);
+  }
+}
+
+static void *range_worker(void *arg)
+{
+  (void)arg;
+  const TaskParallelTLS tls = {NULL};
+  unsigned seen = 0;
+  BLI_mutex_lock(&g_range_mutex);
+  for (;;) {
+    while (g_range.gen == seen) {
+      BLI_condition_wait(&g_range_work, &g_range_mutex);
+    }
+    seen = g_range.gen;
+    if (g_range.want <= 0) {
+      continue;
+    }
+    g_range.want--;
+    g_range.busy++;
+    range_drain(&tls);
+    if (--g_range.busy == 0) {
+      BLI_condition_notify_all(&g_range_done);
+    }
+  }
+  return NULL;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI range_worker_win(LPVOID arg)
+{
+  range_worker(arg);
+  return 0;
+}
+#endif
+
+/* Create the sync objects and start the workers. It runs once, see range_pool. */
+static void range_init(void)
+{
+  BLI_mutex_init(&g_range_mutex);
+  BLI_condition_init(&g_range_work);
+  BLI_condition_init(&g_range_done);
+  int n = BLI_system_thread_count();
+  n = n < 1 ? 1 : (n > RANGE_THREADS_MAX ? RANGE_THREADS_MAX : n);
+  int started = 0;
+  for (int t = 1; t < n; t++) {
+#ifdef _WIN32
+    HANDLE h = CreateThread(NULL, 0, range_worker_win, NULL, 0, NULL);
+    if (!h) {
+      break;
+    }
+    CloseHandle(h);
+#else
+    pthread_t th;
+    if (pthread_create(&th, NULL, range_worker, NULL) != 0) {
+      break;
+    }
+    pthread_detach(th);
+#endif
+    started++;
+  }
+  g_range_workers = started;
+}
+
+/* Start the workers once. Other callers wait here until the first one is done. */
+#ifdef _WIN32
+static INIT_ONCE g_range_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK range_init_win(PINIT_ONCE once, PVOID param, PVOID *ctx)
+{
+  (void)once;
+  (void)param;
+  (void)ctx;
+  range_init();
+  return TRUE;
+}
+
+static int range_pool(void)
+{
+  InitOnceExecuteOnce(&g_range_once, range_init_win, NULL, NULL);
+  return g_range_workers;
+}
+#else
+static pthread_once_t g_range_once = PTHREAD_ONCE_INIT;
+
+static int range_pool(void)
+{
+  pthread_once(&g_range_once, range_init);
+  return g_range_workers;
+}
+#endif
+
+int BLI_task_scheduler_num_threads(void)
+{
+  return range_pool() + 1;
+}
+
+void BLI_task_parallel_range(const int start,
+                             const int stop,
+                             void *userdata,
+                             TaskParallelRangeFunc func,
+                             const TaskParallelSettings *settings)
+{
+  const TaskParallelTLS tls = {NULL};
+  const int count = stop - start;
+  if (count <= 0) {
+    return;
+  }
+  const int per = settings->min_iter_per_thread > 0 ? settings->min_iter_per_thread : 1;
+  int threads = settings->use_threading ? BLI_task_scheduler_num_threads() : 1;
+  if (count / per < threads) {
+    threads = count / per > 0 ? count / per : 1;
+  }
+  if (threads > 1) {
+    BLI_mutex_lock(&g_range_mutex);
+    if (g_range.running) { /* nested or from another thread: serial */
+      BLI_mutex_unlock(&g_range_mutex);
+      threads = 1;
+    }
+  }
+  if (threads <= 1) {
+    for (int i = start; i < stop; i++) {
+      func(userdata, i, &tls);
+    }
+    return;
+  }
+  g_range.func = func;
+  g_range.userdata = userdata;
+  g_range.next = start;
+  g_range.stop = stop;
+  g_range.want = threads - 1;
+  g_range.busy = 0;
+  g_range.running = true;
+  g_range.gen++;
+  BLI_condition_notify_all(&g_range_work);
+  range_drain(&tls);
+  g_range.want = 0; /* workers that wake late do not join */
+  while (g_range.busy > 0) {
+    BLI_condition_wait(&g_range_done, &g_range_mutex);
+  }
+  g_range.running = false;
+  BLI_mutex_unlock(&g_range_mutex);
+}
 
 void BLI_task_parallel_mempool(struct BLI_mempool *UNUSED(pool),
                                void *UNUSED(userdata),
