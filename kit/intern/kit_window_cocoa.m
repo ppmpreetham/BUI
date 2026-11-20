@@ -1631,6 +1631,12 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
       [nw setStyleMask:win->override ? NSWindowStyleMaskBorderless : win->style];
       update_size(win);
     }
+    else if (!strcmp(key, "move")) { /* from the press being handled (macOS 10.11) */
+      NSEvent *ev = [NSApp currentEvent];
+      if (ev.type == NSEventTypeLeftMouseDown) {
+        [nw performWindowDragWithEvent:ev];
+      }
+    }
     else if (!strcmp(key, "state")) {
       switch (BK_CLAMP((int)a, 0, 3)) {
         case 1:

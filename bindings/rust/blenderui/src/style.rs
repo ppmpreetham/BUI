@@ -59,6 +59,17 @@ pub enum UserSelect {
     All,
 }
 
+/// `app-region`: what an element is to a window whose title bar the app draws (not inherited:
+/// an element is part of the nearest area around it).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AppRegion {
+    #[default]
+    Auto,
+    /// The app's own, inside a drag area (Chromium's `no-drag`).
+    NoDrag,
+    Area(crate::window_kind::WindowControlArea),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TextAlign {
     Left,
@@ -354,6 +365,7 @@ pub struct Computed {
     pub effects: Option<Box<crate::effects::Effects>>,
     pub opacity: f32,
     pub z_index: Option<i32>,
+    pub app_region: AppRegion,
     pub translate: (Length, Length),
     pub scale: f32,
     // inherited
@@ -467,6 +479,7 @@ impl Default for Computed {
             effects: None,
             opacity: 1.0,
             z_index: None,
+            app_region: AppRegion::Auto,
             translate: (Length::Px(0.0), Length::Px(0.0)),
             scale: 1.0,
             visible: true,
@@ -3235,6 +3248,21 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             c.c.pointer_events = kw(v) != Some("none");
             true
         }),
+        // Chromium's `drag` / `no-drag`, and BUI's window buttons
+        h("app-region", |c, v| {
+            use crate::window_kind::WindowControlArea as A;
+            c.c.app_region = match kw(v) {
+                Some("none") => AppRegion::Auto,
+                Some("no-drag") => AppRegion::NoDrag,
+                Some("drag") => AppRegion::Area(A::Drag),
+                Some("minimize") => AppRegion::Area(A::Min),
+                Some("maximize") => AppRegion::Area(A::Max),
+                Some("close") => AppRegion::Area(A::Close),
+                _ => return false,
+            };
+            true
+        }),
+        h("-webkit-app-region", |c, v| delegate(c, "app-region", v)),
         h("accent-color", |c, v| match kw(v) {
             Some("auto") => {
                 c.c.accent = None;

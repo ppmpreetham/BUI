@@ -126,6 +126,7 @@ struct BKWindow {
   char *title;
   int open, configured, hidden;
   bool frameless; /* "override": no server-side frame (BUI draws none either) */
+  bool maximized; /* the last configure's XDG_TOPLEVEL_STATE_MAXIMIZED */
   /* "layer": a layer-shell layer (0 background .. 3 overlay), -1 a toplevel; its keyboard
    * interactivity; "anchor": edges (top 1, bottom 2, left 4, right 8), exclusive zone */
   int layer, keyboard, anchor, exclusive;
@@ -1215,7 +1216,16 @@ static void close_requested(BKWindow *win)
 static void toplevel_configure(void *d, struct xdg_toplevel *tl, int32_t w, int32_t h,
                                struct wl_array *states)
 {
-  configure_size((BKWindow *)d, w, h);
+  BKWindow *win = (BKWindow *)d;
+  /* GHOST_WindowWayland's xdg_toplevel_handle_configure: the states the compositor gives */
+  win->maximized = false;
+  const uint32_t *state;
+  wl_array_for_each (state, states) {
+    if (*state == XDG_TOPLEVEL_STATE_MAXIMIZED) {
+      win->maximized = true;
+    }
+  }
+  configure_size(win, w, h);
 }
 
 static void toplevel_close(void *d, struct xdg_toplevel *tl)
@@ -1589,6 +1599,15 @@ void bk_wl_window_wm(BKWindow *win, const char *key, double a, double b)
       set_frame(win);
     }
   }
+  else if (!strcmp(key, "move")) { /* the compositor moves it, from the last press's serial */
+    if (win->toplevel && g.seat) {
+      xdg_toplevel_move(win->toplevel, g.seat, g.serial);
+      if (g.buttons & BK_BUTTON1) { /* the compositor has the pointer: its release won't come */
+        g.buttons &= ~BK_BUTTON1;
+        BK_release(win->ctx, (int)g.px, (int)g.py, mods_now());
+      }
+    }
+  }
   else if (!strcmp(key, "transparent") && (a != 0) != BUI_raster_alpha(win->raster)) {
     BUI_raster_set_alpha(win->raster, a != 0);
     buf_destroy(&win->bufs[0]); /* new buffers in the other format */
@@ -1641,7 +1660,11 @@ int bk_wl_window_wm_get(BKWindow *win, const char *key, double *r_a, double *r_b
     *r_b = win ? win->layer : -1;
     return 1;
   }
-  return 0; /* "pos", "state": not available to a Wayland client */
+  if (!strcmp(key, "state")) { /* maximized (3) from the configure; minimized is not told */
+    *r_a = win && win->maximized ? 3 : 0;
+    return win != NULL;
+  }
+  return 0; /* "pos": not available to a Wayland client */
 }
 
 /* -- the loop -- */

@@ -63,7 +63,7 @@ fn main() {
 | `impl Render for View` | The same: `fn render(&mut self, window, cx) -> impl IntoElement` |
 | `Entity<T>`, `WeakEntity<T>`, `cx.new` | `Copy` handles into the app's entity slots: `read` (returns `&T`), `update`, `downgrade`; `cx.release(e)` drops a value |
 | `Context<T>`: `notify`, `listener`, `entity` | The same; it derefs to `App` |
-| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size`, `gpu`, `window_background` (`WindowBackgroundAppearance::Transparent`), `kind` (`WindowKind::Floating` stays on top, `PopUp` is on top without a frame, `LayerShell(LayerShellOptions { layer, anchor, exclusive_zone, keyboard_interactivity })` is a Wayland layer-shell surface) and `window_decorations` (`WindowDecorations::Client`: no frame). A Wayland toplevel cannot stay on top: use `LayerShell` |
+| `WindowOptions { window_bounds, titlebar, .. }`, `WindowBounds::Windowed(..)` | The same, plus `is_resizable`, `window_min_size`, `gpu`, `window_background` (`WindowBackgroundAppearance::Transparent`), `kind` (`WindowKind::Floating` stays on top, `PopUp` is on top without a frame, `LayerShell(LayerShellOptions { layer, anchor, exclusive_zone, keyboard_interactivity })` is a Wayland layer-shell surface) and `window_decorations` (`WindowDecorations::Client`: the app draws the title bar, its parts marked with `window_control_area`). A Wayland toplevel cannot stay on top: use `LayerShell` |
 | `cx.set_global`, `cx.global` | The same, plus `try_global` and `global_mut` |
 | `cx.stop_propagation()` | The same |
 | `div().flex().gap_2()`, `.when(..)`, `.when_some(..)`, `.map(..)` | The same, from the `Styled` and `FluentBuilder` traits |
@@ -104,6 +104,51 @@ let win = cx.open_window(opts, |_, cx| cx.new(|_| MyView)).unwrap();
 - **On `App`:** `close_window(id)`, `on_window_closed(|id, cx| ...)`, `on_window_activation(|id, active, cx| ...)`, `notify_all()`, `quit()`. `activate(..)` exists for compatibility and does nothing, because windows come to the front when shown.
 
 The event loop runs until every window is closed.
+
+### Your own title bar
+
+With `window_decorations: WindowDecorations::Client`, the app draws the title bar. Mark its parts with `window_control_area`, as in gpui:
+
+```rust
+let opts = WindowOptions { window_decorations: WindowDecorations::Client, ..Default::default() };
+```
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <div flex h-8 style="app-region: drag">
+        <div onClick={|| { /* a menu */ }}>"File"</div>
+        <div flex-1>"My app"</div>
+        <div style="width: 46px; app-region: minimize">"–"</div>
+        <div style="width: 46px; app-region: maximize">"□"</div>
+        <div style="width: 46px; app-region: close">"✕"</div>
+    </div>
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+div().flex().h(px(32.0)).window_control_area(WindowControlArea::Drag)
+    .child(div().child("File").on_click(|_, _, _| { /* a menu */ }))
+    .child(div().flex_1().child("My app"))
+    .child(div().w(px(46.0)).window_control_area(WindowControlArea::Min).child("–"))
+    .child(div().w(px(46.0)).window_control_area(WindowControlArea::Max).child("□"))
+    .child(div().w(px(46.0)).window_control_area(WindowControlArea::Close).child("✕"))
+```
+
+</Tab>
+</Tabs>
+
+- **`Drag`** moves the window, and a double click maximizes it. An element inside it that takes clicks (a listener or a form control) stays yours, like "File" above.
+- **`Min`, `Max` and `Close`** do what they say when clicked, on any element including a form control such as `button()`. You don't need a listener for that. Closing runs the `on_window_closed` hooks, as when the user closes the window.
+- **In CSS**, it's `app-region` (or `-webkit-app-region`), as in Electron: `drag`, `no-drag`, and BUI's `minimize`, `maximize` and `close`.
+- **On `Window`**: `minimize_window()`, `zoom_window()` (maximize or restore), `is_maximized()`, `start_window_move()` (from a press, for your own drag handling) and `remove_window()`.
+
+On Windows, the system's own parts stay: the resize edges, Aero Snap, the shadow and rounded corners, and Windows 11's snap layouts when you hover the maximize button. On Linux and macOS, the window has no frame at all: the drag area and the buttons work, but there are no resize edges yet. `cargo run --example titlebar` shows a complete bar.
 
 ## Globals
 

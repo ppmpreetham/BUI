@@ -60,7 +60,7 @@ struct BKWindow {
   int fixed_w, fixed_h;           /* axes the user may not resize (Tk's resizable) */
   int user_sizing;                /* inside a user move/resize loop */
   DWORD style;                    /* framed style restored by "override" 0 */
-  int override;                   /* "override": no frame */
+  int override;                   /* "override": 1 no frame, 2 the app's title bar */
   int layered;                    /* "transparent": a LAYER_* way to show per-pixel alpha */
   BYTE opacity;                   /* "alpha" as 0..255 */
   struct {                        /* LAYER_ULW: the frame as a DIB section */
@@ -749,6 +749,18 @@ static void size_request(BKWindow *win)
   host_request(win);
 }
 
+/* A client rect `r` (pixels) made the window rect of the window's frame: AdjustWindowRect on its
+ * style, without the top inset when the app draws the title bar (WM_NCCALCSIZE takes the caption
+ * and top frame out unless the window is maximized). */
+static void client_to_window(const BKWindow *win, RECT *r)
+{
+  const LONG top = r->top;
+  AdjustWindowRect(r, (DWORD)GetWindowLongPtrW(win->hwnd, GWL_STYLE), FALSE);
+  if (win->override == 2 && !IsZoomed(win->hwnd)) {
+    r->top = top;
+  }
+}
+
 /* -- input mapping -- */
 
 static int mods_now(WPARAM wp, int mouse)
@@ -879,8 +891,66 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       host_request(win);
       return 0;
     }
+    case WM_NCCALCSIZE:
+      if (win->override == 2 && wp) {
+        /* The app's title bar (Windows Terminal's way): the system's frame stays on the left,
+         * right and bottom (resize edges, snap, the shadow) and goes from the top. A maximized
+         * window hangs its frame off the screen, so its top keeps that much out too. */
+        NCCALCSIZE_PARAMS *p = (NCCALCSIZE_PARAMS *)lp;
+        const LONG top = p->rgrc[0].top, left = p->rgrc[0].left;
+        DefWindowProcW(hwnd, msg, wp, lp);
+        p->rgrc[0].top = top + (IsZoomed(hwnd) ? p->rgrc[0].left - left : 0);
+        return 0;
+      }
+      break;
+    case WM_NCHITTEST:
+      if (win->override == 2) {
+        const LRESULT ht = DefWindowProcW(hwnd, msg, wp, lp);
+        if (ht != HTCLIENT) {
+          return ht; /* the side and bottom edges */
+        }
+        POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        RECT wr;
+        GetWindowRect(hwnd, &wr);
+        POINT o = {0, 0}; /* the client's origin: left of it is the frame */
+        ClientToScreen(hwnd, &o);
+        ScreenToClient(hwnd, &pt);
+        if (!IsZoomed(hwnd) && !win->fixed_h && pt.y < o.x - wr.left) {
+          return HTTOP; /* the top edge, as wide as the side ones */
+        }
+        const int area = win->cb.hit_test ? win->cb.hit_test(win->cb.data, win, pt.x, pt.y) :
+                                            BK_WINDOW_AREA_CLIENT;
+        /* a maximize button is the system's, so Windows 11 shows snap layouts over it; minimize
+         * and close stay the app's (their clicks come as the client's) */
+        return area == BK_WINDOW_AREA_DRAG ? HTCAPTION :
+               area == BK_WINDOW_AREA_MAX  ? HTMAXBUTTON :
+                                             HTCLIENT;
+      }
+      break;
+    case WM_NCMOUSEMOVE:
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONDBLCLK:
+      if (wp == HTMAXBUTTON) { /* the app's maximize button: its pointer, as the client's */
+        POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
+        ScreenToClient(hwnd, &pt);
+        if (msg == WM_NCMOUSEMOVE) {
+          TRACKMOUSEEVENT t = {sizeof(t), TME_LEAVE | TME_NONCLIENT, hwnd, 0};
+          TrackMouseEvent(&t);
+          BK_motion(ctx, pt.x, pt.y, mods_now(0, 0));
+          break; /* DefWindowProc: snap layouts */
+        }
+        SetCapture(hwnd); /* the release comes as WM_LBUTTONUP */
+        BK_press(ctx, pt.x, pt.y, mods_now(MK_LBUTTON, 1));
+        return 0;
+      }
+      break;
+    case WM_NCMOUSELEAVE:
+      if (win->override == 2 && GetCapture() != hwnd) {
+        BK_motion(ctx, -100000, -100000, 0); /* a WM_MOUSEMOVE follows if it went to the client */
+      }
+      break;
     case WM_SETCURSOR:
-      if (LOWORD(lp) == HTCLIENT) {
+      if (LOWORD(lp) == HTCLIENT || LOWORD(lp) == HTMAXBUTTON) {
         SetCursor(cursor_handle(win->cursor));
         return TRUE;
       }
@@ -943,16 +1013,15 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
       }
-      const DWORD style = (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE);
       if (win->min_w || win->min_h) {
         RECT r = {0, 0, (LONG)(win->min_w * win->scale), (LONG)(win->min_h * win->scale)};
-        AdjustWindowRect(&r, style, FALSE);
+        client_to_window(win, &r);
         mm->ptMinTrackSize.x = win->min_w ? r.right - r.left : mm->ptMinTrackSize.x;
         mm->ptMinTrackSize.y = win->min_h ? r.bottom - r.top : mm->ptMinTrackSize.y;
       }
       if (win->max_w || win->max_h) {
         RECT r = {0, 0, (LONG)(win->max_w * win->scale), (LONG)(win->max_h * win->scale)};
-        AdjustWindowRect(&r, style, FALSE);
+        client_to_window(win, &r);
         mm->ptMaxTrackSize.x = win->max_w ? r.right - r.left : mm->ptMaxTrackSize.x;
         mm->ptMaxTrackSize.y = win->max_h ? r.bottom - r.top : mm->ptMaxTrackSize.y;
       }
@@ -1237,7 +1306,7 @@ void BK_window_set_size(BKWindow *win, int width, int height)
     return;
   }
   RECT r = {0, 0, (LONG)(width * win->scale), (LONG)(height * win->scale)};
-  AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
+  client_to_window(win, &r); /* its own frame: a title bar the app draws has no caption */
   SetWindowPos(win->hwnd, NULL, 0, 0, r.right - r.left, r.bottom - r.top,
                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -1327,7 +1396,7 @@ static void set_frame(BKWindow *win)
     win->style = (DWORD)GetWindowLongPtrW(win->hwnd, GWL_STYLE) & ~WS_VISIBLE;
   }
   set_style(win->hwnd,
-            (win->override || win->layered) ? WS_POPUP | WS_CLIPCHILDREN : win->style);
+            (win->override == 1 || win->layered) ? WS_POPUP | WS_CLIPCHILDREN : win->style);
 }
 
 /* The "alpha" of a window that is not transparent: one opacity for the whole window. */
@@ -1476,8 +1545,12 @@ void BK_window_wm(BKWindow *win, const char *key, double a, double b)
     }
   }
   else if (!strcmp(key, "override")) {
-    win->override = a != 0.0;
-    set_frame(win);
+    win->override = BK_CLAMP((int)a, 0, 2);
+    set_frame(win); /* SWP_FRAMECHANGED: WM_NCCALCSIZE again */
+  }
+  else if (!strcmp(key, "move")) { /* DefWindowProc's title-bar drag, once the press is handled */
+    ReleaseCapture();
+    PostMessageW(h, WM_NCLBUTTONDOWN, HTCAPTION, (LPARAM)GetMessagePos());
   }
   else if (!strcmp(key, "transparent")) {
     set_transparent(win, a != 0.0);

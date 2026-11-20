@@ -775,7 +775,19 @@ typedef struct BKWindowCallbacks {
   void (*on_frame)(void *data, BKWindow *win);
   /* The window got (1) or lost (0) the keyboard focus (GHOST_kEventWindowActivate). */
   void (*on_focus)(void *data, BKWindow *win, int active);
+  /* What the app draws at (x, y), in physical pixels, in a window whose title bar it draws
+   * ("override" 2): a BK_WINDOW_AREA_*. Windows asks as the pointer moves (WM_NCHITTEST), so the
+   * system moves the window from a drag area and shows its snap layouts over a maximize button.
+   * NULL: all of it is the app's. */
+  int (*hit_test)(void *data, BKWindow *win, int x, int y);
 } BKWindowCallbacks;
+enum {
+  BK_WINDOW_AREA_CLIENT = 0, /* the app's own (buttons, text ...) */
+  BK_WINDOW_AREA_DRAG = 1,   /* moves the window, as a title bar does */
+  BK_WINDOW_AREA_MIN = 2,
+  BK_WINDOW_AREA_MAX = 3,
+  BK_WINDOW_AREA_CLOSE = 4,
+};
 int BK_window_supported(void);
 BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height);
 void BK_window_free(BKWindow *win);
@@ -805,6 +817,9 @@ void *BK_window_handle(BKWindow *win);       /* HWND / X11 Window / NSWindow * *
 /* Window-manager requests (Tk's wm): "pos" (x, y), "minsize"/"maxsize" (w, h),
  * "resizable" (w, h), "topmost" (a), "alpha" (a), "override" (a), "state"
  * (0 normal, 1 iconic, 2 withdrawn, 3 zoomed), "lift", "lower", "focus".
+ * "override" 1 has no frame (pop-ups); 2 is a window whose title bar the app draws: on Windows it
+ * keeps the system's resize edges, snap and shadow and asks `hit_test` for the rest, elsewhere it
+ * has no frame. "move" (from a press): the window manager moves the window with the pointer.
  * "transparent" (a): per-pixel alpha, no region background. On Linux set it
  * before show (X11 makes the window again; the OpenGL renderer uses its 32-bit visual). On Windows
  * the window has no frame: with the Direct3D 11 renderer DWM blends the alpha of its frames

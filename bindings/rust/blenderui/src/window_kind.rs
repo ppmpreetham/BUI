@@ -27,8 +27,22 @@ pub enum WindowDecorations {
     /// The system's frame.
     #[default]
     Server,
-    /// No frame: the app draws everything.
+    /// The app draws the title bar: mark its parts with
+    /// [`Styled::window_control_area`](crate::Styled::window_control_area). On Windows the
+    /// system's resize edges, snap and shadow stay; elsewhere the window has no frame.
     Client,
+}
+
+/// A part of a title bar the app draws (gpui's `WindowControlArea`), set with
+/// [`Styled::window_control_area`](crate::Styled::window_control_area) or CSS `app-region`.
+/// A press on `Drag` moves the window and a double click maximizes it; a click on the others
+/// minimizes, maximizes (or restores) or closes it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowControlArea {
+    Drag,
+    Close,
+    Max,
+    Min,
 }
 
 /// A layer-shell layer, bottom-most first.
@@ -109,8 +123,13 @@ impl WindowKind {
                 )),
             ),
         };
-        let frameless = decorations == WindowDecorations::Client || self == WindowKind::PopUp;
-        [first, second, frameless.then_some((c"override", 1.0, 0.0))]
+        // "override" 1: no frame at all; 2: the app's title bar
+        let frame = if self == WindowKind::PopUp {
+            Some((c"override", 1.0, 0.0))
+        } else {
+            (decorations == WindowDecorations::Client).then_some((c"override", 2.0, 0.0))
+        };
+        [first, second, frame]
             .into_iter()
             .flatten()
     }
@@ -142,7 +161,11 @@ mod tests {
         );
         assert_eq!(
             requests(WindowKind::Normal, WindowDecorations::Client),
-            [(c"override", 1.0, 0.0)]
+            [(c"override", 2.0, 0.0)]
+        );
+        assert_eq!(
+            requests(WindowKind::PopUp, WindowDecorations::Client),
+            [(c"topmost", 1.0, 0.0), (c"override", 1.0, 0.0)]
         );
     }
 

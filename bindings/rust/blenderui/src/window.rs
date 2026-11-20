@@ -18,7 +18,8 @@ use crate::events::*;
 use crate::geometry::{point, px, size, Bounds, Pixels, Size};
 use crate::layout::{id_key, layout, Content, Frame, Key, LayoutCaches, UiState};
 use crate::prof::{self, span, Phase};
-use crate::window_kind::{WindowDecorations, WindowKind};
+use crate::style::AppRegion;
+use crate::window_kind::{WindowControlArea, WindowDecorations, WindowKind};
 use crate::paint::{paint_frame, Painter};
 use crate::selection::{Cx, Selector};
 use crate::widgets::{WKind, Widgets};
@@ -458,7 +459,7 @@ impl App {
         if let Some(n) = &w.native {
             unsafe {
                 if let Some(WindowBounds::Maximized(_)) = options.window_bounds {
-                    sys::BK_window_wm(*n, c"state".as_ptr(), 1.0, 0.0);
+                    sys::BK_window_wm(*n, c"state".as_ptr(), 3.0, 0.0);
                 }
                 if options.is_resizable == Some(false) {
                     sys::BK_window_wm(*n, c"resizable".as_ptr(), 0.0, 0.0);
@@ -521,7 +522,8 @@ impl App {
         self.flush();
     }
 
-    /// Call `f` whenever the user closes a window.
+    /// Call `f` whenever a window closes: by the user, its title bar's Close control or
+    /// [`close_window`](Self::close_window).
     pub fn on_window_closed(&mut self, f: impl FnMut(WindowId, &mut App) + 'static) {
         self.close_hooks.push(Box::new(f));
     }
@@ -534,12 +536,12 @@ impl App {
 
     /// Close a window (as if the user had).
     pub fn close_window(&mut self, id: WindowId) {
-        if let Some(w) = self.windows.get_mut(id.0).and_then(|w| w.as_deref_mut()) {
-            w.closed = true;
-            if let Some(n) = w.native {
-                unsafe { sys::BK_window_close(n) };
-            }
-        }
+        self.with_window(id.0, |w, _| w.remove_window());
+    }
+
+    /// The title-bar part under (x, y) (logical pixels) of a window whose title bar the app draws.
+    pub fn window_control_area(&self, window: WindowId, x: f32, y: f32) -> Option<WindowControlArea> {
+        self.window(window)?.control_area_at(x, y)
     }
 
     /// Stop the event loop.
@@ -575,8 +577,21 @@ impl App {
     fn with_window<R>(&mut self, id: usize, f: impl FnOnce(&mut Window, &mut App) -> R) -> Option<R> {
         let mut w = self.windows.get_mut(id)?.take()?;
         let r = f(&mut w, self);
+        // closed by the app (`remove_window`): its close hooks, now that it is back
+        let closing = w.life == Life::Closing;
+        if closing {
+            w.life = Life::Closed;
+        }
         self.windows[id] = Some(w);
+        if closing {
+            self.window_closed(id);
+        }
         Some(r)
+    }
+
+    /// Window `id` has closed: the close hooks.
+    fn window_closed(&mut self, id: usize) {
+        run_hooks(self, |a| &mut a.close_hooks, |h, app| h(WindowId(id), app));
     }
 
     /// Handle queued kit events, then re-render what changed.
@@ -923,9 +938,9 @@ unsafe extern "C" fn on_close(data: *mut c_void, _win: *mut sys::BKWindow) -> c_
     let id = data as usize;
     with_running_app(|app| {
         if let Some(w) = app.windows.get_mut(id).and_then(|w| w.as_deref_mut()) {
-            w.closed = true;
+            w.life = Life::Closed;
         }
-        run_hooks(app, |a| &mut a.close_hooks, |h, app| h(WindowId(id), app));
+        app.window_closed(id);
     });
     1
 }
@@ -935,6 +950,23 @@ unsafe extern "C" fn on_focus(data: *mut c_void, _win: *mut sys::BKWindow, activ
     with_running_app(|app| {
         run_hooks(app, |a| &mut a.activation_hooks, |h, app| h(WindowId(id), active != 0, app));
     });
+}
+
+unsafe extern "C" fn on_hit_test(data: *mut c_void, _win: *mut sys::BKWindow, x: c_int, y: c_int) -> c_int {
+    let mut area = sys::BK_WINDOW_AREA_CLIENT;
+    // busy (asked from inside a callback, as a move does): the app's, until the next ask
+    with_running_app(|app| {
+        if let Some(w) = app.window(WindowId(data as usize)) {
+            area = match w.control_area_at(x as f32 / w.scale, y as f32 / w.scale) {
+                None => sys::BK_WINDOW_AREA_CLIENT,
+                Some(WindowControlArea::Drag) => sys::BK_WINDOW_AREA_DRAG,
+                Some(WindowControlArea::Min) => sys::BK_WINDOW_AREA_MIN,
+                Some(WindowControlArea::Max) => sys::BK_WINDOW_AREA_MAX,
+                Some(WindowControlArea::Close) => sys::BK_WINDOW_AREA_CLOSE,
+            };
+        }
+    });
+    area
 }
 
 /// Call each hook; hooks a hook adds run from the next call.
@@ -970,6 +1002,15 @@ unsafe extern "C" {
 
 // ==========================================================================
 // Windows
+
+/// Where a window is in its life.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Life {
+    Open,
+    /// Closed by the app; its close hooks have not run yet.
+    Closing,
+    Closed,
+}
 
 type ViewFn = Box<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 
@@ -1015,7 +1056,7 @@ pub struct Window {
     /// CSS animation time (virtual in headless windows).
     clock: crate::anim::Clock,
     vsync: bool,
-    closed: bool,
+    life: Life,
     title: String,
     cursor: i32,
     pointer: (f32, f32),
@@ -1093,7 +1134,7 @@ impl Window {
                 motion_frame: false,
                 clock: crate::anim::Clock::new(!headless),
                 vsync: true,
-                closed: false,
+                life: Life::Open,
                 title: title.to_owned(),
                 cursor: 0,
                 pointer: (-1.0, -1.0),
@@ -1118,7 +1159,7 @@ impl Window {
                 }
                 let cb = sys::BKWindowCallbacks { data: id as *mut c_void, on_timer: Some(on_timer),
                                                   on_close: Some(on_close), on_frame: Some(on_frame),
-                                                  on_focus: Some(on_focus) };
+                                                  on_focus: Some(on_focus), hit_test: Some(on_hit_test) };
                 sys::BK_window_set_callbacks(n, &cb);
                 win.scale = sys::BK_scale().max(0.5);
                 win.phys = ((w * win.scale).round() as i32, (h * win.scale).round() as i32);
@@ -1211,6 +1252,83 @@ impl Window {
                 unsafe { sys::BK_window_set_title(n, t.as_ptr()) };
             }
         }
+    }
+
+    /// Close this window, as if the user had (gpui's `remove_window`). The close hooks run once
+    /// the event that asked has been handled (`BK_window_close` does not ask `on_close`).
+    pub fn remove_window(&mut self) {
+        if self.life != Life::Open {
+            return;
+        }
+        self.life = Life::Closing;
+        if let Some(n) = self.native {
+            unsafe { sys::BK_window_close(n) };
+        }
+    }
+
+    pub fn minimize_window(&self) {
+        self.wm(c"state", 1.0);
+    }
+
+    /// Maximize the window, or restore it when it is maximized.
+    pub fn zoom_window(&self) {
+        self.wm(c"state", if self.is_maximized() { 0.0 } else { 3.0 });
+    }
+
+    pub fn is_maximized(&self) -> bool {
+        let (mut a, mut b) = (0.0, 0.0);
+        self.native.is_some_and(|n| unsafe { sys::BK_window_wm_get(n, c"state".as_ptr(), &mut a, &mut b) } != 0
+                                    && a == 3.0)
+    }
+
+    /// Let the window manager move the window with the pointer, from a press (what a drag area
+    /// of a title bar the app draws does by itself).
+    pub fn start_window_move(&self) {
+        self.wm(c"move", 0.0);
+    }
+
+    fn wm(&self, key: &CStr, a: f64) {
+        if let Some(n) = self.native {
+            unsafe { sys::BK_window_wm(n, key.as_ptr(), a, 0.0) };
+        }
+    }
+
+    /// The title-bar part (`app-region`) of box `hit` and the elements around it: the nearest one
+    /// set, unless an element that answers to presses (a listener, a widget) or `no-drag` comes
+    /// first, as a button inside a drag area does.
+    fn control_area(&self, hit: Option<usize>) -> Option<WindowControlArea> {
+        let f = self.frame.as_ref()?;
+        let mut cur = hit.map(|b| f.nodes[b].owner);
+        while let Some(i) = cur {
+            let n = &f.nodes[i];
+            match self.caches.styles[n.style].app_region {
+                AppRegion::Area(a) => return Some(a),
+                AppRegion::NoDrag => return None,
+                AppRegion::Auto => {}
+            }
+            let pressable = f.el(i).and_then(|e| e.listeners.as_deref()).is_some_and(Listeners::take_presses);
+            if pressable || matches!(n.content, Content::Widget(_)) {
+                return None;
+            }
+            cur = n.parent;
+        }
+        None
+    }
+
+    /// A click on element `key`: what the title-bar control it is part of does.
+    fn run_control_area(&mut self, key: Key) {
+        let hit = self.frame.as_ref().and_then(|f| f.by_key().get(&key).copied());
+        match self.control_area(hit) {
+            Some(WindowControlArea::Min) => self.minimize_window(),
+            Some(WindowControlArea::Max) => self.zoom_window(),
+            Some(WindowControlArea::Close) => self.remove_window(),
+            Some(WindowControlArea::Drag) | None => {}
+        }
+    }
+
+    /// The title-bar part under (x, y), in logical pixels.
+    fn control_area_at(&self, x: f32, y: f32) -> Option<WindowControlArea> {
+        self.control_area(self.frame.as_ref()?.hit_box(x, y, &self.caches.styles))
     }
 
     /// Pointer position in logical pixels.
@@ -1789,6 +1907,16 @@ impl Window {
             sys::BK_EV_PRESS | sys::BK_EV_DOUBLE => {
                 self.pointer = (x, y);
                 let (modifiers, button) = self.pointer_event(&ev.text);
+                // a title bar's drag area: the window manager moves the window (Windows does it
+                // without the press reaching the app)
+                if button == MouseButton::Left && self.control_area_at(x, y) == Some(WindowControlArea::Drag) {
+                    if ev.kind == sys::BK_EV_DOUBLE {
+                        self.zoom_window();
+                    } else {
+                        self.start_window_move();
+                    }
+                    return;
+                }
                 let path = self.path_at(x, y);
                 if button == MouseButton::Left && self.grab_scrollbar(&path, x, y) {
                     return;
@@ -1838,6 +1966,7 @@ impl Window {
                     let down = MouseDownEvent { button, position: point(px(x), px(y)), modifiers, click_count: 1 };
                     let e = ClickEvent { down, up };
                     self.emit(app, target, &e, |l| l.click.iter().collect());
+                    self.run_control_area(target);
                 }
             }
             sys::BK_EV_WHEEL => {
@@ -2013,6 +2142,7 @@ impl Window {
                 let up = MouseUpEvent { button: MouseButton::Left, position: point(px(x), px(y)),
                                         modifiers: Modifiers::default() };
                 self.emit(app, key, &ClickEvent { down, up }, |l| l.click.iter().collect());
+                self.run_control_area(key);
                 self.dirty = true;
             }
             _ => {}

@@ -13,6 +13,7 @@ Here's the story of BUI so far, in plain words: what each release gave you, and 
 
 These are on `main` and will ship in the next release; the details are under **Unreleased** in the changelog. Nothing here is on PyPI, crates.io or npm yet.
 
+- **Your own title bar.** `WindowDecorations::Client` and `window_control_area` (or CSS `app-region`) let you draw the bar, and on Windows the window keeps its resize edges, snap and shadow. See [Your own title bar](../../rust/gpui-syntax/#your-own-title-bar).
 - **Animation.** One animation engine in the C kit runs GSAP-style timelines (position strings such as `"<"` and `"+=1"`, stagger, repeat, yoyo) and Motion-style springs, for Rust, JavaScript, React, Python, Lua and C. Rust gets `<motion.div>` in `rsx!`; see [Motion](../../rust/motion/) and [Effects and animations](../../rust/effects-and-animations/).
 - **Vue.** `@blender-ui/vue` renders Vue 3 single-file components in native windows. See [Vue](../../javascript/vue/).
 - **D.** A DUB package with the whole C API, idiomatic wrappers and an HTML, CSS and RSX layer. See [D](../../d/overview/).

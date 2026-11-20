@@ -312,6 +312,7 @@ alias BKWindowTimerFn = extern(C) void function(void* data, BKWindow* win, int i
 alias BKWindowCloseFn = extern(C) int function(void* data, BKWindow* win);
 alias BKWindowFrameFn = extern(C) void function(void* data, BKWindow* win);
 alias BKWindowFocusFn = extern(C) void function(void* data, BKWindow* win, int active);
+alias BKWindowHitTestFn = extern(C) int function(void* data, BKWindow* win, int x, int y);
 
 struct BKWindowCallbacks {
     void* data;
@@ -319,6 +320,15 @@ struct BKWindowCallbacks {
     BKWindowCloseFn on_close;
     BKWindowFrameFn on_frame;
     BKWindowFocusFn on_focus;
+    BKWindowHitTestFn hit_test;
+}
+
+enum {
+    BK_WINDOW_AREA_CLIENT = 0,
+    BK_WINDOW_AREA_DRAG = 1,
+    BK_WINDOW_AREA_MIN = 2,
+    BK_WINDOW_AREA_MAX = 3,
+    BK_WINDOW_AREA_CLOSE = 4,
 }
 
 struct BKWidgetDraw {

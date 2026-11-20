@@ -233,7 +233,17 @@ pub struct BKWindowCallbacks {
     pub on_close: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow) -> c_int>,
     pub on_frame: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow)>,
     pub on_focus: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow, active: c_int)>,
+    /// What the app draws at (x, y) (physical pixels) in a window whose title bar it draws: a
+    /// `BK_WINDOW_AREA_*`.
+    pub hit_test: Option<unsafe extern "C" fn(data: *mut c_void, win: *mut BKWindow, x: c_int, y: c_int) -> c_int>,
 }
+
+// Window areas (BK_WINDOW_AREA_*), for `hit_test`.
+pub const BK_WINDOW_AREA_CLIENT: c_int = 0;
+pub const BK_WINDOW_AREA_DRAG: c_int = 1;
+pub const BK_WINDOW_AREA_MIN: c_int = 2;
+pub const BK_WINDOW_AREA_MAX: c_int = 3;
+pub const BK_WINDOW_AREA_CLOSE: c_int = 4;
 
 unsafe extern "C" {
     // look

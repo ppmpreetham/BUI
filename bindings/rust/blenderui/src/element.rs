@@ -63,6 +63,13 @@ pub(crate) struct Listeners {
     pub input: Vec<Listener<ChangeEvent>>,
 }
 
+impl Listeners {
+    /// A press on the element does something: it is the app's, even inside a drag area.
+    pub(crate) fn take_presses(&self) -> bool {
+        !(self.click.is_empty() && self.mouse_down.is_empty() && self.mouse_up.is_empty())
+    }
+}
+
 /// An element: a tag, its attributes, styles, children and listeners.
 /// `div()`, `span()`, `button()` ... all build one of these.
 pub struct Div {

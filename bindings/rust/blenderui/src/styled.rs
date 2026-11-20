@@ -415,6 +415,19 @@ pub trait Styled: Sized {
         pointer_events_none => "pointer-events": "none",
     }
 
+    /// A part of the title bar the app draws (with [`WindowDecorations::Client`](crate::WindowDecorations)):
+    /// CSS `app-region`.
+    fn window_control_area(self, area: crate::WindowControlArea) -> Self {
+        use crate::WindowControlArea as A;
+        let value = match area {
+            A::Drag => fixed_value!("drag"),
+            A::Min => fixed_value!("minimize"),
+            A::Max => fixed_value!("maximize"),
+            A::Close => fixed_value!("close"),
+        };
+        self.decl(Decl { prop: prop!("app-region"), value, important: false })
+    }
+
     fn z_index(self, z: i32) -> Self {
         self.decl(Decl::one(prop!("z-index"), Tok::Num(z as f32)))
     }

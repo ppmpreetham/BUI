@@ -143,7 +143,7 @@ pub use shader::{GpuTarget, ShaderEffect};
 pub use video::{Video, VideoState};
 pub use styled::{FontWeight, StyleBlock, Styled};
 pub use window::*;
-pub use window_kind::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions, WindowDecorations, WindowKind};
+pub use window_kind::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions, WindowControlArea, WindowDecorations, WindowKind};
 
 /// Whether `class` names also work as Tailwind CSS v4 utilities (`p-4`,
 /// `md:hover:bg-sky-500/50` ...), compiled on first use. On by default;
@@ -336,5 +336,6 @@ pub mod prelude {
     pub use crate::shader::ShaderEffect;
     pub use crate::styled::{FontWeight, StyleBlock, Styled};
     pub use crate::window::*;
-    pub use crate::window_kind::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions, WindowDecorations, WindowKind};
+    pub use crate::window_kind::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions, WindowControlArea, WindowDecorations,
+                                 WindowKind};
 }
