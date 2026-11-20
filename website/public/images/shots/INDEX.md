@@ -7,7 +7,7 @@ off-screen at 2x (`BUI_UI_SCALE=2`) and recompressed losslessly
 
 ```sh
 BUIPY_BUILD_DIR=<build>/bindings/python BUI_BUILD_DIR=<build> python tools/gen_doc_images.py --site
-#   --only python|rust|js|imgui|c   one producer;   --theme dark|light   one theme
+#   --only python|rust|js|imgui|c|lua|go   one producer;   --theme dark|light   one theme
 ```
 
 The CMake build needs `BUI_BUILD_EXAMPLES=ON`, `BUI_BUILD_IMGUI=ON` and the

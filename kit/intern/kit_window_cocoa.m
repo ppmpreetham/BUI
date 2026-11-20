@@ -1548,10 +1548,11 @@ int BK_window_timer(BKWindow *win, int ms)
 {
   const int ident = win->next_timer++;
   BKCocoaTimer *t = timer_slot(win, ident);
-  if (t) {
-    t->ident = ident;
-    t->due = now_ms() + BK_MAX(0, ms);
+  if (!t) {
+    return -1; /* every slot is taken: no timer, so no id that would never fire */
   }
+  t->ident = ident;
+  t->due = now_ms() + BK_MAX(0, ms);
   return ident;
 }
 

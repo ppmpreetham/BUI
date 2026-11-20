@@ -228,6 +228,10 @@ void BK_node_set_borrowed_ref(BKNode *node, void *ref);
 void *BK_node_borrowed_ref(const BKNode *node);
 int BK_node_add(BKNode *parent, BKNode *child, int index); /* index -1: append */
 void BK_node_remove(BKNode *parent, BKNode *child);
+/* Move a child to `index` among its parent's children (-1: last) without taking it out, so it
+ * keeps the keyboard focus and a text edit, which a remove and add would end. 0 when child is not
+ * parent's. */
+int BK_node_move(BKNode *parent, BKNode *child, int index);
 int BK_node_child_count(const BKNode *node);
 BKNode *BK_node_child(const BKNode *node, int i);
 BKNode *BK_node_parent(const BKNode *node);
@@ -796,7 +800,7 @@ void BK_window_set_gpu(BKWindow *win, int on);
 int BK_window_gpu(BKWindow *win);
 int BK_window_frames(BKWindow *win);
 void BK_window_render_now(BKWindow *win);
-int BK_window_timer(BKWindow *win, int ms); /* one-shot; returns its id */
+int BK_window_timer(BKWindow *win, int ms); /* one-shot; returns its id, -1 when the window holds no more timers */
 /* Ask for an animation frame: `on_frame` runs before the next render. With
  * `vsync`, consecutive frames are paced to the display's refresh. */
 void BK_window_request_frame(BKWindow *win, int vsync);

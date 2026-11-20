@@ -1,0 +1,120 @@
+---
+title: BUI for Go
+sidebarLabel: Overview
+description: A Go module with the C kit's nodes, contexts, native windows, headless rendering, menus, canvases, trees and themes, built with cgo, plus MyGo-style views in package ui.
+section: Go
+order: 10
+languages: ["go"]
+sources: ["bindings/go/README.md", "bindings/go/bui/bui.go", "bindings/go/bui/node.go", "bindings/go/bui/context.go", "bindings/go/bui/window.go", "bindings/go/bui/menu.go", "bindings/go/bui/canvas.go", "bindings/go/bui/theme.go", "bindings/go/internal/kitgen/main.go", "bindings/go/examples/hello/main.go", "bindings/go/examples/headless/main.go"]
+---
+
+**The `bindings/go` module gives Go programs Blender's widget drawing, layout and interaction rules.** It has two packages:
+
+- **`bui`** is the C kit: nodes made by type name and set by property name, contexts, native windows, headless rendering, menus, canvases, trees, images and themes.
+- **`ui`** builds the same widgets the way [MyGo](https://github.com/egoist/mygo)'s `ui` package does, from a view function of your state. See [MyGo-style views](../mygo-syntax/).
+
+## Setup
+
+You need Go 1.22 or newer with cgo, CMake, and a C compiler cgo can use: gcc or clang. On Windows that means MinGW-w64 gcc (MSYS2's `ucrt64`, for one), because cgo does not work with MSVC or `clang-cl`. On Linux you also need the X11 development headers (`libx11-dev`, or `libX11-devel`). If your `CC` names another compiler, set `CC=gcc CXX=g++` for the build.
+
+The module lives in the repository, next to the C sources it builds. Use it from your module with a `replace`:
+
+```go title="go.mod"
+require github.com/ppmpreetham/BUI/bindings/go v0.0.0
+
+replace github.com/ppmpreetham/BUI/bindings/go => ../BUI/bindings/go
+```
+
+Then build the C kit once, and again after you update BUI:
+
+```sh
+go generate github.com/ppmpreetham/BUI/bindings/go/bui
+```
+
+`go generate` runs a small builder that configures CMake in `bindings/go/.bui/build` with the compiler cgo uses, builds the kit, and copies the libraries and headers into `.bui/lib` and `.bui/include`. Files are copied only when their content changed, so an up-to-date kit does not make Go rebuild the package.
+
+## A first window
+
+```go title="main.go"
+package main
+
+import (
+	"fmt"
+
+	"github.com/ppmpreetham/BUI/bindings/go/bui"
+)
+
+func main() {
+	root := bui.NewNode("column").Set("padding", 8)
+
+	size := bui.NewNode("slider").Set("label", "Size").Set("min", 0).Set("max", 10).Set("value", 2.5)
+	size.OnChange(func(e bui.Event) { fmt.Println("size =", e.Node.Num("value")) })
+	root.Add(size)
+
+	apply := bui.NewNode("button").Set("text", "Apply")
+	apply.OnClick(func(bui.Event) { bui.Quit() })
+	root.Add(apply)
+
+	bui.NewWindow(bui.WindowOptions{Title: "BUI from Go", Width: 320, Height: 120, Root: root})
+	bui.Run()
+}
+```
+
+`bui.NewNode` creates a node in the kit's retained tree. `Set` takes numbers, bools, strings, `[]string` and `Color`, and returns the node, so calls chain. `Num`, `Str`, `Color` and `Strs` read properties. The node types and their keys are the C kit's: see [the C API](../../c/c-api/).
+
+`NewWindow` makes a context for `Root` and shows it. `Run` handles input and draws until the last window closes, and `Quit` ends it.
+
+## Headless rendering
+
+A window is optional. A `Raster` is a frame buffer, and `Context.Render` draws the tree into it:
+
+```go
+root := bui.NewNode("column").Set("padding", 12)
+clicks := 0
+button := bui.NewNode("button").Set("text", "Click me")
+button.OnClick(func(bui.Event) { clicks++ })
+root.Add(button)
+
+ctx := bui.NewContext(root)
+raster := bui.NewRaster(320, 200)
+ctx.Render(raster, 320, 200, true)
+
+x, y := button.Rect().Center()
+ctx.Click(x, y, 0) // clicks == 1
+pixels := raster.Pixels() // 0x00RRGGBB, row by row
+```
+
+This is how the tests run: `go test ./...` needs no display.
+
+## Threads
+
+The kit belongs to the main thread. Package `bui` locks the main goroutine to it during `init`, so `main` and every callback run there. Other goroutines reach the UI with `bui.RunOnMain(fn)`, or with `window.Update(fn)`, which also draws a frame:
+
+```go
+go func() {
+	items, err := fetchItems()
+	win.Update(func() { app.items, app.err = items, err })
+}()
+```
+
+## What the package covers
+
+| Area | API |
+| --- | --- |
+| Nodes | `NewNode`, `Add`, `Insert`, `Remove`, `Child`, `ChildCount`, `Parent`, `Rect`, `Natural`, `Free`; `Set`, `SetNum`, `SetStr`, `SetColor`, `SetStrs`, `Num`, `Str`, `Color`, `Strs` |
+| Events | `OnClick`, `OnChange`, `OnSubmit`, `On(kind, fn)`, `Context.OnEvent` |
+| Geometry | `Pack`, `Grid`, `Place` (Tk's managers in a `frame`), `GridWeight` |
+| Contexts | `NewContext`, `Render`, `Configure`, `Press`, `Release`, `Motion`, `Click`, `Wheel`, `Scroll`, `Key`, `ContextMenu`, `Bind`, `HitAt`, `Hover`, `Focus`, `FocusNode`, `Popups`, `Undo`, `Redo`, clipboard |
+| Windows | `NewWindow`, `Show`, `Close`, `SetTitle`, `SetSize`, `Size`, `UseGPU`, `Timer`, `RequestFrame`, `OnFrame`, `OnClose`, `OnFocus`, `WM`, `WMGet`, `Update`, `Invalidate`; `Run`, `Pump`, `Quit`, `RunOnMain`, `App.WhenReady`, `App.Run` |
+| Menus | `SetMenu` on a `menubutton`, `Context.OpenMenu`, `Context.OpenPie`; items run Go functions |
+| Images | `DecodeImage`, `LoadImage`, `ImageFromRGBA`; `SetImage`, `SetImBuf`, `SetImageSource` |
+| Canvas | `AddItem`, `SetItem`, `PutItem`, `TruncateItems`, `DeleteItem` |
+| Text areas, trees | `TextInsert`, `TextDelete`, `Caret`, `Selection`, `See`; `NewTreeItem`, `SetTreeRoots`, `TreeSelected` |
+| Look | `SetTheme`, `LoadThemeJSON`, `LoadThemeFile`, `ThemeColor`, `SetThemeColor`, `SetScale`, `SetFont`, `SetFontSize`, `Icon` |
+| More | `FileDialog`, `EvalNumber`, `Version` |
+
+The kit holds integers, never Go pointers. A context's host data, a window's callbacks, and the refs of menu items and key bindings are ids into the package's tables. The kit's retain and release hooks drop a menu's functions once no menu holds them.
+
+## Platforms
+
+Windows (Win32, with Direct3D 11 or the software renderer), Linux (X11 and Wayland, loaded at run time, so a headless program needs neither) and macOS (Cocoa). The binding is tested on Windows 11 with MSYS2's gcc 15.2, in native windows on both renderers. CI runs the headless tests on Ubuntu and Windows. The macOS build has not been tried yet.

@@ -4,7 +4,7 @@
     python tools/gen_doc_images.py --site     # website/public/images/shots/, dark + light,
                                               # every language (see INDEX.md there)
     python tools/gen_doc_images.py --site --only python      # one producer:
-          python | rust | js | imgui | c   (--theme dark|light for one theme)
+          python | rust | js | imgui | c | lua | go   (--theme dark|light for one theme)
 
 The site shots are 2x (BUI_UI_SCALE=2, crisp on high-DPI screens), in Blender's
 dark and light themes (BUI_THEME), and losslessly recompressed (tools/pngopt.py).
@@ -191,6 +191,21 @@ def site_native(theme, which):
         run([path, "--screenshot", out] + args, env=child_env(theme))
 
 
+def site_go(theme):
+    """Go shots: the examples render headless with --screenshot (ui.Tester)."""
+    go = os.path.join(ROOT, "bindings", "go")
+    if not shutil.which("go"):
+        print("go: go not found, skipped")
+        return
+    env = child_env(theme)
+    if run(["go", "generate", "./bui"], env=env, cwd=go) != 0:
+        print("go: the C kit did not build (cgo needs gcc or clang), skipped")
+        return
+    for ex, name in (("counter", "go-counter"),):
+        out = os.path.join(SITE_OUT, "%s-%s.png" % (name, theme))
+        run(["go", "run", "./examples/" + ex, "--screenshot", out], env=env, cwd=go)
+
+
 def site_lua(theme):
     """Lua shots: run bui-lua headless to render the table editor."""
     build = os.environ.get("BUI_BUILD_DIR", os.path.join(ROOT, "build"))
@@ -253,7 +268,7 @@ def site(only, themes, example=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--site", action="store_true")
-    ap.add_argument("--only", choices=("python", "rust", "js", "imgui", "c", "lua"))
+    ap.add_argument("--only", choices=("python", "rust", "js", "imgui", "c", "lua", "go"))
     ap.add_argument("--theme", choices=THEMES)
     ap.add_argument("--example", help="with --only rust: just this example (e.g. site_data_table)")
     ap.add_argument("--site-python", choices=THEMES, help=argparse.SUPPRESS)

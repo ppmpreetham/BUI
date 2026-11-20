@@ -15,6 +15,7 @@ export const sections = [
   { label: "C & C++", blurb: "The C kit and embedding BUI in your host", icon: "file-c" },
   { label: "Lua", blurb: "The bui-lua host and the bui module", icon: "moon" },
   { label: "D", blurb: "A DUB package with raw C declarations and D wrappers", icon: "code" },
+  { label: "Go", blurb: "The kit from Go, and MyGo-style views", icon: "file-code" },
   { label: "Concepts", blurb: "How BUI works under the hood", icon: "lightbulb-filament" },
   { label: "Performance", blurb: "Numbers, and how to measure them yourself", icon: "gauge" },
   { label: "Reference", blurb: "Variables, options, matrices and terms", icon: "books" },
@@ -37,6 +38,7 @@ export const languages = [
   { id: "cpp", label: "C++" },
   { id: "imgui", label: "Dear ImGui" },
   { id: "d", label: "D" },
+  { id: "go", label: "Go" },
 ] as const;
 
 export type LanguageId = (typeof languages)[number]["id"];

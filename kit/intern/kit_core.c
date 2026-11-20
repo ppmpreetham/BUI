@@ -343,6 +343,32 @@ void BK_node_remove(BKNode *parent, BKNode *child)
   bk_release(child->ref);
 }
 
+int BK_node_move(BKNode *parent, BKNode *child, int index)
+{
+  if (!parent || !child || child->parent != parent) {
+    return 0;
+  }
+  int from = 0;
+  while (from < parent->nkids && parent->kids[from] != child) {
+    from++;
+  }
+  index = (index < 0 || index >= parent->nkids) ? parent->nkids - 1 : index;
+  if (from == index) {
+    return 1;
+  }
+  /* shift the ones between, in place: the child never leaves, so it keeps the focus, a text
+   * edit and its context (BK_node_remove + BK_node_add forget them) */
+  if (from < index) {
+    memmove(parent->kids + from, parent->kids + from + 1, sizeof(BKNode *) * (size_t)(index - from));
+  }
+  else {
+    memmove(parent->kids + index + 1, parent->kids + index, sizeof(BKNode *) * (size_t)(from - index));
+  }
+  parent->kids[index] = child;
+  bk_relayout(parent);
+  return 1;
+}
+
 int BK_node_child_count(const BKNode *n)
 {
   return n->nkids;

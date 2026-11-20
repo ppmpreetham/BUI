@@ -16,6 +16,7 @@ These are on `main` and will ship in the next release; the details are under **U
 - **Animation.** One animation engine in the C kit runs GSAP-style timelines (position strings such as `"<"` and `"+=1"`, stagger, repeat, yoyo) and Motion-style springs, for Rust, JavaScript, React, Python, Lua and C. Rust gets `<motion.div>` in `rsx!`; see [Motion](../../rust/motion/) and [Effects and animations](../../rust/effects-and-animations/).
 - **Vue.** `@blender-ui/vue` renders Vue 3 single-file components in native windows. See [Vue](../../javascript/vue/).
 - **D.** A DUB package with the whole C API, idiomatic wrappers and an HTML, CSS and RSX layer. See [D](../../d/overview/).
+- **Go.** A cgo module with the C kit, and MyGo-style views: `ui.Column(c).Children(...)`, controls bound to your state, and a headless `Tester`. See [Go](../../go/overview/) and [MyGo-style views](../../go/mygo-syntax/).
 - **Video with sound.** A `<video>` now plays its audio track. This changes a default: videos used to be silent, so set `muted` to keep one quiet.
 - **Rust conditionals.** An `Option` is an element: `None` draws nothing and `Some(x)` draws `x`, so `{ cond.then(|| <p>"hi"</p>) }` replaces an empty placeholder.
 - **Controls in node-editor nodes.** A node can hold a button, a checkbox and a dropdown, as Blender's nodes do.

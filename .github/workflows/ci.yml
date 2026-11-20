@@ -180,6 +180,35 @@ jobs:
       - name: Build and run the D test suite
         run: dub run --config=test --compiler=ldc2
 
+  # bindings/go builds the C kit with cgo's compiler (gcc; MinGW on Windows) through
+  # `go generate`, then runs the tests of both packages and the examples'. They are
+  # headless (ui.Tester), so no display server is needed.
+  go:
+    name: go test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: bindings/go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: X11 headers (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev
+      - name: Build the C kit
+        run: go generate ./bui
+      - name: go vet and go test
+        run: |
+          go vet ./...
+          go test ./...
+
   # The crates.io package of blenderui-sys builds from its vendored sources alone.
   package:
     name: cargo package (blenderui-sys, vendored C sources)

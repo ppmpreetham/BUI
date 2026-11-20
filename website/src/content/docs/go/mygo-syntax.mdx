@@ -1,0 +1,176 @@
+---
+title: MyGo-style views
+sidebarLabel: MyGo-style views
+description: Package ui builds Blender's widgets from a view function of your state, with MyGo's syntax - Column, Row, Children, bound controls, Clicked and Changed, keys, and a Tester for headless tests.
+section: Go
+order: 20
+languages: ["go"]
+sources: ["bindings/go/README.md", "bindings/go/ui/ui.go", "bindings/go/ui/element.go", "bindings/go/ui/widgets.go", "bindings/go/ui/style.go", "bindings/go/ui/tester.go", "bindings/go/ui/ui_test.go", "bindings/go/examples/counter/main.go", "bindings/go/examples/counter/main_test.go", "bindings/go/examples/todos/main.go"]
+---
+
+**Package `ui` builds BUI's Blender widgets the way [MyGo](https://github.com/egoist/mygo)'s `ui` package does.** A view is a function from your app's state to its interface. BUI calls it on the main thread to build a frame, and again after input. The syntax is MyGo's: MyGo's counter and its test run with only the import paths changed.
+
+```go title="examples/counter/main.go"
+// counter is the state the window shows.
+type counter struct{ n int }
+
+// view builds the interface from the state whenever the window needs a frame.
+func (s *counter) view(c *ui.Context) {
+	if c.Shortcut(0, ui.KeyUp) {
+		s.n++
+	}
+	if c.Shortcut(0, ui.KeyDown) {
+		s.n--
+	}
+	t := c.Theme()
+	ui.Column(c).Fill().Center().Gap(16).Children(func() {
+		ui.Textf(c, "%d", s.n).FontSize(56).Bold()
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.Button(c.Key("decrement"), "−").Label("Decrement").Width(44).Clicked() {
+				s.n--
+			}
+			if ui.Button(c.Key("reset"), "Reset").Disabled(s.n == 0).Clicked() {
+				s.n = 0
+			}
+			if ui.PrimaryButton(c.Key("increment"), "+").Label("Increment").Width(44).Clicked() {
+				s.n++
+			}
+		})
+		ui.Text(c, "↑ and ↓ count too").FontSize(12).TextColor(t.TextMuted)
+	})
+}
+
+func main() {
+	s := &counter{}
+	bui.App.WhenReady(func() {
+		bui.NewWindow(bui.WindowOptions{Title: "Counter", Width: 360, Height: 260, Content: ui.View(s.view)})
+	})
+	if err := bui.App.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+<Figure
+  shot="go-counter"
+  alt="The counter: a large bold 3 in the middle, a row of three buttons below it (minus, Reset and a blue plus), and a line saying the arrow keys count too"
+  caption="The counter at 3 (<code>bindings/go/examples/counter</code>, rendered with <code>--screenshot</code>)."
+/>
+
+The window shows the count in Blender's dark theme. Reset is grayed out at 0, and `+` is drawn as Blender's default button.
+
+## How a view becomes widgets
+
+Every element is a node of the kit, kept from build to build by its place among its siblings of its kind, or by its key. A view that builds the same interface again changes nothing in the tree. The kit only lays out and draws again what changed, so an idle window costs nothing. A pass whose controls took input is built once more before the frame is drawn, so the frame shows the outcome.
+
+## Containers and children
+
+Constructors take the context first and return a `ui.Element`. Its methods style the element and ask about its input. Containers take their children in a callback, and `c` stays the same: inside the callback, it builds into the container.
+
+```go
+ui.Column(c).Padding(16).Gap(8).Children(func() {
+	ui.Text(c, "To-dos").FontSize(20).Bold()
+	ui.Row(c).Gap(6).Children(func() {
+		ui.TextInput(c, &app.draft).Placeholder("New to-do").Grow(1)
+		ui.PrimaryButton(c, "Add").Disabled(app.draft == "").OnClick(app.add)
+	})
+})
+```
+
+| Constructor | Blender widget |
+| --- | --- |
+| `Column`, `Box`, `Row`, `Scroll`, `RadioGroup`, `Spacer`, `Divider` | layout, a scrolled region, a separator line |
+| `Collapsible(c, label, &open, fn)` | a panel, with its header and open/close animation |
+| `Text`, `Textf` | a label |
+| `Button`, `PrimaryButton` | a push button, Blender's default button |
+| `Checkbox(c, &b, label)`, `Switch(c, &b)`, `Toggle(c, &b, label)` | a check box (Blender has no switch), a toggle button |
+| `Radio(c, &sel, value, label)` | a radio button, for any comparable type |
+| `Select(c, &s, options)` | a drop-down menu |
+| `Slider`, `StepSlider`, `NumberInput` | number sliders and fields: drag, Ctrl snaps, click to type an expression |
+| `TextInput`, `TextArea` | text fields |
+| `Progress(c, v)`, `Image(c, bitmap)` | a progress bar, an image |
+
+## Input
+
+Controls take a pointer to what they edit. They write the user's edit through it before their constructor returns, so the next statement reads the new value, as in MyGo. A value the app changes shows in the control at the next build.
+
+```go
+if ui.Checkbox(c, &app.showHidden, "Show hidden files").Changed() {
+	app.reload()
+}
+if ui.TextInput(c, &app.name).Submitted() { // Return
+	app.rename()
+}
+ui.Slider(c, &app.volume, 0, 100).Label("Volume") // shows "Volume: 50", as Blender's fields do
+```
+
+`Clicked`, `Changed` and `Submitted` report input in the pass that took it. `OnClick`, `OnChange` and `OnSubmit` run after the view has built. Use them to change a collection the view is looping over:
+
+```go
+for _, item := range app.items {
+	ui.Row(c.Key(item.ID)).Children(func() {
+		ui.Checkbox(c, &item.Done, item.Title).Grow(1)
+		ui.Button(c, "Delete").OnClick(func() { app.remove(item.ID) })
+	})
+}
+```
+
+`c.Shortcut(mods, key)` reports a key combination since the last build: `c.Shortcut(ui.Ctrl, ui.KeyS)`.
+
+From other goroutines, change the state with `window.Update(fn)`. It runs `fn` on the main thread and builds a new frame. Inside the view, `c.Invalidate()` asks for another build.
+
+## Keys
+
+Give the elements of a collection's items a key with `c.Key(...)` before the constructor. Their nodes, and with them focus, edited text and a panel's state, then follow the items when the collection changes. Keys compare as map keys do. A key that Go cannot compare compares by its printed value.
+
+## Layout
+
+Rows place their children left to right, centered vertically. Columns stack theirs and stretch them to their width. Sizes are in DIPs and scale with the window.
+
+- `Gap`, `Padding` (one, two or four values, as in CSS), `Width`, `Height` and `Size`.
+- `Grow(f)` takes the free space along the parent's direction. Any factor above 0 takes an equal share. `Spacer(c)` is an empty element that grows.
+- `Fill`, `FillWidth` and `FillHeight` take the parent's box.
+- `Justify` takes `Start`, `Center`, `End`, `SpaceBetween`, `SpaceAround` or `SpaceEvenly`. `SpaceAround` gives the ends half the space between children, as in CSS.
+- `AlignItems` and `AlignSelf` take `Start`, `Center`, `End` or `Stretch`, and `Center()` centers both ways. As in CSS, an element's own size across the direction wins over `Stretch`.
+
+The kit's packer (Tk's) does the layout, so only what changed is laid out again.
+
+## Look
+
+`Bold`, `FontSize` (Blender's UI text is 11), `TextColor`, `Background` (rows and columns), `Tooltip`, `Disabled`, `Hidden`, `Label`, `Placeholder` and `Password`. Colors come from `ui.RGB`, `ui.RGBA` and `ui.Hex`. `c.Theme()` gives the active Blender theme's colors under MyGo's names: `Background`, `Surface`, `Border`, `Text`, `TextMuted`, `Accent` and `AccentText`.
+
+## Tests
+
+`ui.NewTester(view, width, height)` runs a view on a software raster, without a window. `Click` takes a text or label; `ClickAt`, `Key`, `Type`, `HasText`, `Texts` and `Frame` do the rest. MyGo's own counter test passes on it:
+
+```go title="examples/counter/main_test.go"
+func TestCounter(t *testing.T) {
+	s := &counter{}
+	tt := ui.NewTester(s.view, 360, 260)
+	defer tt.Close()
+	for _, label := range []string{"Increment", "Increment", "Decrement"} {
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.n != 1 || !tt.HasText("1") {
+		t.Errorf("count %d after the buttons, texts %q", s.n, tt.Texts())
+	}
+	tt.Key(0, ui.KeyUp)
+	if s.n != 2 {
+		t.Errorf("count %d after the arrow key", s.n)
+	}
+}
+```
+
+## What is not there
+
+The look is Blender's, so this package leaves out these parts of MyGo:
+
+- its styling of boxes: radius, borders, shadows, gradients, materials, transforms and transitions;
+- its custom-widget bases, such as `ButtonBase` and `SliderBase`;
+- overlays, virtual lists and grids;
+- `Margin` and `Absolute` positioning;
+- web-view content.
+
+Calls to them are compile errors, not silent differences. For the rest of the kit (menus, trees, canvases, the file browser, Blender's editors), use [package `bui`](../overview/).
