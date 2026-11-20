@@ -1863,17 +1863,21 @@ impl<'a> Builder<'a> {
                 let attr = |n: &str| self.attr(i, n).and_then(|v| v.trim_end_matches("px").parse::<f32>().ok());
                 let mut s = base;
                 let (aw, ah) = (attr("width"), attr("height"));
-                if s.size.width == Dimension::auto() {
-                    s.size.width = Dimension::length(aw.unwrap_or(match ah {
-                        Some(h) if ih > 0.0 => h * iw / ih,
-                        _ => iw,
-                    }));
+                // the `width` / `height` attributes are sizes under any CSS one
+                if s.size.width == Dimension::auto() && let Some(w) = aw {
+                    s.size.width = Dimension::length(w);
                 }
-                if s.size.height == Dimension::auto() {
-                    s.size.height = Dimension::length(ah.unwrap_or(match aw {
-                        Some(w) if iw > 0.0 => w * ih / iw,
-                        _ => ih,
-                    }));
+                if s.size.height == Dimension::auto() && let Some(h) = ah {
+                    s.size.height = Dimension::length(h);
+                }
+                // an auto size follows the other through a ratio, as in CSS: the
+                // `aspect-ratio`, else the attributes', else the picture's own (a
+                // `width: 70%` image is as tall as 70% of the width makes it)
+                let attrs = aw.zip(ah).filter(|&(_, h)| h > 0.0).map(|(w, h)| w / h);
+                s.aspect_ratio = s.aspect_ratio.or(attrs).or((ih > 0.0).then(|| iw / ih));
+                if s.size.width == Dimension::auto() && s.size.height == Dimension::auto() {
+                    // neither given: the natural width (the ratio gives the height)
+                    s.size.width = Dimension::length(iw);
                 }
                 return self.leaf(i, s);
             }
@@ -2597,12 +2601,18 @@ pub(crate) fn inherit(nodes: &mut [BoxNode], styles: &StyleStore) {
     inherit_at(nodes, styles, 0..nodes.len());
 }
 
+/// Whether a box of this content has its own style (text, words and line
+/// boxes carry their element's: its opacity, effects and animations).
+pub(crate) const fn owns_style(content: &Content) -> bool {
+    matches!(content, Content::Element | Content::Widget(_) | Content::Replaced(_))
+}
+
 /// [`inherit`] for the boxes `at` (ascending: parents first).
 pub(crate) fn inherit_at(nodes: &mut [BoxNode], styles: &StyleStore, at: impl Iterator<Item = usize>) {
     for i in at {
         let (po, pv) = nodes[i].parent.map_or((1.0, true), |p| (nodes[p].opacity, nodes[p].visible));
         let st = &styles[nodes[i].style];
-        let own = matches!(nodes[i].content, Content::Element | Content::Widget(_) | Content::Replaced(_));
+        let own = owns_style(&nodes[i].content);
         nodes[i].opacity = if own { po * st.opacity } else { po };
         nodes[i].visible = pv && st.visible;
     }

@@ -32,6 +32,29 @@
 mod element;
 mod state;
 
+use std::cell::RefCell;
+
+use crate::layout::Frame;
+use crate::{App, Window};
+
+type AfterLayout = Box<dyn FnOnce(&Frame, &mut Window, &mut App)>;
+
+thread_local! {
+    static AFTER: RefCell<Vec<AfterLayout>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Run `f` once this frame is laid out, before it is painted.
+pub(crate) fn after_layout(f: AfterLayout) {
+    AFTER.with(|a| a.borrow_mut().push(f));
+}
+
+/// Lists render with last frame's size; this fits them to the frame just laid out, without rendering the view again.
+pub(crate) fn run_after_layout(frame: &Frame, window: &mut Window, cx: &mut App) {
+    for f in AFTER.with(|a| std::mem::take(&mut *a.borrow_mut())) {
+        f(frame, window, cx);
+    }
+}
+
 pub use blenderui_vlist::{
     Align, Budget, ChatList, ChatStyle, CountSource, Estimator, Fx, Hit, ItemPainter, ItemSource, Lines, List, ListView, Measurer, Message,
     Nav, Options, PaintSink, Page, Palette, Placed, Point, Pos, Record, Rect, Rgba, RowList, RowStyle, TextWidth, VecSource, FLAG_DIVIDER,

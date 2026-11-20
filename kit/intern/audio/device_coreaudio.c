@@ -103,6 +103,13 @@ double bk_audio_device_played(BKAudioDevice *d)
   return t > 0.0 ? t : 0.0;
 }
 
+/* The queue opens on the default output at once, or not at all: it never waits for one. */
+bool bk_audio_device_waiting(BKAudioDevice *d)
+{
+  (void)d;
+  return false;
+}
+
 void bk_audio_device_close(BKAudioDevice *d)
 {
   if (!d) {

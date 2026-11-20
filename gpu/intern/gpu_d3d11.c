@@ -925,21 +925,30 @@ typedef HRESULT(WINAPI *D3DCompileFn)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_
 
 /* d3dcompiler_47.dll (Windows 8.1 and later ship it) is loaded when the first effect is drawn:
  * nothing links against it and no SDK is needed. System folder first, then the app's own. */
+static D3DCompileFn g_d3d_compile;
+
+static BOOL CALLBACK d3d_compiler_load(PINIT_ONCE once, PVOID param, PVOID *ctx)
+{
+  (void)once;
+  (void)param;
+  (void)ctx;
+  HMODULE m = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+  if (!m) {
+    m = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
+  }
+  if (m) {
+    g_d3d_compile = (D3DCompileFn)(void *)GetProcAddress(m, "D3DCompile");
+  }
+  return TRUE;
+}
+
+/* Loaded once, whichever thread draws the first effect (devices of several windows or tests
+ * compile at the same time): another thread waits for the load rather than seeing it unfinished. */
 static D3DCompileFn d3d_compiler(void)
 {
-  static int tried;
-  static D3DCompileFn fn;
-  if (!tried) {
-    tried = 1;
-    HMODULE m = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (!m) {
-      m = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR);
-    }
-    if (m) {
-      fn = (D3DCompileFn)(void *)GetProcAddress(m, "D3DCompile");
-    }
-  }
-  return fn;
+  static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
+  InitOnceExecuteOnce(&once, d3d_compiler_load, NULL, NULL);
+  return g_d3d_compile;
 }
 
 /* One stage of the assembled source; on failure the compiler's text goes to `log`. */

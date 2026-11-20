@@ -1231,6 +1231,52 @@ struct ElState {
     transitions: Vec<Transition>,
     /// The element's cascaded style last frame (when it has transitions).
     prev: Option<Box<Computed>>,
+    /// Something of it still moved at its last full frame.
+    moving: bool,
+    /// What moving its values needs without a full frame, when every value
+    /// it animates only paints (see [`Animations::redraw_css`]).
+    paint: Option<Paint>,
+}
+
+impl ElState {
+    /// The fields its transitions and animations write.
+    fn fields(&self) -> impl Iterator<Item = Field> + '_ {
+        let runs = self.paint.iter().flat_map(|p| p.runs.iter().flat_map(|r| r.tracks.iter().map(|t| t.field)));
+        self.transitions.iter().map(|t| t.field).chain(runs)
+    }
+}
+
+/// An element's CSS animations ready for frames of time alone: its box, its
+/// cascaded style and each animation's timing and resolved tracks, from its
+/// last full frame.
+struct Paint {
+    node: usize,
+    base: Box<Computed>,
+    runs: Vec<RunPaint>,
+}
+
+struct RunPaint {
+    start: f64,
+    held: Option<f64>,
+    anim: Anim,
+    timing: Timing,
+    paused: bool,
+    tracks: Vec<Track>,
+}
+
+/// Whether a field only changes how a box paints, so a frame can move it
+/// without a cascade or a layout (`leaf`: the box has no child elements;
+/// they took an inherited value from it at the cascade, so it can't change
+/// under them). `Translate` moves the box and what is in it.
+fn paint_field(f: Field, leaf: bool) -> bool {
+    use Field::*;
+    match f {
+        Opacity | Background | BorderColor(_) | OutlineColor | BoxShadow | Filter | Backdrop | Rotate | Scale
+        | Transform | Translate => true,
+        // inherited (text-decoration reaches inline descendants)
+        Color | DecorationColor | TextShadow | Visibility | Accent => leaf,
+        _ => false,
+    }
 }
 
 /// What [`Animations::apply`] needs from the cascade.
@@ -1262,6 +1308,17 @@ pub(crate) struct Animations {
     running: bool,
     /// Motion's elements (`<motion.div>`), moved by the animation engine.
     motion: crate::motion::Elements,
+    /// Per-box buffers of the CSS redraws, kept so a frame allocates nothing.
+    scratch: CssScratch,
+}
+
+/// A CSS redraw's per-box marks: which boxes hold child elements, which it
+/// changed, and how far each moved.
+#[derive(Default)]
+struct CssScratch {
+    parent: Vec<bool>,
+    dirty: Vec<bool>,
+    shift: Vec<(f32, f32)>,
 }
 
 impl Animations {
@@ -1329,16 +1386,9 @@ impl Animations {
         self.running || crate::motion::active()
     }
 
-    /// Whether any element has CSS animation state (time passing may matter;
-    /// Motion's values: [`crate::motion::active`]).
-    pub(crate) fn any(&self) -> bool {
-        !self.els.is_empty()
-    }
-
-    /// Whether anything follows where boxes are placed (so a scroll moves it): CSS animation
-    /// state, Motion's elements, a followed scroll.
-    pub(crate) fn tracks_placement(&self) -> bool {
-        !self.els.is_empty() || self.motion.any() || crate::motion::used() || crate::motion::follows_scroll()
+    /// Whether CSS animations or transitions still move (as of the last frame).
+    pub(crate) fn css_running(&self) -> bool {
+        self.running
     }
 
     /// Whether element `key` with cascaded style `base` needs [`apply`](Self::apply).
@@ -1430,7 +1480,9 @@ impl Animations {
             set(t.field, out.get_or_insert_with(|| base.clone()), t.value(now, &u));
         }
 
-        // -- animations on top
+        // -- animations on top; what frames of time alone need is kept while
+        // every value only paints
+        let mut paint = st.transitions.iter().all(|t| paint_field(t.field, true)).then(Vec::new);
         if let Some(s) = spec {
             let important: Vec<Field> = env.important.iter().flat_map(|p| fields_of(*p).iter().copied()).collect();
             for (i, run) in st.runs.iter_mut().enumerate() {
@@ -1459,17 +1511,154 @@ impl Animations {
                 if active && !paused {
                     running = true;
                 }
-                let Some((p, before)) = progress else { continue };
                 let timing = nth(&s.timings, i, EASE);
-                let c = out.get_or_insert_with(|| base.clone());
-                sample(kf, p, before, &timing, base, c, env, &important, &u);
+                let (tracks, discrete) = resolve(kf, base, env, &important, &u);
+                if let Some((p, before)) = progress {
+                    let c = out.get_or_insert_with(|| base.clone());
+                    apply_discrete(&discrete, p, before, &timing, c, env, &u);
+                    for t in &tracks {
+                        eval_track(t, p, before, &timing, c, &u);
+                    }
+                }
+                paint = paint.filter(|_| discrete.is_empty() && tracks.iter().all(|t| paint_field(t.field, true)));
+                if let Some(list) = &mut paint {
+                    list.push(RunPaint { start: run.start, held: run.held, anim, timing, paused, tracks });
+                }
             }
+        }
+        st.moving = running;
+        st.paint = paint.filter(|_| running).map(|runs| Paint { node: env.node, base: Box::new(base.clone()), runs });
+        if st.paint.is_some() {
+            // its own style, to change in place (never a shared one)
+            out.get_or_insert_with(|| base.clone());
         }
         if st.runs.is_empty() && st.transitions.is_empty() && st.prev.is_none() {
             self.els.remove(&key);
         }
         self.running |= running;
         self.apply_motion(key, base, env, out)
+    }
+
+    /// A frame of time alone for the CSS animations and transitions: their
+    /// values written into the styles of the last frame's boxes (no cascade,
+    /// no layout; see [`Paint`]). The boxes it changed, with everything under
+    /// them, and whether anything still moves; `None` when a full frame is
+    /// needed (a value that is more than paint, an inherited one over child
+    /// elements, a box that is gone).
+    pub(crate) fn redraw_css(&mut self, now: f64, frame: &mut crate::layout::Frame,
+                             styles: &mut crate::layout::StyleStore, viewport: (f32, f32))
+                             -> Option<(Vec<bool>, bool)> {
+        // the per-box marks are kept between frames: a frame allocates nothing
+        let mut scratch = std::mem::take(&mut self.scratch);
+        let out = self.redraw_css_into(&mut scratch, now, frame, styles, viewport);
+        self.scratch = scratch;
+        out
+    }
+
+    /// The marks [`redraw_css`](Self::redraw_css) gave, back for the next frame.
+    pub(crate) fn give_css_dirty(&mut self, v: Vec<bool>) {
+        if v.capacity() > self.scratch.dirty.capacity() {
+            self.scratch.dirty = v;
+        }
+    }
+
+    fn redraw_css_into(&mut self, s: &mut CssScratch, now: f64, frame: &mut crate::layout::Frame,
+                       styles: &mut crate::layout::StyleStore, viewport: (f32, f32))
+                       -> Option<(Vec<bool>, bool)> {
+        let nodes = &mut frame.nodes;
+        let len = nodes.len();
+        s.parent.clear();
+        s.parent.resize(len, false);
+        s.dirty.clear();
+        s.dirty.resize(len, false);
+        s.shift.clear();
+        s.shift.resize(len, (0.0, 0.0));
+        let CssScratch { parent: parent_of_element, dirty, shift } = s;
+        for n in nodes.iter() {
+            if let Some(p) = n.parent.filter(|_| crate::layout::owns_style(&n.content)) {
+                parent_of_element[p] = true;
+            }
+        }
+        let (mut running, mut moved, mut faded) = (false, false, false);
+        for (&key, st) in &self.els {
+            if !st.moving {
+                continue;
+            }
+            let p = st.paint.as_ref()?;
+            let n = nodes.get(p.node).filter(|n| n.key == key)?;
+            let leaf = !parent_of_element[p.node];
+            if !st.fields().all(|f| paint_field(f, leaf)) {
+                return None;
+            }
+            let u = Units { font_size: p.base.font_size, viewport };
+            let (w, h) = (n.bounds.size.width, n.bounds.size.height);
+            let at = |c: &Computed| (c.translate.0.resolve(&u, w), c.translate.1.resolve(&u, h));
+            let style = styles.private_mut(n.style);
+            let before = at(style);
+            // back to the cascaded values, then transitions, then animations
+            for f in st.fields() {
+                copy_field(f, &p.base, style);
+                faded |= matches!(f, Field::Opacity | Field::Visibility);
+            }
+            for t in &st.transitions {
+                running |= !t.done(now);
+                set(t.field, style, t.value(now, &u));
+            }
+            for r in &p.runs {
+                let (progress, active) = r.anim.progress(r.held.unwrap_or(now - r.start) as f32);
+                running |= active && !r.paused;
+                if let Some((q, phase_before)) = progress {
+                    for t in &r.tracks {
+                        eval_track(t, q, phase_before, &r.timing, style, &u);
+                    }
+                }
+            }
+            // Motion's values go over these (its redraw is next), not over the last full frame's
+            for f in st.fields() {
+                self.motion.rebase(key, f, style);
+            }
+            let after = at(style);
+            if before != after {
+                shift[p.node] = (after.0 - before.0, after.1 - before.1);
+                moved = true;
+            }
+            dirty[p.node] = true;
+        }
+        // what is under a changed box changes with it; a moved box moves it
+        // (parents come before children)
+        for j in 0..nodes.len() {
+            let Some(parent) = nodes[j].parent else { continue };
+            dirty[j] |= dirty[parent];
+            if moved {
+                let own = shift[j];
+                let d = (own.0 + shift[parent].0, own.1 + shift[parent].1);
+                if d != (0.0, 0.0) {
+                    // a clip made inside the moved box moves with it
+                    let inner = shift[parent] == d && own == (0.0, 0.0);
+                    let parent_clip = nodes[parent].clip;
+                    let n = &mut nodes[j];
+                    n.bounds.origin.x += d.0;
+                    n.bounds.origin.y += d.1;
+                    if let (true, Some(c)) = (inner, &mut n.clip)
+                        && parent_clip != Some(*c)
+                    {
+                        c.origin.x += d.0;
+                        c.origin.y += d.1;
+                    }
+                }
+                shift[j] = d;
+            }
+        }
+        if let Some(root) = shift.first().copied().filter(|d| *d != (0.0, 0.0)) {
+            let n = &mut nodes[0];
+            n.bounds.origin.x += root.0;
+            n.bounds.origin.y += root.1;
+        }
+        if faded {
+            crate::layout::inherit_at(nodes, styles, (0..dirty.len()).filter(|&j| dirty[j]));
+        }
+        self.running = running;
+        Some((std::mem::take(dirty), running))
     }
 
     /// Motion's values on top of the CSS animations (`out`: their result).
@@ -1493,6 +1682,7 @@ fn keyframes<'s>(sheet: &'s crate::css::Stylesheet, media: &[bool], name: &str) 
 }
 
 /// One animation's timing (css-animations / web-animations timing model).
+#[derive(Clone, Copy)]
 struct Anim {
     duration: f32,
     delay: f32,
@@ -1556,13 +1746,27 @@ impl Anim {
     }
 }
 
-/// Apply keyframes `kf` at iteration progress `p` onto `out`.
-#[allow(clippy::too_many_arguments)]
-fn sample(kf: &crate::css::Keyframes, p: f32, before: bool, timing: &Timing, base: &Computed, out: &mut Computed,
-          env: &Env, important: &[Field], u: &Units) {
+/// One interpolated field of an animation, resolved against the element's
+/// style once (at a full frame): its keyframes as (offset, value, the
+/// keyframe's own easing), the implicit 0% / 100% ones holding the
+/// underlying value. Sampling it is a lookup and a blend: no style copies.
+#[derive(Clone)]
+struct Track {
+    field: Field,
+    keys: Vec<(f32, Val, Option<Timing>)>,
+}
+
+/// A discrete declaration's keyframes (offset, declaration, easing).
+type Discrete<'k> = (Field, Vec<(f32, &'k Decl, Option<Timing>)>);
+
+/// The keyframes of `kf` per field: the interpolated ones resolved against
+/// `base` (see [`Track`]), and the discrete ones, applied as declared.
+/// Fields set by `!important` declarations are left out.
+fn resolve<'k>(kf: &'k crate::css::Keyframes, base: &Computed, env: &Env, important: &[Field], u: &Units)
+               -> (Vec<Track>, Vec<Discrete<'k>>) {
     const TIMING: Prop = Prop::named("animation-timing-function");
     // per field: (offset, declaration, the keyframe's own easing), by offset
-    let mut tracks: Vec<(Field, Vec<(f32, &Decl, Option<Timing>)>)> = Vec::new();
+    let mut tracks: Vec<Discrete<'k>> = Vec::new();
     for (offsets, decls) in &kf.frames {
         let own = decls.iter().rev().find(|d| d.prop == TIMING).and_then(|d| d.value.first().and_then(Timing::parse));
         for &o in offsets {
@@ -1589,54 +1793,68 @@ fn sample(kf: &crate::css::Keyframes, p: f32, before: bool, timing: &Timing, bas
             }
         }
     }
-    let mut applied: Vec<(*const Decl, Computed)> = Vec::new();
-    let with = |d: &Decl, applied: &mut Vec<(*const Decl, Computed)>| -> usize {
-        if let Some(k) = applied.iter().position(|e| std::ptr::eq(e.0, d)) {
-            return k;
-        }
-        let mut c = base.clone();
-        apply_decl(&mut c, d, env, u);
-        applied.push((d as *const Decl, c));
-        applied.len() - 1
-    };
-    // discrete declarations first: interpolated fields are set over them
-    tracks.sort_by_key(|t| !matches!(t.0, Field::Other(_)));
-    for (f, mut list) in tracks {
-        if important.contains(&f) || matches!(f, Field::Other(p) if env.important.contains(&p)) {
-            continue;
-        }
+    tracks.retain(|(f, _)| !important.contains(f) && !matches!(f, Field::Other(p) if env.important.contains(p)));
+    for (_, list) in &mut tracks {
         list.sort_by(|a, b| a.0.total_cmp(&b.0));
-        // implicit 0% / 100% keyframes hold the underlying value
-        type Key<'d> = (f32, Option<&'d Decl>, Option<Timing>);
-        let mut keys: Vec<Key> = list.into_iter().map(|(o, d, t)| (o, Some(d), t)).collect();
-        if keys.first().is_none_or(|k| k.0 > 0.0) {
-            keys.insert(0, (0.0, None, None));
+    }
+    let (discrete, interpolated): (Vec<_>, Vec<_>) = tracks.into_iter().partition(|t| matches!(t.0, Field::Other(_)));
+    // each declaration applied to the style once, shared by its fields
+    let mut applied: Vec<(*const Decl, Computed)> = Vec::new();
+    let mut value = |f: Field, d: Option<&Decl>| -> Option<Val> {
+        let Some(d) = d else { return get(f, base) };
+        let k = applied.iter().position(|e| std::ptr::eq(e.0, d)).unwrap_or_else(|| {
+            let mut c = base.clone();
+            apply_decl(&mut c, d, env, u);
+            applied.push((d as *const Decl, c));
+            applied.len() - 1
+        });
+        get(f, &applied[k].1)
+    };
+    let resolved = interpolated.into_iter().filter_map(|(field, list)| {
+        let mut keys = Vec::with_capacity(list.len() + 2);
+        if list.first().is_none_or(|k| k.0 > 0.0) {
+            keys.push((0.0, value(field, None)?, None));
         }
-        if keys.last().is_none_or(|k| k.0 < 1.0) {
-            keys.push((1.0, None, None));
+        for (o, d, t) in &list {
+            keys.push((*o, value(field, Some(d))?, t.clone()));
         }
-        let k = keys.iter().rposition(|e| e.0 <= p).unwrap_or(0).min(keys.len() - 2);
-        let (a, b) = (&keys[k], &keys[k + 1]);
-        let local = if b.0 > a.0 { (p - a.0) / (b.0 - a.0) } else { 1.0 };
-        let eased = a.2.as_ref().unwrap_or(timing).apply(local, before);
-        match f {
-            Field::Other(_) => {
-                // discrete: the nearer keyframe's declaration as is
-                if let Some(d) = if eased < 0.5 { a.1 } else { b.1 } {
-                    apply_decl(out, d, env, u);
-                }
-            }
-            _ => {
-                let val = |e: &Key, applied: &mut Vec<(*const Decl, Computed)>| match e.1 {
-                    Some(d) => {
-                        let k = with(d, applied);
-                        get(f, &applied[k].1)
-                    }
-                    None => get(f, base),
-                };
-                let (Some(va), Some(vb)) = (val(a, &mut applied), val(b, &mut applied)) else { continue };
-                set(f, out, blend(&va, &vb, eased, u));
-            }
+        if list.last().is_none_or(|k| k.0 < 1.0) {
+            keys.push((1.0, value(field, None)?, None));
+        }
+        Some(Track { field, keys })
+    }).collect();
+    (resolved, discrete)
+}
+
+/// Track `t` at iteration progress `p` onto `out`.
+fn eval_track(t: &Track, p: f32, before: bool, timing: &Timing, out: &mut Computed, u: &Units) {
+    let keys = &t.keys;
+    let k = keys.iter().rposition(|e| e.0 <= p).unwrap_or(0).min(keys.len() - 2);
+    let (a, b) = (&keys[k], &keys[k + 1]);
+    let local = if b.0 > a.0 { (p - a.0) / (b.0 - a.0) } else { 1.0 };
+    let eased = a.2.as_ref().unwrap_or(timing).apply(local, before);
+    set(t.field, out, blend(&a.1, &b.1, eased, u));
+}
+
+/// Discrete declarations at progress `p` onto `out`: the nearer keyframe's
+/// declaration as is (none: the underlying value).
+fn apply_discrete(list: &[Discrete], p: f32, before: bool, timing: &Timing, out: &mut Computed, env: &Env,
+                  u: &Units) {
+    for (_, keys) in list {
+        let k = keys.iter().rposition(|e| e.0 <= p);
+        let (a, b) = match k {
+            Some(k) => (Some(&keys[k]), keys.get(k + 1)),
+            None => (None, keys.first()),
+        };
+        let (ao, at) = a.map_or((0.0, None), |a| (a.0, a.2.as_ref()));
+        let bo = b.map_or(1.0, |b| b.0);
+        let local = if bo > ao { (p - ao) / (bo - ao) } else { 1.0 };
+        let eased = at.unwrap_or(timing).apply(local, before);
+        // past an explicit 100% key there is no next one: that key holds (a missing one, the
+        // underlying value, takes over halfway)
+        let next = if b.is_none() && ao >= 1.0 { a } else { b };
+        if let Some(d) = if eased < 0.5 { a } else { next }.map(|e| e.1) {
+            apply_decl(out, d, env, u);
         }
     }
 }

@@ -16,6 +16,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <math.h>
 #include <string.h>
 
 #include "BLI_ghash.h"
@@ -66,6 +67,7 @@ struct BKImageSource {
   int refs;
   int info_state; /* 0 unknown, 1 read, -1 not an image */
   BKImageInfo info;
+  Entry *shown; /* its whole still drawn last: drawn while another size decodes */
   char path[1]; /* NUL-terminated, allocated with the struct */
 };
 
@@ -184,6 +186,15 @@ static void lru_front(Entry *e)
   C.lru_head = e;
 }
 
+/* `e` used now: to the front, so eviction (from the tail) finds the oldest first. */
+static void lru_touch(Entry *e)
+{
+  if (e != C.lru_head) {
+    lru_unlink(e);
+    lru_front(e);
+  }
+}
+
 static void pend_unlink(Entry *e)
 {
   *(e->pend_prev ? &e->pend_prev->pend_next : &C.pending) = e->pend_next;
@@ -216,6 +227,9 @@ static void entry_free(Entry *e)
   }
   C.bytes -= e->bytes;
   BK_imbuf_free(e->ib);
+  if (e->source->shown == e) {
+    e->source->shown = NULL;
+  }
   bk_image_source_release(e->source);
   MEM_freeN(e->spare);
   MEM_freeN(e);
@@ -308,10 +322,7 @@ static Entry *lookup(BKImageSource *s, const BKImageFit *target, bool create, in
     request(e, priority, false);
   }
   else if (e) {
-    if (e != C.lru_head) {
-      lru_unlink(e);
-      lru_front(e);
-    }
+    lru_touch(e);
     if (e->req && (priority > e->req->priority || e->used != C.gen)) {
       bk_loader_touch(e->req, BK_MAX(priority, e->req->priority), C.gen);
     }
@@ -322,11 +333,8 @@ static Entry *lookup(BKImageSource *s, const BKImageFit *target, bool create, in
   return e;
 }
 
-const BKImBuf *bk_image_cache_get(BKImageSource *s, const BKImageFit *target, const int rect[4])
+static Entry *entry_get(BKImageSource *s, const BKImageFit *target, const int rect[4])
 {
-  if (!s) {
-    return NULL;
-  }
   Entry *e = lookup(s, target, true, BK_IMAGE_PRIORITY_VISIBLE);
   if (e->req || e->play) {
     add_waiter(e, rect);
@@ -334,14 +342,67 @@ const BKImBuf *bk_image_cache_get(BKImageSource *s, const BKImageFit *target, co
   if (e->play && e->ib) {
     imb_play_drawn(e->play, bk_time());
   }
-  return e->ib;
+  return e;
+}
+
+const BKImBuf *bk_image_cache_get(BKImageSource *s, const BKImageFit *target, const int rect[4])
+{
+  return s ? entry_get(s, target, rect)->ib : NULL;
+}
+
+/* Scale steps of the whole decodes, per doubling: a decode is at most 2^(1/4) (1.19) times the size
+ * drawn, so a box resized within a step draws the same decode (no decoder runs) at a scale the
+ * bilinear draw keeps sharp. */
+#define SCALE_STEPS 4.0
+
+bool bk_image_cache_whole(BKImageSource *s, const BKImageFit *want, BKImageFit *r_whole)
+{
+  BKImageInfo info;
+  if (!s || !bk_image_source_info(s, &info)) {
+    return false;
+  }
+  float dst[4], src[4];
+  bk_image_fit(want, info.width, info.height, dst, src);
+  if (dst[2] < 0.5f || dst[3] < 0.5f) {
+    return false; /* nothing of it shows */
+  }
+  /* the largest scale it is drawn at (fill stretches), as a step; never above intrinsic but for
+   * a vector image, which the loader rasterizes sharp at any size */
+  const double scale = fmax(dst[2] / src[2], dst[3] / src[3]);
+  const double step = exp2(ceil(log2(scale) * SCALE_STEPS - 1e-6) / SCALE_STEPS);
+  const double cap = info.format == BK_IMAGE_SVG ? step : fmin(1.0, step);
+  *r_whole = (BKImageFit){BK_FIT_FILL, BK_MAX(1, (int)lround(info.width * cap)),
+                          BK_MAX(1, (int)lround(info.height * cap)), 0.5f, 0.5f, want->frame};
+  return true;
+}
+
+bool bk_image_cache_scaled(BKImageSource *s, const BKImageFit *want, const int rect[4],
+                           const BKImBuf **r_ib)
+{
+  BKImageFit whole;
+  if (!bk_image_cache_whole(s, want, &whole)) {
+    return false;
+  }
+  Entry *e = entry_get(s, &whole, rect);
+  *r_ib = e->ib;
+  if (e->ib && !e->play) {
+    s->shown = e;
+  }
+  else if (!e->ib && s->shown && s->shown->ib && s->shown->target.frame == whole.frame) {
+    lru_touch(s->shown); /* on screen until the new size comes */
+    s->shown->used = C.gen;
+    *r_ib = s->shown->ib;
+  }
+  return true;
 }
 
 void bk_image_cache_prefetch(BKImageSource *s, const BKImageFit *target)
 {
-  if (s) {
-    lookup(s, target, true, BK_IMAGE_PRIORITY_PREFETCH);
+  BKImageFit whole;
+  if (!s) {
+    return;
   }
+  lookup(s, bk_image_cache_whole(s, target, &whole) ? &whole : target, true, BK_IMAGE_PRIORITY_PREFETCH);
 }
 
 /** \} */
@@ -452,7 +513,7 @@ int BK_image_poll(void)
         entry_account(e);
         if (e->ib) {
           C.stats.decoded++;
-          if (e->source->info_state == 0) { /* free intrinsic size for layout */
+          if (e->source->info_state <= 0) { /* free intrinsic size for layout (or a file that came later) */
             e->source->info = (BKImageInfo){e->ib->ftype, e->ib->src_x, e->ib->src_y, e->ib->frames};
             e->source->info_state = 1;
           }

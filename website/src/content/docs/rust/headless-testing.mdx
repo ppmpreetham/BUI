@@ -166,6 +166,8 @@ let win = cx.open_window(opts, |_, cx| cx.new(|_| MyView)).unwrap();
 
 `@media` queries and Tailwind breakpoints follow this size, so you can test `md:` layouts by opening a wider window.
 
+To test resizing, `cx.resize_window(win.id, size(px(800.0), px(600.0)))` resizes the window as a user drag does (a headless window takes the size at once), and the next `cx.draw` shows it.
+
 ## One app at a time
 
 The C kit has global state, so **one `Application` runs at a time per process**. `run` takes a lock, so tests that run in parallel simply queue up; you don't need `--test-threads=1`.

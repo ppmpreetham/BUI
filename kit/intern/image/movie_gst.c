@@ -8,6 +8,7 @@
  *
  * The pipeline decodes, converts and scales to NV12 at the size drawn:
  *   filesrc ! decodebin ! videoconvert ! videoscale ! capsfilter ! appsink
+ * (urisourcebin in place of filesrc for a url).
  * The appsink holds at most two frames and blocks the pipeline when they
  * aren't pulled: a video that isn't shown costs nothing. Its sound is a
  * second pipeline, pulled by the audio device's thread (audio/audio.c):
@@ -174,16 +175,16 @@ static void gst_close(void *state)
   MEM_freeN(m);
 }
 
-/* A launch line reading `path` (quoted with gst_parse_launch's escapes),
- * then `tail` (from the closing quote on). */
+/* A launch line reading `path`, a file or a url (quoted with gst_parse_launch's
+ * escapes), then `tail` (from the closing quote on). */
 static char *pipeline_desc(const char *path, const char *tail)
 {
-  static const char head[] = "filesrc location=\"";
-  const size_t n = strlen(path), tail_n = strlen(tail) + 1;
-  char *s = (char *)MEM_mallocN(sizeof(head) + 2 * n + tail_n, "gst pipeline");
+  const char *head = imb_path_is_url(path) ? "urisourcebin uri=\"" : "filesrc location=\"";
+  const size_t head_n = strlen(head), n = strlen(path), tail_n = strlen(tail) + 1;
+  char *s = (char *)MEM_mallocN(head_n + 2 * n + tail_n, "gst pipeline");
   char *p = s;
-  memcpy(p, head, sizeof(head) - 1);
-  p += sizeof(head) - 1;
+  memcpy(p, head, head_n);
+  p += head_n;
   for (size_t i = 0; i < n; i++) {
     if (path[i] == '"' || path[i] == '\\') {
       *p++ = '\\';
@@ -381,6 +382,7 @@ typedef struct GstSound {
   GstElement *pipeline, *sink;
   int channels;
   bool playing;
+  double duration; /* seconds, read once prerolled; 0 when the stream doesn't say */
   float *buf; /* the last block */
   size_t cap; /* floats */
 } GstSound;
@@ -429,6 +431,10 @@ static void *gst_audio_open(const char *path, int rate, int channels, int *r_rat
     return NULL;
   }
   s->channels = channels;
+  int64_t dur = 0;
+  s->duration = G.query_duration(s->pipeline, GST_FORMAT_TIME, &dur) && dur > 0 ?
+                    (double)dur / GST_SECOND :
+                    0.0;
   *r_rate = rate; /* the caps above: audioresample and audioconvert make it so */
   *r_channels = channels;
   return s;
@@ -472,9 +478,14 @@ static bool gst_audio_seek(void *state, double t)
                        (int64_t)(t * GST_SECOND)) != 0;
 }
 
+static double gst_audio_duration(void *state)
+{
+  return ((const GstSound *)state)->duration;
+}
+
 const BKImAnimCodec imb_movie_gst = {
     "gstreamer", true, imb_is_a_movie, gst_open, gst_output, gst_next, gst_seek, gst_bytes,
-    gst_close, gst_audio_open, gst_audio_read, gst_audio_seek, gst_audio_close};
+    gst_close, gst_audio_open, gst_audio_read, gst_audio_seek, gst_audio_close, gst_audio_duration};
 
 /** \} */
 

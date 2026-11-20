@@ -33,6 +33,8 @@ pub struct ListState<S: ItemSource + 'static, P: Measurer + ItemPainter + 'stati
     last_frame: Option<Instant>,
     /// The range and count last reported by [`take_view_change`](Self::take_view_change).
     reported: Option<(std::ops::Range<usize>, usize)>,
+    /// The item under the pointer (see `VariableList::on_item_hover`).
+    pub(crate) hover: Option<usize>,
 }
 
 impl<S: ItemSource, P: Measurer + ItemPainter> Deref for ListState<S, P> {
@@ -52,7 +54,7 @@ impl<S: ItemSource, P: Measurer + ItemPainter> ListState<S, P> {
     /// An entity state for `list` (call inside `cx.new`).
     pub fn new(list: List<S, P>, cx: &mut Context<Self>) -> Self {
         let id = SharedString::from(format!("bui-vlist-{}", cx.entity().entity_id()));
-        Self { list, bounds: Bounds::default(), id, last_frame: None, reported: None }
+        Self { list, bounds: Bounds::default(), id, last_frame: None, reported: None, hover: None }
     }
 
     /// Called while rendering with the list's last bounds: resize, advance
@@ -104,6 +106,8 @@ impl<S: ItemSource, P: Measurer + ItemPainter> ListState<S, P> {
 
     /// Draw the laid-out frame into `p` (logical px, `b` = the element's box).
     pub(crate) fn draw(&self, b: Bounds<f32>, p: &mut crate::Painter, scale: f32) {
-        with_sink(p, b.origin, scale, |sink| self.list.paint(sink));
+        if self.bounds.size.width >= 1.0 {
+            with_sink(p, b.origin, scale, |sink| self.list.paint(sink));
+        }
     }
 }

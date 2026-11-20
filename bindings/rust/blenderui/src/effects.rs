@@ -6,16 +6,23 @@
 //! offscreen with the canvas' own item code (`BK_canvas_rasterize`), then
 //! filtered, clipped, masked, transformed and composited here, and drawn back
 //! as one image item. That works the same under the CPU and GPU renderers;
-//! results are cached by content, so a page that doesn't change costs
-//! nothing.
+//! results are cached by content relative to where the layer is, so a page
+//! that doesn't change costs nothing, nor does a layer that only moves.
+//!
+//! A transform that only moves and scales (no turn, skew or mirror) needs no
+//! pixels: what the element and its subtree paint is mapped through the
+//! matrix instead ([`Effects::vector`]), so scaled text stays vector text,
+//! drawn by the renderer at its size, and an animated scale costs what an
+//! animated colour does.
 //!
 //! The formulas are the W3C ones (Filter Effects 1, Compositing and Blending
 //! 1), which is what browsers implement. Blur is a three-pass box blur, the
-//! Gaussian approximation browsers use. Resampling is bilinear over
-//! premultiplied pixels, like Blender's `IMB_transform`.
+//! Gaussian approximation browsers use; a wide one runs on a smaller copy
+//! ([`blur`]). Resampling is bilinear over premultiplied pixels, like
+//! Blender's `IMB_transform`.
 
 use crate::color::Rgba;
-use crate::geometry::{Length, Units};
+use crate::geometry::{Bounds, Length, Units};
 use crate::style::{BoxEdge, Gradient, Pos};
 
 // ==========================================================================
@@ -200,12 +207,129 @@ pub struct Effects {
 }
 
 impl Effects {
-    /// Whether the element must be painted into its own layer.
-    pub fn needs_layer(&self) -> bool {
-        !self.filter.is_empty() || self.blend != Blend::Normal || self.clip_path.is_some()
-            || self.mask.as_ref().is_some_and(|m| m.image.is_some()) || !self.transform.is_empty()
-            || self.rotate != 0.0 || self.scale2.is_some()
+    /// Whether the element must be painted into its own layer (`b`: its box):
+    /// effects on pixels, or a transform that is more than a move and a scale.
+    pub fn needs_layer(&self, b: Bounds<f32>, u: &Units) -> bool {
+        self.needs_pixels() || (self.has_transform() && self.vector(b, u).is_none())
     }
+
+    /// Filters, blending, a clip path or a mask: they work on pixels.
+    pub fn needs_pixels(&self) -> bool {
+        !self.filter.is_empty() || self.blend != Blend::Normal || self.clip_path.is_some()
+            || self.mask.as_ref().is_some_and(|m| m.image.is_some())
+    }
+
+    /// `transform` (beyond translate), `rotate` or a non-uniform `scale`.
+    pub fn has_transform(&self) -> bool {
+        !self.transform.is_empty() || self.rotate != 0.0 || self.scale2.is_some()
+    }
+
+    /// The element's transform for box `b`, in logical pixels of the page,
+    /// about its `transform-origin` (identity: none).
+    pub fn matrix(&self, b: Bounds<f32>, u: &Units) -> Affine {
+        if !self.has_transform() {
+            return IDENTITY;
+        }
+        let mut m = IDENTITY;
+        if self.rotate != 0.0 {
+            m = mul(&m, &[self.rotate.cos(), self.rotate.sin(), -self.rotate.sin(), self.rotate.cos(), 0.0, 0.0]);
+        }
+        if let Some((sx, sy)) = self.scale2 {
+            m = mul(&m, &[sx, 0.0, 0.0, sy, 0.0, 0.0]);
+        }
+        if !self.transform.is_empty() {
+            m = mul(&m, &matrix_of(&self.transform, b.size.width, b.size.height, u));
+        }
+        let origin = self.origin.unwrap_or([Pos::CENTER; 2]);
+        let (ox, oy) = (b.origin.x + origin[0].at(b.size.width), b.origin.y + origin[1].at(b.size.height));
+        mul(&mul(&[1.0, 0.0, 0.0, 1.0, ox, oy], &m), &[1.0, 0.0, 0.0, 1.0, -ox, -oy])
+    }
+
+    /// The transform as a vector one: its matrix when it only moves and
+    /// scales (positive, axis-aligned) and nothing needs pixels; `None` for a
+    /// turn, a skew or a mirror, which take a layer.
+    pub fn vector(&self, b: Bounds<f32>, u: &Units) -> Option<Affine> {
+        if self.needs_pixels() || !self.has_transform() {
+            return None;
+        }
+        let m = self.matrix(b, u);
+        (m[1].abs() < AXIS_EPSILON && m[2].abs() < AXIS_EPSILON && m[0] > 0.0 && m[3] > 0.0).then_some(m)
+    }
+}
+
+/// How far off the axes a matrix may be and still move and scale only
+/// (rounding of a turn by 0 or 360 degrees).
+pub(crate) const AXIS_EPSILON: f32 = 1e-5;
+
+/// The shader that turns (rotates, skews, mirrors) a layer on the GPU: each
+/// pixel of the box goes back through the inverse matrix (`U[0..6]`, box
+/// pixels to texels, see [`turn_box`]) to the layer's texture, sampled
+/// bilinearly, the last half texel at its edges faded out (antialiasing),
+/// times the layer's opacity (`U[6]`). The texture holds premultiplied texels
+/// ([`turn_texture`]), so the bilinear mix is the CPU's; `input_color` takes
+/// texels as straight and multiplies by alpha again, which is undone here (a
+/// straight texture mixed bilinearly darkens the edges it fades out).
+#[doc(hidden)]
+pub const TURN_SHADER: &str = "vec4 effect(vec2 p) {
+    vec2 q = vec2(U[0] * p.x + U[2] * p.y + U[4], U[1] * p.x + U[3] * p.y + U[5]);
+    vec2 inside = clamp(min(q, input_size(0) - q) + 0.5, 0.0, 1.0);
+    vec4 c = input_color(0, q);
+    c.rgb = c.rgb / max(c.a, 0.000001);
+    return c * (inside.x * inside.y * U[6]);
+}";
+
+/// A BUI texture of a layer for [`TURN_SHADER`]: its premultiplied texels as
+/// they are (RGBA bytes), not made straight. 0 on failure.
+#[doc(hidden)]
+#[must_use]
+pub fn turn_texture(a: &Argb) -> i32 {
+    if a.w == 0 || a.h == 0 || a.px.len() < a.w * a.h {
+        return 0;
+    }
+    let rgba: Vec<u8> = a.px[..a.w * a.h].iter().flat_map(|&p| [(p >> 16) as u8, (p >> 8) as u8, p as u8, (p >> 24) as u8]).collect();
+    // SAFETY: `rgba` holds `w * h * 4` bytes, read during the call.
+    unsafe { crate::sys::BUI_texture_create(a.w as i32, a.h as i32, rgba.as_ptr().cast(), 0) }
+}
+
+/// Where a turned layer lands, and how a pixel of that box finds its texel:
+/// for a layer image of `size` pixels whose top left is `origin` (layer device
+/// pixels, `layer_scale` of them per logical pixel) turned by `m` (in layer
+/// device pixels), in a window of `scale` device pixels per logical one. The
+/// box in logical pixels, and the matrix of [`TURN_SHADER`] (box device pixels,
+/// from its corner, to texels). `None` for a matrix that flattens it.
+#[doc(hidden)]
+#[must_use]
+pub fn turn_box(origin: (f32, f32), size: (f32, f32), m: &Affine, layer_scale: f32, scale: f32)
+                -> Option<(Bounds<f32>, Affine)> {
+    let inverse = invert(m)?;
+    let (x0, y0, x1, y1) = (origin.0, origin.1, origin.0 + size.0, origin.1 + size.1);
+    let corners = [(x0, y0), (x1, y0), (x0, y1), (x1, y1)].map(|(x, y)| apply(m, x, y));
+    let (lx0, ly0) = corners.iter().fold((f32::MAX, f32::MAX), |(a, b), c| (a.min(c.0), b.min(c.1)));
+    let (lx1, ly1) = corners.iter().fold((f32::MIN, f32::MIN), |(a, b), c| (a.max(c.0), b.max(c.1)));
+    let at = crate::geometry::rect(lx0 / layer_scale, ly0 / layer_scale, (lx1 - lx0) / layer_scale, (ly1 - ly0) / layer_scale);
+    // a box pixel to layer device pixels, back through the matrix, then from
+    // the texture's corner
+    let to_layer = [layer_scale / scale, 0.0, 0.0, layer_scale / scale, lx0, ly0];
+    Some((at, mul(&mul(&[1.0, 0.0, 0.0, 1.0, -origin.0, -origin.1], &inverse), &to_layer)))
+}
+
+thread_local! {
+    /// Layers this thread rasterized (cache misses).
+    static DRAWN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A layer was rasterized (not found in the cache).
+pub(crate) fn count_layer() {
+    DRAWN.set(DRAWN.get() + 1);
+}
+
+/// How many layers this thread has rasterized and filtered so far (a layer
+/// found in the cache costs nothing and is not counted): for tests and
+/// benchmarks.
+#[doc(hidden)]
+#[must_use]
+pub fn layers_drawn() -> u64 {
+    DRAWN.get()
 }
 
 // ==========================================================================
@@ -315,6 +439,147 @@ impl Pixels {
         }
         o
     }
+
+    /// From premultiplied ARGB words (no division: both are premultiplied).
+    pub fn from_argb(a: &Argb) -> Pixels {
+        const K: f32 = 1.0 / 255.0;
+        let px = a.px.iter().map(|&p| {
+            [((p >> 16) & 255) as f32 * K, ((p >> 8) & 255) as f32 * K, (p & 255) as f32 * K, (p >> 24) as f32 * K]
+        }).collect();
+        Pixels { w: a.w, h: a.h, px }
+    }
+
+    /// To premultiplied ARGB words (a channel never above alpha).
+    pub fn to_argb(&self) -> Argb {
+        let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u32;
+        let px = self.px.iter().map(|p| {
+            let a = q(p[3]);
+            a << 24 | q(p[0]).min(a) << 16 | q(p[1]).min(a) << 8 | q(p[2]).min(a)
+        }).collect();
+        Argb { w: self.w, h: self.h, px }
+    }
+}
+
+/// Premultiplied ARGB words, row-major: the kit's image format, which a
+/// layer is rasterized to and drawn from (`BK_canvas_rasterize`,
+/// `BK_imbuf_from_argb`), with no conversion on either side. A layer whose
+/// filters are blurs stays in it end to end ([`blur_argb`]); other effects
+/// work on [`Pixels`].
+#[derive(Clone, Debug, Default)]
+pub struct Argb {
+    pub w: usize,
+    pub h: usize,
+    pub px: Vec<u32>,
+}
+
+impl Argb {
+    /// This raster at (`x`, `y`) in a transparent `w` x `h` one (the margin a
+    /// filter spreads into); clipped to it.
+    pub fn padded(&self, w: usize, h: usize, (x, y): (usize, usize)) -> Argb {
+        let mut out = Argb { w, h, px: vec![0; w * h] };
+        let cols = self.w.min(w.saturating_sub(x));
+        if cols == 0 || y >= h {
+            return out; // nothing of it lands inside
+        }
+        for (row, line) in self.px.chunks_exact(self.w).enumerate().take(h.saturating_sub(y)) {
+            out.px[(y + row) * w + x..][..cols].copy_from_slice(&line[..cols]);
+        }
+        out
+    }
+
+    /// Every channel times `o` (0..1): a layer's opacity.
+    pub fn fade(&mut self, o: f32) {
+        let k = (o.clamp(0.0, 1.0) * 256.0) as u32;
+        for p in &mut self.px {
+            // each byte times k / 256, all four at once in two lanes
+            let rb = (((*p & 0x00ff_00ff) * k) >> 8) & 0x00ff_00ff;
+            let ag = ((*p >> 8 & 0x00ff_00ff) * k) & 0xff00_ff00;
+            *p = ag | rb;
+        }
+    }
+}
+
+/// Gaussian blur of premultiplied ARGB with standard deviation `sigma`
+/// (device pixels): the three box blurs of [`blur`], in integers, as Ivan
+/// Kutskir's "fastest Gaussian blur" lays them out for SIMD. The four
+/// channels are split into planes of bytes; every pass runs down the
+/// columns, a whole row at a time (`sums[x] += row[y + r][x] - row[y - r -
+/// 1][x]`: straight loops over arrays, which the compiler vectorizes), with
+/// the division a multiply and a shift; the horizontal passes are the same
+/// passes on the transposed plane. The work per pixel does not grow with the
+/// radius. A wide blur runs on a smaller copy, as [`blur`] does.
+pub fn blur_argb(p: &mut Argb, sigma: f32) {
+    if sigma < 0.3 || p.w == 0 || p.h == 0 {
+        return;
+    }
+    if let Some(k) = downsample_factor(sigma, p.w, p.h) {
+        // the same path as `blur`: down, blur, up
+        let mut f = Pixels::from_argb(p);
+        blur_small(&mut f, sigma, k);
+        *p = f.to_argb();
+        return;
+    }
+    let (w, h) = (p.w, p.h);
+    let radii = boxes(sigma).map(|b| (b - 1) / 2);
+    let mut planes: [Vec<u8>; 4] = std::array::from_fn(|c| {
+        let shift = 24 - 8 * c;
+        p.px.iter().map(|&q| (q >> shift) as u8).collect()
+    });
+    let (mut tmp, mut sums) = (vec![0u8; w * h], Vec::new());
+    for plane in &mut planes {
+        for &r in &radii {
+            box_down(plane, &mut tmp, w, h, r, &mut sums);
+            std::mem::swap(plane, &mut tmp);
+        }
+        transpose(plane, &mut tmp, w, h);
+        for &r in &radii {
+            box_down(&tmp, plane, h, w, r, &mut sums);
+            std::mem::swap(plane, &mut tmp);
+        }
+        transpose(&tmp, plane, h, w);
+    }
+    for (i, q) in p.px.iter_mut().enumerate() {
+        *q = u32::from(planes[0][i]) << 24 | u32::from(planes[1][i]) << 16 | u32::from(planes[2][i]) << 8
+            | u32::from(planes[3][i]);
+    }
+}
+
+/// A box blur of radius `r` down the columns of a `w` x `h` plane
+/// (transparent beyond its ends), a row at a time over a row of sums.
+fn box_down(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize, sums: &mut Vec<u32>) {
+    // sum * mul >> 24 divides by the window: 255 * 2^24 still fits in u32
+    let mul = (1u32 << 24) / (2 * r as u32 + 1);
+    sums.clear();
+    sums.resize(w, 0);
+    let row = |y: usize| &src[y * w..(y + 1) * w];
+    for y in 0..=r.min(h - 1) {
+        sums.iter_mut().zip(row(y)).for_each(|(s, &v)| *s += u32::from(v));
+    }
+    for y in 0..h {
+        dst[y * w..(y + 1) * w].iter_mut().zip(sums.iter()).for_each(|(o, &s)| {
+            *o = ((s * mul + (1 << 23)) >> 24) as u8;
+        });
+        if y + r + 1 < h {
+            sums.iter_mut().zip(row(y + r + 1)).for_each(|(s, &v)| *s += u32::from(v));
+        }
+        if y >= r {
+            sums.iter_mut().zip(row(y - r)).for_each(|(s, &v)| *s -= u32::from(v));
+        }
+    }
+}
+
+/// `dst` (`h` x `w`) is `src` (`w` x `h`) transposed, in cache-sized tiles.
+fn transpose(src: &[u8], dst: &mut [u8], w: usize, h: usize) {
+    const TILE: usize = 32;
+    for y0 in (0..h).step_by(TILE) {
+        for x0 in (0..w).step_by(TILE) {
+            for y in y0..(y0 + TILE).min(h) {
+                for x in x0..(x0 + TILE).min(w) {
+                    dst[x * h + y] = src[y * w + x];
+                }
+            }
+        }
+    }
 }
 
 // -- filters ---------------------------------------------------------------------
@@ -372,9 +637,75 @@ fn box_pass(src: &[[f32; 4]], dst: &mut [[f32; 4]], w: usize, h: usize, r: usize
     }
 }
 
+/// From this sigma (device pixels) on, a blur runs on a smaller copy: the
+/// result is smooth enough that a box-filtered copy, blurred and scaled back
+/// up bilinearly, looks the same (what GPU "dual filter" blurs do). The work
+/// falls with the square of the factor: `blur(64px)` on a cover costs
+/// hundreds of times less.
+pub(crate) const DOWNSAMPLE_FROM: f32 = 6.0;
+/// The sigma the smaller copy is blurred at; the factor follows from it.
+pub(crate) const SMALL_SIGMA: f32 = 3.0;
+
+/// How many times smaller a blur of `sigma` runs on a `w` x `h` image (for
+/// [`blur`] and [`blur_argb`] alike); `None`: at full size.
+fn downsample_factor(sigma: f32, w: usize, h: usize) -> Option<usize> {
+    let k = (sigma / SMALL_SIGMA).floor() as usize;
+    (sigma >= DOWNSAMPLE_FROM && k >= 2 && w >= 2 * k && h >= 2 * k).then_some(k)
+}
+
 /// Gaussian blur with standard deviation `sigma` (device pixels).
 pub fn blur(p: &mut Pixels, sigma: f32) {
     if sigma < 0.3 || p.w == 0 || p.h == 0 {
+        return;
+    }
+    match downsample_factor(sigma, p.w, p.h) {
+        Some(k) => blur_small(p, sigma, k),
+        None => box_blur(p, sigma),
+    }
+}
+
+/// The blur of `sigma` on a copy `k` times smaller, scaled back up into `p`.
+fn blur_small(p: &mut Pixels, sigma: f32, k: usize) {
+    let mut small = downsample(p, k);
+    // the box filter down and the bilinear filter up blur too (variances
+    // (k^2 - 1) / 12 and k^2 / 6): the small copy takes what is left
+    let kf = k as f32;
+    let rest = (sigma * sigma - (kf * kf - 1.0) / 12.0 - kf * kf / 6.0).max(0.25).sqrt();
+    box_blur(&mut small, rest / kf);
+    upsample(&small, p, k);
+}
+
+/// `p` averaged over `k` x `k` blocks (transparent beyond its edges).
+fn downsample(p: &Pixels, k: usize) -> Pixels {
+    let (w, h) = (p.w.div_ceil(k), p.h.div_ceil(k));
+    let mut out = Pixels::new(w, h);
+    let norm = 1.0 / (k * k) as f32;
+    for (y, row) in p.px.chunks_exact(p.w).enumerate() {
+        let line = &mut out.px[(y / k) * w..(y / k + 1) * w];
+        for (x, px) in row.iter().enumerate() {
+            let o = &mut line[x / k];
+            for c in 0..4 {
+                o[c] += px[c] * norm;
+            }
+        }
+    }
+    out
+}
+
+/// `small` scaled up `k` times into `p`, bilinearly (block centres line up).
+fn upsample(small: &Pixels, p: &mut Pixels, k: usize) {
+    let inv = 1.0 / k as f32;
+    for y in 0..p.h {
+        let sy = (y as f32 + 0.5) * inv;
+        for x in 0..p.w {
+            p.px[y * p.w + x] = small.sample((x as f32 + 0.5) * inv, sy);
+        }
+    }
+}
+
+/// Gaussian blur as three box blurs, at full size.
+fn box_blur(p: &mut Pixels, sigma: f32) {
+    if sigma < 0.3 {
         return;
     }
     let mut tmp = vec![[0.0f32; 4]; p.px.len()];
@@ -622,4 +953,64 @@ pub fn transform(src: &Pixels, origin: (f32, f32), m: &Affine) -> Option<(Pixels
         }
     }
     Some((out, (minx, miny)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Pixels, blur, blur_argb, box_blur};
+
+    /// A wide blur on a smaller copy matches the full-size one, and takes a
+    /// fraction of the time.
+    #[test]
+    fn a_downsampled_blur_matches_the_full_one() {
+        let (w, h) = (240, 160);
+        let mut src = Pixels::new(w, h);
+        for (i, px) in src.px.iter_mut().enumerate() {
+            let (x, y) = (i % w, i / w);
+            // squares of colour, with sharp edges
+            if (x / 40 + y / 40) % 2 == 0 && (40..200).contains(&x) && (40..120).contains(&y) {
+                *px = [0.9, 0.3, 0.1, 1.0];
+            }
+        }
+        for sigma in [6.0, 12.0, 24.0] {
+            let (mut fast, mut exact) = (Pixels { w, h, px: src.px.clone() }, Pixels { w, h, px: src.px.clone() });
+            blur(&mut fast, sigma);
+            box_blur(&mut exact, sigma);
+            // away from the edges (both fade to transparent there, a little differently)
+            let m = (sigma * 2.0) as usize;
+            let worst = (m..h - m)
+                .flat_map(|y| (m..w - m).map(move |x| y * w + x))
+                .map(|i| (0..4).map(|c| (fast.px[i][c] - exact.px[i][c]).abs()).fold(0.0, f32::max))
+                .fold(0.0, f32::max);
+            assert!(worst < 0.04, "sigma {sigma}: off by {worst}");
+        }
+    }
+
+    /// The integer ARGB blur matches the float one (to rounding), and a
+    /// layer's opacity scales every channel.
+    #[test]
+    fn the_argb_blur_matches_the_float_one() {
+        let (w, h) = (90, 60);
+        let mut src = Pixels::new(w, h);
+        for (i, px) in src.px.iter_mut().enumerate() {
+            if (20..70).contains(&(i % w)) && (15..45).contains(&(i / w)) {
+                *px = [0.6, 0.2, 0.1, 0.8];
+            }
+        }
+        for sigma in [0.6, 1.5, 3.0, 5.0] {
+            let mut exact = Pixels { w, h, px: src.px.clone() };
+            box_blur(&mut exact, sigma);
+            let mut fast = src.to_argb();
+            blur_argb(&mut fast, sigma);
+            let fast = Pixels::from_argb(&fast);
+            let worst = fast.px.iter().zip(&exact.px)
+                .map(|(a, b)| (0..4).map(|c| (a[c] - b[c]).abs()).fold(0.0, f32::max))
+                .fold(0.0, f32::max);
+            assert!(worst < 0.02, "sigma {sigma}: off by {worst}");
+        }
+        let mut a = src.to_argb();
+        a.fade(0.5);
+        let p = Pixels::from_argb(&a).px[15 * w + 20];
+        assert!((p[3] - 0.4).abs() < 0.01 && (p[0] - 0.3).abs() < 0.01, "half of (0.6, 0.8): {p:?}");
+    }
 }

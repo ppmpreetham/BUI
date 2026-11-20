@@ -133,6 +133,8 @@ pub struct BKCanvasItem {
     pub effect_inputs: [c_int; BK_EFFECT_MAX_INPUTS],
     pub effect_floats: *const c_float,
     pub n_effect_floats: c_int,
+    /// `BK_ITEM_IMAGE`: how far the image is faded out, 0 (opaque, the default) to 1.
+    pub fade: c_float,
 }
 
 /// A `<video>` (`BKVideo`): the kit's player (OS decoders; frames in one GPU
@@ -148,6 +150,21 @@ pub const BK_VIDEO_PLAYING: c_int = 1;
 pub const BK_VIDEO_PAUSED: c_int = 2;
 pub const BK_VIDEO_ENDED: c_int = 3;
 pub const BK_VIDEO_ERROR: c_int = 4;
+
+/// A sound (`BKSound`): an audio file or url on the default output, decoded by
+/// the video backend's audio reader on the output's thread. UI-thread object.
+#[repr(C)]
+pub struct BKSound {
+    _private: [u8; 0],
+}
+
+/// `BK_SOUND_*` states (the same values as `BK_VIDEO_*`).
+pub const BK_SOUND_LOADING: c_int = 0;
+pub const BK_SOUND_PLAYING: c_int = 1;
+pub const BK_SOUND_PAUSED: c_int = 2;
+pub const BK_SOUND_ENDED: c_int = 3;
+pub const BK_SOUND_ERROR: c_int = 4;
+pub const BK_SOUND_NO_OUTPUT: c_int = 5;
 
 /// An animation stepped by the caller (`BKAnim`): GIF, animated WebP.
 #[repr(C)]
@@ -279,6 +296,8 @@ unsafe extern "C" {
     pub fn BK_imbuf_decode(data: *const c_void, len: usize, max_w: c_int, max_h: c_int) -> *mut BKImBuf;
     pub fn BK_imbuf_load(path: *const c_char, max_w: c_int, max_h: c_int) -> *mut BKImBuf;
     pub fn BK_imbuf_from_rgba(rgba: *const c_uchar, w: c_int, h: c_int, stride: c_int) -> *mut BKImBuf;
+    /// An image of premultiplied ARGB words (copied as they are).
+    pub fn BK_imbuf_from_argb(argb: *const u32, w: c_int, h: c_int) -> *mut BKImBuf;
     pub fn BK_imbuf_free(ib: *mut BKImBuf);
     pub fn BK_imbuf_size(ib: *const BKImBuf, r_w: *mut c_int, r_h: *mut c_int) -> c_int;
     pub fn BK_imbuf_pixels(ib: *const BKImBuf, frame: c_int) -> *const u32;
@@ -286,6 +305,8 @@ unsafe extern "C" {
     pub fn BK_imbuf_rgba(ib: *const BKImBuf, frame: c_int, dst: *mut c_uchar) -> c_int;
     pub fn BK_imbuf_texture(ib: *const BKImBuf, frame: c_int) -> c_int;
     pub fn BK_imbuf_texture_update(ib: *const BKImBuf, frame: c_int, tex: c_int) -> c_int;
+    /// A BUI texture of `w` x `h` RGBA bytes (`pitch` 0: `w * 4`; null: transparent); 0 on failure.
+    pub fn BUI_texture_create(w: c_int, h: c_int, rgba: *const c_void, pitch: c_int) -> c_int;
     /// Frees a BUI texture (`BK_imbuf_texture`, Dear ImGui user textures).
     pub fn BUI_texture_free(tex: c_int);
 
@@ -341,6 +362,16 @@ unsafe extern "C" {
     pub fn BK_video_texture(v: *mut BKVideo, tex: c_int, max_w: c_int, max_h: c_int) -> c_int;
     pub fn BK_node_set_video(node: *mut BKNode, v: *mut BKVideo, fit: c_int);
     pub fn BK_video_backends() -> *const c_char;
+    pub fn BK_sound_new(src: *const c_char) -> *mut BKSound;
+    pub fn BK_sound_free(s: *mut BKSound);
+    pub fn BK_sound_play(s: *mut BKSound);
+    pub fn BK_sound_pause(s: *mut BKSound);
+    pub fn BK_sound_seek(s: *mut BKSound, seconds: c_double);
+    pub fn BK_sound_set_volume(s: *mut BKSound, volume: c_double);
+    pub fn BK_sound_volume(s: *const BKSound) -> c_double;
+    pub fn BK_sound_state(s: *const BKSound) -> c_int;
+    pub fn BK_sound_time(s: *const BKSound) -> c_double;
+    pub fn BK_sound_duration(s: *const BKSound) -> c_double;
     /// Allocations made through MEM_* so far (allocations per frame, in benchmarks).
     pub fn MEM_get_allocations_total() -> usize;
     /// Blender's allocator counters (bui_core): bytes and blocks held through MEM_*.
@@ -369,10 +400,10 @@ unsafe extern "C" {
     pub fn BK_canvas_set_item(canvas: *mut BKNode, item: *const BKCanvasItem);
     pub fn BK_canvas_add_item(canvas: *mut BKNode, item: *const BKCanvasItem);
     pub fn BK_canvas_put_item(canvas: *mut BKNode, index: c_int, item: *const BKCanvasItem);
-    /// Offscreen: `items` (device pixels) drawn into a `w` x `h` straight-alpha
-    /// RGBA8 buffer whose top left is at (`x0`, `y0`). 1 on success.
+    /// Offscreen: `items` (device pixels) drawn into a `w` x `h` buffer of
+    /// premultiplied ARGB words whose top left is at (`x0`, `y0`). 1 on success.
     pub fn BK_canvas_rasterize(items: *const BKCanvasItem, n: c_int, x0: f32, y0: f32, w: c_int, h: c_int,
-                               rgba: *mut u8) -> c_int;
+                               argb: *mut u32) -> c_int;
     pub fn BK_canvas_truncate(canvas: *mut BKNode, count: c_int);
     pub fn BK_canvas_delete(canvas: *mut BKNode, id: c_int);
     pub fn BK_canvas_count(canvas: *mut BKNode) -> c_int;

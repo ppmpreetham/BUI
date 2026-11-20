@@ -31,13 +31,14 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "blenderui"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "blenderui-macros",
  "blenderui-sys",
  "blenderui-table",
  "blenderui-tailwind",
  "blenderui-vlist",
+ "foldhash",
  "paste",
  "smallvec",
  "taffy",
@@ -45,36 +46,36 @@ dependencies = [
 
 [[package]]
 name = "blenderui-macros"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "blenderui-tailwind",
 ]
 
 [[package]]
 name = "blenderui-paint"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "blenderui-sys"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cmake",
 ]
 
 [[package]]
 name = "blenderui-table"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "blenderui-paint",
 ]
 
 [[package]]
 name = "blenderui-tailwind"
-version = "0.5.0"
+version = "0.5.1"
 
 [[package]]
 name = "blenderui-vlist"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "blenderui-paint",
 ]
@@ -173,6 +174,12 @@ dependencies = [
  "miniz_oxide 0.9.1",
  "zlib-rs",
 ]
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "futures-core"

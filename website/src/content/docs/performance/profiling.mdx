@@ -24,6 +24,8 @@ BUI_PROFILE=1 node app.js
 
 Any value turns it on, even `0`; unset it to turn it off. When it's off, it costs one check per phase.
 
+**One slow frame hides in an average.** In Rust, `BUI_PROFILE=each` prints every frame on its own line, with its total, so a resize, a first open or a hitch shows as the frame it is.
+
 There are two kinds of output, depending on your app.
 
 ### Rust and JavaScript: per-phase times
@@ -48,6 +50,7 @@ Each … is an average in milliseconds. Phases that took no time are left out. I
 | `paint` | Building the display list |
 | `flush` | Handing the display list to the kit's canvas |
 | `widgets+hover` | Updating Blender widget nodes, and the rest of the frame |
+| `headless raster` | A headless `App::draw` rasterizing the frame (tests, screenshots). It runs after its frame's line was printed, so it lands on the next line, and it isn't in the total. |
 
 ### Windows native window: raster and present
 

@@ -21,7 +21,7 @@
 #include <string.h>
 
 /* Current text font (set_font); applies to Raster targets. */
-static char g_font_family[64] = "";
+static char g_font_family[256] = ""; /* a CSS list: as long as the raster's (BUI_raster_set_font) */
 static int g_font_flags = 0;
 
 /* -------------------------------------------------------------------- */

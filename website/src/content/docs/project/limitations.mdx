@@ -14,8 +14,7 @@ BUI has **no accessibility support**. It draws its own widgets and doesn't talk 
 
 ## Text
 
-- The font is Blender's Inter, embedded and drawn with FreeType. System fonts are used only with the Windows GDI text option.
-- There is no per-glyph font fallback yet, so a character the font doesn't have shows as a box.
+- The UI font is Blender's Inter, embedded and drawn with FreeType. Installed fonts are found by name. A character the font lacks is drawn from the rest of the `font-family` list, then from the system's fallback fonts for its script when one of them is installed and has it; otherwise it appears as a missing glyph. BUI doesn't search every installed font.
 - Input methods (IME) work on Windows only: composed input such as Japanese or Chinese works there, and isn't expected to work on Linux (X11) or macOS yet.
 - Right-to-left text is reordered but not shaped (Arabic joining), and there are no OpenType features.
 

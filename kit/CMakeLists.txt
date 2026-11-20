@@ -38,6 +38,9 @@ add_library(bui_kit STATIC
   intern/image/draw.c
   intern/image/video.c
   intern/image/movie.c
+  # sound (intern/audio): the player and BK_sound_*; silent without a device backend below
+  intern/audio/audio.c
+  intern/audio/sound.c
   # Blender's UI sources copied and edited for the kit (C++; see blender/bk_blender.h)
   intern/blender/interface_string_search.cc
   intern/blender/interface_utils.cc
@@ -95,7 +98,6 @@ endif()
 # when asked for (they link those libraries). Its sound plays on the OS's
 # audio output (intern/audio), loaded at run time too.
 if(BUI_VIDEO)
-  target_sources(bui_kit PRIVATE intern/audio/audio.c)
   if(WIN32)
     target_sources(bui_kit PRIVATE intern/image/movie_mf.c intern/audio/device_wasapi.c)
     target_compile_definitions(bui_kit PRIVATE BUI_VIDEO_MF BUI_AUDIO_WASAPI)

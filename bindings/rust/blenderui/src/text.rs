@@ -27,35 +27,22 @@ pub(crate) const FAMILY_SHIFT: i32 = 8;
 
 /// Families by id (0 = the UI font, ""), leaked: canvas items point at them.
 static FAMILIES: std::sync::Mutex<Vec<&'static std::ffi::CStr>> = std::sync::Mutex::new(Vec::new());
-/// Families registered with `add_font` / `@font-face` (lowercase).
-static REGISTERED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
-pub(crate) fn register_family(name: &str) {
-    let mut r = REGISTERED.lock().unwrap_or_else(|e| e.into_inner());
-    let n = name.to_ascii_lowercase();
-    if !r.contains(&n) {
-        r.push(n);
-    }
-}
-
-/// The id of a `font-family` list: its first registered family, else its
-/// first generic one, else its first entry (the engine finds installed
-/// fonts by name, and falls back to the UI font). 0 = the UI font.
+/// The id of a `font-family` list. The kit gets the list itself ("A,B,C"):
+/// the first family it finds (registered, installed by its own name, or
+/// generic) draws, and the others fill in the glyphs that one lacks, before
+/// the system's fallback fonts for the script. 0 = the UI font.
 pub(crate) fn font_id(list: &str) -> u16 {
-    let names: Vec<String> = list.split(',').map(|n| n.trim().trim_matches(['"', '\'']).trim().to_string())
-        .filter(|n| !n.is_empty()).collect();
-    let registered = REGISTERED.lock().unwrap_or_else(|e| e.into_inner());
-    let generic = |n: &str| match n.to_ascii_lowercase().as_str() {
-        "sans-serif" | "system-ui" | "ui-sans-serif" | "-apple-system" | "blinkmacsystemfont" | "inter" => Some(""),
-        "monospace" | "ui-monospace" => Some("monospace"),
-        "serif" | "ui-serif" => Some("serif"),
-        _ => None,
-    };
-    let pick = names.iter().find(|n| registered.contains(&n.to_ascii_lowercase())).cloned()
-        .or_else(|| names.iter().find_map(|n| generic(n)).map(str::to_string))
-        .or_else(|| names.first().cloned())
-        .unwrap_or_default();
-    drop(registered);
+    // browsers' names for the system's UI font, which neither text backend knows: as
+    // `system-ui`, which both do (a list of UI names alone is the UI font, below)
+    let names: Vec<&str> = list.split(',').map(|n| n.trim().trim_matches(['"', '\'']).trim())
+        .filter(|n| !n.is_empty())
+        .map(|n| if n.eq_ignore_ascii_case("-apple-system") || n.eq_ignore_ascii_case("blinkmacsystemfont") { "system-ui" } else { n })
+        .collect();
+    // the UI font (Inter) by its generic names
+    let ui = |n: &str| matches!(n.to_ascii_lowercase().as_str(),
+        "sans-serif" | "system-ui" | "ui-sans-serif" | "-apple-system" | "blinkmacsystemfont" | "inter");
+    let pick = if names.iter().all(|n| ui(n)) { String::new() } else { names.join(",") };
     if pick.is_empty() {
         return 0;
     }

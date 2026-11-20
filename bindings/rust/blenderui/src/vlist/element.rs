@@ -8,7 +8,7 @@
 
 use std::rc::Rc;
 
-use blenderui_vlist::{ChatStyle, Hit, ItemPainter, ItemSource, List, Measurer, VecSource};
+use blenderui_vlist::{ChatStyle, Hit, ItemPainter, ItemSource, List, Measurer, VecSource, SCROLLBAR_WIDTH};
 
 use super::state::{ListState, ViewInfo};
 use crate::css::Decl;
@@ -18,6 +18,7 @@ use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement
 
 type Listener<S, P> = Rc<dyn Fn(usize, &mut List<S, P>)>;
 type HitListener<S, P> = Rc<dyn Fn(usize, u32, &mut List<S, P>)>;
+type HoverListener<S, P> = Rc<dyn Fn(Option<usize>, &mut List<S, P>)>;
 
 /// The press handlers of a list.
 struct Handlers<S: ItemSource, P: Measurer + ItemPainter> {
@@ -38,11 +39,13 @@ pub struct VariableList<S: ItemSource + 'static, P: Measurer + ItemPainter + 'st
     on_item_click: Option<Listener<S, P>>,
     on_item_hit: Option<HitListener<S, P>>,
     on_view_change: Option<Rc<dyn Fn(&ViewInfo)>>,
+    on_copy: Option<Rc<dyn Fn(&ListState<S, P>) -> Option<String>>>,
+    on_item_hover: Option<HoverListener<S, P>>,
 }
 
 /// The element for a list state.
 pub fn variable_list<S: ItemSource, P: Measurer + ItemPainter>(state: &Entity<ListState<S, P>>) -> VariableList<S, P> {
-    VariableList { state: *state, base: div().relative().overflow_hidden().size_full(), on_item_click: None, on_item_hit: None, on_view_change: None }
+    VariableList { state: *state, base: div().relative().overflow_hidden().size_full(), on_item_click: None, on_item_hit: None, on_view_change: None, on_copy: None, on_item_hover: None }
 }
 
 /// A chat: a [`VariableList`] over a [`ChatList`] where a click selects a
@@ -75,6 +78,20 @@ impl<S: ItemSource, P: Measurer + ItemPainter> VariableList<S, P> {
         self.on_item_hit = Some(Rc::new(f));
         self
     }
+
+    /// The pointer moved onto another item, or left the list (`None`). The closure may change the list; only a repaint follows.
+    #[must_use]
+    pub fn on_item_hover(mut self, f: impl Fn(Option<usize>, &mut List<S, P>) + 'static) -> Self {
+        self.on_item_hover = Some(Rc::new(f));
+        self
+    }
+
+    /// Ctrl+C: the text to put on the clipboard (`None`: nothing is selected).
+    #[must_use]
+    pub fn on_copy(mut self, f: impl Fn(&ListState<S, P>) -> Option<String> + 'static) -> Self {
+        self.on_copy = Some(Rc::new(f));
+        self
+    }
 }
 
 impl<S: ItemSource, P: Measurer + ItemPainter> Styled for VariableList<S, P> {
@@ -85,24 +102,31 @@ impl<S: ItemSource, P: Measurer + ItemPainter> Styled for VariableList<S, P> {
 
 impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P> {
     fn into_any_element(self) -> AnyElement {
-        let VariableList { state, base, on_item_click, on_item_hit, on_view_change } = self;
+        let VariableList { state, base, on_item_click, on_item_hit, on_view_change, on_copy, on_item_hover } = self;
         let el = base.defer(move |window, cx, el| {
             let id = state.read(cx).id.clone();
             let known = window.bounds_of(&id);
             let bounds = known.unwrap_or_default();
             let scale = window.scale_factor();
-            let (changed, view) = state.update(cx, |s, _| {
-                let moved = known.is_none() || s.bounds != bounds;
-                s.sync(bounds, scale, window);
-                (moved, s.take_view_change())
-            });
-            if changed {
-                window.refresh(); // placed for the first time or resized: lay out once more with the size
-            }
-            if let (Some(f), Some(info)) = (&on_view_change, view) {
-                f(&info);
-            }
-            let (down, mv, up, wh, key) = (state, state, state, state, state);
+            state.update(cx, |s, _| s.sync(bounds, scale, window));
+            // this frame's placement is only known after layout: the list fits it then, before anything is
+            // painted, and the range it paints is the one reported (outside the entity's borrow)
+            let (after, after_id) = (state, id.clone());
+            super::after_layout(Box::new(move |frame, window, cx| {
+                let placed = frame.by_key().get(&crate::layout::id_key(&after_id)).map(|&i| frame.nodes[i].bounds);
+                let scale = window.scale_factor();
+                let view = after.update(cx, |s, _| {
+                    if let Some(placed) = placed.filter(|p| s.bounds != *p) {
+                        s.sync(placed, scale, window);
+                    }
+                    s.take_view_change()
+                });
+                if let (Some(f), Some(info)) = (&on_view_change, view) {
+                    f(&info);
+                }
+            }));
+            let (down, mv, up, wh, key, leave) = (state, state, state, state, state, state);
+            let (hover_move, hover_leave) = (on_item_hover.clone(), on_item_hover);
             let handlers = Handlers { click: on_item_click, hit: on_item_hit };
             let taken = std::mem::replace(el, Div::new("div"));
             *el = taken
@@ -116,20 +140,45 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                     w.refresh();
                 })
                 .on_mouse_move(move |e, w, cx| {
-                    let moved = mv.update(cx, |s, _| {
+                    let (moved, hovered) = mv.update(cx, |s, _| {
                         let y = e.position.y.0 - s.bounds.origin.y;
                         if e.pressed_button.is_none() {
                             s.pointer_up();
-                            false
+                            let x = e.position.x.0 - s.bounds.origin.x;
+                            let over = if x < s.bounds.size.width - SCROLLBAR_WIDTH { s.view.item_at(y) } else { None };
+                            let changed = s.hover != over;
+                            if changed {
+                                s.hover = over;
+                                if let Some(f) = &hover_move {
+                                    f(over, s);
+                                }
+                            }
+                            (false, changed)
                         } else {
-                            s.pointer_move(y)
+                            (s.pointer_move(y), false)
                         }
                     });
                     if moved {
                         w.refresh();
+                    } else if hovered {
+                        w.repaint();
                     }
                 })
                 .on_mouse_up(MouseButton::Left, move |_, _, cx| up.update(cx, |s, _| s.pointer_up()))
+                .on_hover(move |inside, w, cx| {
+                    if !*inside {
+                        let left = leave.update(cx, |s, _| {
+                            let had = s.hover.take().is_some();
+                            if had && let Some(f) = &hover_leave {
+                                f(None, s);
+                            }
+                            had
+                        });
+                        if left {
+                            w.repaint();
+                        }
+                    }
+                })
                 .on_scroll_wheel(move |e, w, cx| {
                     wh.update(cx, |s, _| {
                         // Blender's wheel scrolls at once, a notch or a touchpad fraction alike: no easing
@@ -139,6 +188,12 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                     w.request_animation_frame();
                 })
                 .on_key_down(move |e, w, cx| {
+                    if e.keystroke.modifiers.control && e.keystroke.key.eq_ignore_ascii_case("c") {
+                        if let Some(text) = on_copy.as_ref().and_then(|f| f(key.read(cx))) {
+                            w.write_clipboard(&text);
+                        }
+                        return;
+                    }
                     let handled = key.update(cx, |s, _| s.key(&e.keystroke.key, LINE_PX));
                     if handled {
                         w.request_animation_frame();

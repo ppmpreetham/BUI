@@ -112,8 +112,11 @@ name.get();                          // a clone of the value (T: Clone)
 name.with(|n| n.len());              // look without cloning
 name.set("Sphere".into());           // replace, then re-render
 name.update(|n| n.push_str(".001")); // change in place, then re-render
+name.update_untracked(|n| n.clear()); // change in place, no re-render
 let (read, write) = name.split();    // Leptos-style halves
 ```
+
+`update_untracked` is for values no view shows, such as when the user last scrolled, written from an event handler on every event without a render each time.
 
 `ReadSignal` has `get` and `with`; `WriteSignal` has `set` and `update`.
 

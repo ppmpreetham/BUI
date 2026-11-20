@@ -2,6 +2,7 @@
 //! canvas. [`Painter`] is also what `canvas(|bounds, painter| ...)` draws with.
 
 use std::collections::HashMap;
+use std::hash::Hasher;
 use std::sync::Arc;
 
 use taffy::prelude::*;
@@ -47,6 +48,15 @@ impl Image {
         }
         // SAFETY: `rgba` holds the `width * height * 4` bytes the kit reads.
         Self::wrap(unsafe { sys::BK_imbuf_from_rgba(rgba.as_ptr(), width as i32, height as i32, 0) })
+    }
+
+    /// An image of premultiplied ARGB words (a layer's), copied as they are.
+    pub(crate) fn from_argb(a: &crate::effects::Argb) -> Option<Self> {
+        if a.w == 0 || a.h == 0 || a.px.len() < a.w * a.h {
+            return None;
+        }
+        // SAFETY: `a.px` holds the `w * h` words the kit reads.
+        Self::wrap(unsafe { sys::BK_imbuf_from_argb(a.px.as_ptr(), a.w as i32, a.h as i32) })
     }
 
     /// Decode an encoded image, fitted within `max_w` x `max_h` (0: no limit;
@@ -250,6 +260,11 @@ struct EffectItem {
     inputs: [i32; sys::BK_EFFECT_MAX_INPUTS],
     floats: Vec<f32>,
     fallback: Option<Arc<Image>>,
+    /// A texture of the painter's own among the inputs (a turned layer's): held for as long as
+    /// a display list draws it, not only while the layer cache keeps it (another window's
+    /// paints can drop it from the cache while this one's list is still shown). Never read.
+    #[allow(dead_code)]
+    texture: Option<Arc<Texture>>,
 }
 
 /// Coordinates: up to four inline (rects, ovals, text, images), more on the heap.
@@ -381,7 +396,7 @@ impl Painter {
             return Some([c[0], c[1], c[0] + len as f32 * size, c[1] + size * 1.5]);
         }
         let (mut x0, mut y0, mut x1, mut y1) = (c[0], c[1], c[0], c[1]);
-        for xy in c.chunks_exact(2) {
+        for xy in c.as_chunks::<2>().0 {
             x0 = x0.min(xy[0]);
             x1 = x1.max(xy[0]);
             y0 = y0.min(xy[1]);
@@ -410,6 +425,17 @@ impl Painter {
         if !self.retained || self.ranges.len() != frame.nodes.len() || self.text.len() > 2 * self.text_full + 4096 {
             return false;
         }
+        // a scale that moved on is a new matrix for the box and all under it
+        with_scratch(|s| self.repaint_with(&mut s.mats, frame, styles, tc, dirty, vp, app))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn repaint_with(&mut self, mats: &mut Mats, frame: &Frame, styles: &StyleStore, tc: &mut TextCache,
+                    dirty: &[bool], vp: (f32, f32), app: &crate::window::App) -> bool {
+        vector_mats(frame, styles, vp, mats);
+        if mats.layered {
+            return false;
+        }
         self.changed.clear();
         for (i, _) in dirty.iter().enumerate().filter(|(_, d)| **d) {
             let (start, end) = self.ranges[i];
@@ -419,6 +445,7 @@ impl Painter {
                 self.opacity = n.opacity;
                 self.clip = n.clip;
                 paint_node(frame, styles, tc, i, self, vp, app);
+                mats.map(self, at, i);
             }
             let painted = (self.items.len() - at) as u32;
             let had = if start == u32::MAX { 0 } else { end - start };
@@ -435,6 +462,69 @@ impl Painter {
         self.clip = None;
         self.partial = true;
         true
+    }
+
+    /// Map the items from `from` on through `m`, a move and a scale (see
+    /// [`Effects::vector`](crate::effects::Effects::vector)): their points,
+    /// text sizes, corner radii and line widths, and their clips ([`clip_through`]).
+    fn map_items(&mut self, from: usize, m: &crate::effects::Affine, outer: OuterClip) {
+        let (sx, sy) = (m[0], m[3]);
+        let mean = (sx + sy) * 0.5;
+        for it in &mut self.items[from..] {
+            match &mut it.coords {
+                Coords::Inline(a, n) => map_points(&mut a[..*n as usize], m),
+                Coords::Heap(v) => map_points(v, m),
+            }
+            match &mut it.kind {
+                Kind::Rect { radius, width, .. } => {
+                    *radius *= sx.min(sy);
+                    *width *= mean;
+                }
+                Kind::Oval { width, .. } | Kind::Line { width } => *width *= mean,
+                // anchored at its top left: the size follows the height
+                Kind::Text { size, .. } => *size *= sy,
+                _ => {}
+            }
+            it.clip = clip_through(it.clip, m, outer);
+        }
+    }
+
+    /// Leave out of the items the clip `outer` (a layer's own, applied when
+    /// its image is drawn).
+    fn unclip(&mut self, outer: Option<Bounds<f32>>) {
+        for it in self.items.iter_mut().filter(|it| outer.is_some() && it.clip == outer) {
+            it.clip = None;
+        }
+    }
+
+    /// The area the items cover: their points (with half a stroke and a pixel
+    /// of antialiasing around a stroked one), and text by its measured width
+    /// and line (`None`: no items). What a layer must rasterize: not the boxes
+    /// it sits in, which may be wider than anything drawn.
+    fn extent(&self, tc: &mut TextCache) -> Option<Bounds<f32>> {
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for it in &self.items {
+            let xy = it.coords.as_slice();
+            if let (Kind::Text { start, size, flags }, [x, y, ..]) = (&it.kind, xy) {
+                let t = &self.text[*start as usize..];
+                let t = std::str::from_utf8(&t[..t.iter().position(|&b| b == 0).unwrap_or(t.len())]).unwrap_or("");
+                // a quarter of the size around: italic overhang, synthetic bold, descenders
+                let pad = size * TEXT_INK_PAD;
+                let w = tc.width(t, *size, *flags);
+                (x0, y0, x1, y1) = (x0.min(x - pad), y0.min(y - pad), x1.max(x + w + pad), y1.max(y + size * TEXT_LINE + pad));
+                continue;
+            }
+            let stroke = match it.kind {
+                Kind::Line { width } | Kind::Oval { width, .. } | Kind::Rect { width, .. } if width > 0.0 => {
+                    width * 0.5 + 1.0
+                }
+                _ => 0.0,
+            };
+            for p in xy.as_chunks::<2>().0 {
+                (x0, y0, x1, y1) = (x0.min(p[0] - stroke), y0.min(p[1] - stroke), x1.max(p[0] + stroke), y1.max(p[1] + stroke));
+            }
+        }
+        (x0 <= x1).then(|| rect(x0, y0, x1 - x0, y1 - y0))
     }
 
     fn push(&mut self, kind: Kind, coords: Coords, fill: Rgba) {
@@ -519,9 +609,9 @@ impl Painter {
         }
     }
 
-    /// An image scaled to `bounds`.
+    /// An image scaled to `bounds` (at the painter's opacity: its fill's alpha).
     pub fn image(&mut self, bounds: Bounds<f32>, image: &Arc<Image>) {
-        self.push(Kind::Image(image.clone()), Self::corners(bounds), Rgba::TRANSPARENT);
+        self.push(Kind::Image(image.clone()), Self::corners(bounds), Rgba { r: 0.0, g: 0.0, b: 0.0, a: 1.0 });
     }
 
     /// An image file (any format the kit reads) scaled to `bounds`. It
@@ -569,12 +659,18 @@ impl Painter {
     /// change every frame repaint the canvas every frame.
     pub fn effect(&mut self, bounds: Bounds<f32>, effect: &ShaderEffect, inputs: &[i32], floats: &[f32],
                   fallback: Option<&Arc<Image>>) {
+        self.effect_holding(bounds, effect, inputs, floats, fallback, None);
+    }
+
+    /// [`Painter::effect`], the item holding `texture` (one of `inputs`) while it is drawn.
+    fn effect_holding(&mut self, bounds: Bounds<f32>, effect: &ShaderEffect, inputs: &[i32], floats: &[f32],
+                      fallback: Option<&Arc<Image>>, texture: Option<Arc<Texture>>) {
         let mut slots = [0; sys::BK_EFFECT_MAX_INPUTS];
         for (slot, id) in slots.iter_mut().zip(inputs) {
             *slot = *id;
         }
         let floats = floats[..floats.len().min(ShaderEffect::MAX_FLOATS)].to_vec();
-        let item = EffectItem { id: effect.id(), inputs: slots, floats, fallback: fallback.cloned() };
+        let item = EffectItem { id: effect.id(), inputs: slots, floats, fallback: fallback.cloned(), texture };
         self.push(Kind::Effect(Box::new(item)), Self::corners(bounds), Rgba::TRANSPARENT);
     }
 
@@ -652,6 +748,9 @@ impl Painter {
                 ci.type_ = sys::BK_ITEM_IMAGE;
                 ci.imbuf = img.as_ptr();
                 ci.fit = sys::BK_FIT_FILL;
+                // the fill carries the image's opacity, which it is drawn at
+                ci.fade = 1.0 - it.fill.a;
+                ci.fill = [0.0; 4];
             }
             Kind::Video(v, fit) => {
                 ci.type_ = sys::BK_ITEM_IMAGE;
@@ -737,9 +836,17 @@ impl Painter {
     }
 
     /// Draw the items offscreen into a `w` x `h` device-pixel region whose
-    /// top left is (`x0`, `y0`) (CSS effects).
+    /// top left is (`x0`, `y0`) (CSS effects), as floats for the effects
+    /// that work on them.
     pub(crate) fn rasterize(&self, scale: f32, x0: f32, y0: f32, w: usize, h: usize)
                             -> Option<crate::effects::Pixels> {
+        self.rasterize_argb(scale, x0, y0, w, h).map(|a| crate::effects::Pixels::from_argb(&a))
+    }
+
+    /// [`rasterize`](Self::rasterize) as premultiplied ARGB words: the kit's
+    /// image format, kept end to end by a layer that only blurs.
+    pub(crate) fn rasterize_argb(&self, scale: f32, x0: f32, y0: f32, w: usize, h: usize)
+                                 -> Option<crate::effects::Argb> {
         if w == 0 || h == 0 || w > 8192 || h > 8192 {
             return None;
         }
@@ -756,22 +863,26 @@ impl Painter {
         for (ci, c) in items.iter_mut().zip(&coords) {
             ci.coords = c.as_ptr();
         }
-        let mut rgba = vec![0u8; w * h * 4];
+        let mut px = vec![0u32; w * h];
         // SAFETY: `items` point into `coords`, `keep` and `self.text`, all alive here.
         let ok = unsafe {
             sys::BK_canvas_rasterize(items.as_ptr(), items.len() as i32, x0, y0, w as i32, h as i32,
-                                     rgba.as_mut_ptr())
+                                     px.as_mut_ptr())
         };
         drop(keep);
-        (ok != 0).then(|| crate::effects::Pixels::from_rgba8(w, h, &rgba))
+        (ok != 0).then_some(crate::effects::Argb { w, h, px })
     }
 
-    /// A hash of everything drawn (layer caching).
-    fn content_hash(&self, h: &mut impl std::hash::Hasher) {
+    /// A hash of everything drawn into a layer over `area` (layer caching),
+    /// placed relative to (`dx`, `dy`) to 1/64 px: the same content moved
+    /// hashes the same. A clip that holds all of `area` cuts nothing, so it
+    /// is left out (a layer moving under a still clip stays the same).
+    fn content_hash(&self, h: &mut impl std::hash::Hasher, area: Bounds<f32>, dx: f32, dy: f32) {
         use std::hash::Hash;
         for it in &self.items {
-            for v in it.coords.as_slice() {
-                v.to_bits().hash(h);
+            for xy in it.coords.as_slice().chunks(2) {
+                quantize(xy[0] - dx).hash(h);
+                xy.get(1).map(|y| quantize(y - dy)).hash(h);
             }
             it.fill.to_array().map(f32::to_bits).hash(h);
             match &it.kind {
@@ -797,8 +908,9 @@ impl Painter {
                     e.floats.iter().for_each(|v| v.to_bits().hash(h));
                 }
             }
-            if let Some(c) = it.clip {
-                (c.origin.x.to_bits(), c.origin.y.to_bits(), c.size.width.to_bits(), c.size.height.to_bits()).hash(h);
+            if let Some(c) = it.clip.filter(|c| c.intersect(&area) != area) {
+                (quantize(c.origin.x - dx), quantize(c.origin.y - dy), quantize(c.size.width),
+                 quantize(c.size.height)).hash(h);
             }
         }
     }
@@ -833,16 +945,27 @@ fn radius_px(c: &Computed, b: Bounds<f32>, vp: (f32, f32)) -> f32 {
 /// per logical pixel (for elements whose effects work on pixels).
 pub(crate) fn paint_frame(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, p: &mut Painter,
                           vp: (f32, f32), scale: f32, app: &crate::window::App) {
-    let mut order: Vec<usize> = (0..frame.nodes.len()).collect();
+    with_scratch(|s| paint_frame_with(s, frame, styles, tc, p, vp, scale, app));
+    p.opacity = 1.0;
+    p.clip = None;
+}
+
+/// [`paint_frame`] with the paint's buffers.
+#[allow(clippy::too_many_arguments)]
+fn paint_frame_with(s: &mut PaintScratch, frame: &Frame, styles: &StyleStore, tc: &mut TextCache, p: &mut Painter,
+                    vp: (f32, f32), scale: f32, app: &crate::window::App) {
+    let PaintScratch { order, mats, done, tour, subs } = s;
+    order.clear();
+    order.extend(0..frame.nodes.len());
     if frame.nodes.iter().any(|n| styles[n.style].z_index.is_some()) {
-        order.sort_by_key(|&i| frame.z_of(i, styles)); // stable: tree order within a level
+        order.sort_by_cached_key(|&i| frame.z_of(i, styles)); // stable: tree order within a level
     }
-    let has_effects = frame.nodes.iter().any(|n| styles[n.style].effects.is_some());
-    if !has_effects {
+    vector_mats(frame, styles, vp, mats);
+    if !mats.layered {
         // each box's items, for redraws that paint only what moved
         p.ranges.clear();
         p.ranges.resize(frame.nodes.len(), (u32::MAX, 0));
-        for i in order {
+        for &i in order.iter() {
             let n = &frame.nodes[i];
             if !n.visible || n.opacity <= 0.0 {
                 continue;
@@ -852,20 +975,46 @@ pub(crate) fn paint_frame(frame: &Frame, styles: &StyleStore, tc: &mut TextCache
             if matches!(n.content, Content::Widget(_)) {
                 p.note_widget(n.key, n.clip.map_or(n.bounds, |c| c.intersect(&n.bounds)));
             }
-            let start = p.items.len() as u32;
+            let start = p.items.len();
             paint_node(frame, styles, tc, i, p, vp, app);
-            p.ranges[i] = (start, p.items.len() as u32);
+            mats.map(p, start, i);
+            p.ranges[i] = (start as u32, p.items.len() as u32);
         }
         // redraws that paint only what moved: one canvas only (items map to canvas slots)
         p.retained = p.segments.is_empty();
         p.text_full = p.text.len();
     } else {
-        let mut cx = LayerCx { frame, styles, tc, vp, scale, app, done: vec![false; frame.nodes.len()] };
-        paint_list(&mut cx, &order, p, None, 1.0);
+        done.clear();
+        done.resize(frame.nodes.len(), false);
+        tour.build(frame);
+        let mut cx = LayerCx { frame, styles, tc, vp, scale, app, done, mats, tour, subs };
+        paint_list(&mut cx, order, p, None, 1.0);
         LAYERS.with(|l| l.borrow_mut().end_frame());
     }
-    p.opacity = 1.0;
-    p.clip = None;
+}
+
+/// Buffers a paint fills, kept between paints so a frame allocates none of them.
+#[derive(Default)]
+struct PaintScratch {
+    order: Vec<usize>,
+    mats: Mats,
+    done: Vec<bool>,
+    tour: Tour,
+    /// The boxes of the layers being painted (one list per nesting level).
+    subs: Vec<Vec<usize>>,
+}
+
+thread_local! {
+    static SCRATCH: std::cell::RefCell<PaintScratch> = std::cell::RefCell::new(PaintScratch::default());
+}
+
+/// `f` with the paint buffers (taken out while it runs: a paint inside a
+/// paint gets fresh ones).
+fn with_scratch<R>(f: impl FnOnce(&mut PaintScratch) -> R) -> R {
+    let mut s = SCRATCH.with(|c| std::mem::take(&mut *c.borrow_mut()));
+    let r = f(&mut s);
+    SCRATCH.with(|c| *c.borrow_mut() = s);
+    r
 }
 
 struct LayerCx<'a> {
@@ -875,44 +1024,295 @@ struct LayerCx<'a> {
     vp: (f32, f32),
     scale: f32,
     app: &'a crate::window::App,
-    done: Vec<bool>,
+    done: &'a mut Vec<bool>,
+    mats: &'a Mats,
+    tour: &'a Tour,
+    subs: &'a mut Vec<Vec<usize>>,
 }
 
-/// Rendered layers by content hash, kept while they're used (frames that
-/// don't change reuse them: no rasterizing, no filtering).
+/// Each box's vector transform: its own move and scale and its ancestors'
+/// ([`Effects::vector`](crate::effects::Effects::vector)), applied to what it
+/// paints; the clip from outside its nearest transformed ancestor (that one
+/// stays put); and whether some box needs a pixel layer.
 #[derive(Default)]
-struct LayerCache {
-    map: HashMap<u64, (Arc<Image>, Bounds<f32>, bool)>,
+struct Mats {
+    m: Vec<crate::effects::Affine>,
+    outer: Vec<OuterClip>,
+    /// Boxes whose move and scale goes through a pixel layer all the same: a
+    /// non-uniform scale over text (a text item scales by one size).
+    pixel: Vec<bool>,
+    /// Whether each box's subtree draws text (the buffer of [`vector_mats`]).
+    text: Vec<bool>,
+    layered: bool,
 }
 
-impl LayerCache {
-    fn get(&mut self, k: u64) -> Option<(Arc<Image>, Bounds<f32>)> {
+/// The clip from outside a box's nearest transformed ancestor: as layout gave
+/// it (`.0`, what its items carry) and where it draws (`.1`: through the
+/// transforms above that ancestor, not through the ancestor's own).
+type OuterClip = (Option<Bounds<f32>>, Option<Bounds<f32>>);
+
+/// Where clip `c` of an item drawn through `m` draws: the outer clip where it
+/// draws; a clip made inside the transformed boxes through `m`, within it.
+fn clip_through(c: Option<Bounds<f32>>, m: &crate::effects::Affine, outer: OuterClip) -> Option<Bounds<f32>> {
+    if c == outer.0 {
+        return outer.1;
+    }
+    let mapped = map_rect(c?, m);
+    Some(outer.1.map_or(mapped, |o| mapped.intersect(&o)))
+}
+
+impl Mats {
+    /// Map what box `i` painted (the items from `from` on).
+    fn map(&self, p: &mut Painter, from: usize, i: usize) {
+        if self.m[i] != crate::effects::IDENTITY {
+            p.map_items(from, &self.m[i], self.outer[i]);
+        }
+    }
+}
+
+/// The effects of box `i`, when it owns them (see [`owns_style`](crate::layout::owns_style)).
+fn effects_of<'s>(frame: &Frame, styles: &'s StyleStore, i: usize) -> Option<&'s crate::effects::Effects> {
+    let n = &frame.nodes[i];
+    if crate::layout::owns_style(&n.content) { styles[n.style].effects.as_deref() } else { None }
+}
+
+fn vector_mats(frame: &Frame, styles: &StyleStore, vp: (f32, f32), out: &mut Mats) {
+    use crate::effects::{mul, IDENTITY};
+    let nodes = &frame.nodes;
+    out.m.clear();
+    out.outer.clear();
+    out.pixel.clear();
+    out.layered = false;
+    // children come after their parents: backwards, a subtree's text reaches its root
+    out.text.clear();
+    out.text.resize(nodes.len(), false);
+    for (i, n) in nodes.iter().enumerate().rev() {
+        let text = out.text[i] || matches!(n.content, Content::Word { .. } | Content::Text(_));
+        if let Some(p) = n.parent {
+            out.text[p] |= text;
+        }
+        out.text[i] = text;
+    }
+    for (i, n) in nodes.iter().enumerate() {
+        // parents come before their children
+        let (mut m, mut outer) = n.parent.and_then(|p| Some((*out.m.get(p)?, out.outer[p]))).unwrap_or((IDENTITY, (None, None)));
+        if let Some(e) = effects_of(frame, styles, i) {
+            let u = Units { font_size: styles[n.style].font_size, viewport: vp };
+            out.layered |= !e.backdrop.is_empty() || e.needs_layer(n.bounds, &u);
+            let vector = e.vector(n.bounds, &u);
+            let pixel = out.text[i] && vector.is_some_and(|v| (v[0] - v[3]).abs() > crate::effects::AXIS_EPSILON);
+            out.layered |= pixel;
+            out.pixel.push(pixel);
+            if let Some(own) = vector.filter(|_| !pixel) {
+                // its clip draws through the transforms above it, not its own
+                outer = (n.clip, clip_through(n.clip, &m, outer));
+                m = mul(&m, &own);
+            }
+        }
+        else {
+            out.pixel.push(false);
+        }
+        out.m.push(m);
+        out.outer.push(outer);
+    }
+}
+
+/// Points (x, y pairs) through `m`.
+fn map_points(xy: &mut [f32], m: &crate::effects::Affine) {
+    for p in xy.as_chunks_mut::<2>().0 {
+        (p[0], p[1]) = crate::effects::apply(m, p[0], p[1]);
+    }
+}
+
+/// A rectangle through `m` (a move and a scale: it stays a rectangle).
+fn map_rect(b: Bounds<f32>, m: &crate::effects::Affine) -> Bounds<f32> {
+    let (x0, y0) = crate::effects::apply(m, b.origin.x, b.origin.y);
+    let (x1, y1) = crate::effects::apply(m, b.origin.x + b.size.width, b.origin.y + b.size.height);
+    rect(x0.min(x1), y0.min(y1), (x1 - x0).abs(), (y1 - y0).abs())
+}
+
+/// How many paints a layer result is kept without being used. More than one:
+/// a frame can be painted more than once (a hover, a selection), and a paint
+/// that finds a layer's image never asks for its raster, which the next
+/// frame of a turn or a fade needs again.
+const KEEP_PAINTS: u8 = 3;
+
+/// Layer results by key, each with the paints since it was last used; one
+/// unused for [`KEEP_PAINTS`] paints is dropped (see [`Caches::end_frame`]).
+struct Cache<T: Clone> {
+    map: HashMap<u64, (T, u8)>,
+}
+
+impl<T: Clone> Default for Cache<T> {
+    fn default() -> Self {
+        Cache { map: HashMap::new() }
+    }
+}
+
+impl<T: Clone> Cache<T> {
+    fn get(&mut self, k: u64) -> Option<T> {
         self.map.get_mut(&k).map(|e| {
-            e.2 = true;
-            (e.0.clone(), e.1)
+            e.1 = 0;
+            e.0.clone()
         })
     }
-    fn put(&mut self, k: u64, img: Arc<Image>, b: Bounds<f32>) {
-        self.map.insert(k, (img, b, true));
+    fn put(&mut self, k: u64, v: T) {
+        self.map.insert(k, (v, 0));
     }
     fn end_frame(&mut self) {
-        self.map.retain(|_, e| std::mem::replace(&mut e.2, false));
+        self.map.retain(|_, e| {
+            e.1 += 1;
+            e.1 <= KEEP_PAINTS
+        });
+    }
+}
+
+/// A layer's three stages, each cached by what it depends on, so a frame
+/// redoes only the stages whose inputs changed:
+/// - `rasters`: its content, rasterized (a blur radius that moves reuses it);
+/// - `filtered`: then filtered, clipped and masked (a turning or fading
+///   layer reuses it: only the turn is done again, and a fade is the
+///   image's opacity);
+/// - `images`: then transformed, as the image drawn, placed relative to the
+///   layer's area (a layer that only moves reuses it: nothing is done again).
+///
+/// A stage found in the cache costs nothing; a static page soon keeps only
+/// images.
+#[derive(Default)]
+struct Caches {
+    rasters: Cache<Arc<crate::effects::Argb>>,
+    filtered: Cache<Arc<crate::effects::Argb>>,
+    images: Cache<(Arc<Image>, Bounds<f32>)>,
+    /// Filtered layers as GPU textures, for the GPU to turn (see [`gpu_turn`]).
+    textures: Cache<Arc<Texture>>,
+}
+
+impl Caches {
+    fn end_frame(&mut self) {
+        self.rasters.end_frame();
+        self.filtered.end_frame();
+        self.images.end_frame();
+        self.textures.end_frame();
     }
 }
 
 thread_local! {
-    static LAYERS: std::cell::RefCell<LayerCache> = std::cell::RefCell::new(LayerCache::default());
+    static LAYERS: std::cell::RefCell<Caches> = std::cell::RefCell::new(Caches::default());
+    /// The shader that turns a layer on the GPU (None: it can't be declared).
+    static TURN: Option<ShaderEffect> = ShaderEffect::new("bui-turn", crate::effects::TURN_SHADER, 1, 7).ok();
 }
 
-fn is_inside(frame: &Frame, mut k: usize, root: usize) -> bool {
-    loop {
-        if k == root {
-            return true;
+/// A BUI texture of a layer's pixels, freed with it: the layer cache and every
+/// display list that draws it ([`EffectItem::texture`]) hold it.
+struct Texture(i32);
+
+impl Drop for Texture {
+    fn drop(&mut self) {
+        // SAFETY: ours, freed once, when nothing that draws it is left.
+        unsafe { sys::BUI_texture_free(self.0) };
+    }
+}
+
+/// Draws a turned layer as the GPU's: its filtered pixels `px` (cached as a
+/// texture under `key`), whose top left is at `origin` in layer device pixels
+/// (`layer_scale` per logical pixel), through `m_dev` (layer device pixels),
+/// in a window of `scale` device pixels per logical one. No pixels are turned
+/// on the CPU and nothing is uploaded while the content stays the same: a
+/// turn or skew animation costs a quad a frame. False when the GPU can't
+/// (no shader, it failed to compile, no texture, a degenerate matrix).
+#[allow(clippy::too_many_arguments)]
+fn gpu_turn(p: &mut Painter, px: &crate::effects::Argb, key: u64, origin: (f32, f32), m_dev: &crate::effects::Affine,
+            (layer_scale, scale): (f32, f32), clip: Option<Bounds<f32>>, opacity: f32) -> bool {
+    let size = (px.w as f32, px.h as f32);
+    let Some((at, m)) = crate::effects::turn_box(origin, size, m_dev, layer_scale, scale) else { return false };
+    TURN.with(|turn| {
+        let Some(turn) = turn.as_ref().filter(|t| t.error().is_empty()) else { return false };
+        let texture = LAYERS.with(|l| l.borrow_mut().textures.get(key)).or_else(|| {
+            let id = crate::effects::turn_texture(px);
+            (id > 0).then(|| {
+                let t = Arc::new(Texture(id));
+                LAYERS.with(|l| l.borrow_mut().textures.put(key, t.clone()));
+                t
+            })
+        });
+        let Some(texture) = texture else { return false };
+        p.opacity = 1.0;
+        p.clip = clip;
+        let id = texture.0;
+        p.effect_holding(at, turn, &[id], &[m[0], m[1], m[2], m[3], m[4], m[5], opacity], None, Some(texture));
+        true
+    })
+}
+
+/// Where each box enters and leaves a depth-first walk of the tree (an
+/// Euler tour): box `k` is inside box `root` when its span is in `root`'s.
+/// One walk a paint, then each test is two comparisons (walking up from each
+/// box was quadratic in a page with many layers: a long list of blurred rows).
+#[derive(Default)]
+struct Tour {
+    enter: Vec<u32>,
+    leave: Vec<u32>,
+    /// The walk's own buffers: children by parent (compressed rows) and the path.
+    start: Vec<u32>,
+    fill: Vec<u32>,
+    kids: Vec<u32>,
+    stack: Vec<(usize, u32)>,
+}
+
+/// `v` as `n` zeros, in the room it has.
+fn zeroed(v: &mut Vec<u32>, n: usize) {
+    v.clear();
+    v.resize(n, 0);
+}
+
+impl Tour {
+    fn build(&mut self, frame: &Frame) {
+        let nodes = &frame.nodes;
+        let n = nodes.len();
+        let Tour { enter, leave, start, fill, kids, stack } = self;
+        // children by parent, in arena order (compressed rows)
+        zeroed(start, n + 1);
+        for p in nodes.iter().filter_map(|nd| nd.parent) {
+            start[p + 1] += 1;
         }
-        match frame.nodes[k].parent {
-            Some(p) => k = p,
-            None => return false,
+        for i in 0..n {
+            start[i + 1] += start[i];
         }
+        fill.clear();
+        fill.extend_from_slice(start);
+        zeroed(kids, n);
+        for (k, nd) in nodes.iter().enumerate() {
+            if let Some(p) = nd.parent {
+                kids[fill[p] as usize] = k as u32;
+                fill[p] += 1;
+            }
+        }
+        zeroed(enter, n);
+        zeroed(leave, n);
+        stack.clear();
+        let mut clock = 0u32;
+        for root in (0..n).filter(|&i| nodes[i].parent.is_none()) {
+            stack.push((root, start[root]));
+            enter[root] = clock;
+            clock += 1;
+            while let Some((node, next)) = stack.last_mut() {
+                if *next < start[*node + 1] {
+                    let child = kids[*next as usize] as usize;
+                    *next += 1;
+                    enter[child] = clock;
+                    clock += 1;
+                    stack.push((child, start[child]));
+                } else {
+                    leave[*node] = clock;
+                    stack.pop();
+                }
+            }
+        }
+    }
+
+    /// Whether box `k` is `root` or under it.
+    fn inside(&self, k: usize, root: usize) -> bool {
+        self.enter[root] <= self.enter[k] && self.leave[k] <= self.leave[root]
     }
 }
 
@@ -929,18 +1329,22 @@ fn paint_list(cx: &mut LayerCx, list: &[usize], p: &mut Painter, root: Option<us
         if !n.visible || n.opacity <= 0.0 {
             continue;
         }
-        let fx = cx.styles[n.style].effects.as_deref();
+        let fx = effects_of(cx.frame, cx.styles, i);
         if fx.is_some_and(|e| !e.backdrop.is_empty()) && Some(i) != root {
             paint_backdrop(cx, i, p);
         }
-        if fx.is_some_and(|e| e.needs_layer()) && Some(i) != root {
-            let sub: Vec<usize> = list[idx..].iter().copied()
-                .filter(|&k| !cx.done[k] && is_inside(cx.frame, k, i)).collect();
+        let u = Units { font_size: cx.styles[n.style].font_size, viewport: cx.vp };
+        if (cx.mats.pixel[i] || fx.is_some_and(|e| e.needs_layer(n.bounds, &u))) && Some(i) != root {
+            // a list kept from an earlier layer (a nested layer takes the next)
+            let mut sub = cx.subs.pop().unwrap_or_default();
+            sub.clear();
+            sub.extend(list[idx..].iter().copied().filter(|&k| !cx.done[k] && cx.tour.inside(k, i)));
             // the layer's own pass paints these; mark them after
             paint_layer(cx, i, &sub, p, base);
             for &k in &sub {
                 cx.done[k] = true;
             }
+            cx.subs.push(sub);
             continue;
         }
         cx.done[i] = true;
@@ -950,16 +1354,38 @@ fn paint_list(cx: &mut LayerCx, list: &[usize], p: &mut Painter, root: Option<us
             p.note_widget(n.key, n.clip.map_or(n.bounds, |c| c.intersect(&n.bounds)));
         }
         let (frame, styles, vp) = (cx.frame, cx.styles, cx.vp);
+        let start = p.items.len();
         paint_node(frame, styles, cx.tc, i, p, vp, cx.app);
+        cx.mats.map(p, start, i);
     }
 }
 
-/// The logical-pixel area a layer's content can cover: its boxes, their
-/// outlines and shadows, and how far its filters spread.
-fn layer_area(cx: &LayerCx, list: &[usize], fx: &crate::effects::Effects) -> Bounds<f32> {
-    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    for &k in list {
+/// The logical-pixel area a layer's content covers: what it painted (text by
+/// its measured width: not the boxes it sits in, which a resize widens and
+/// narrows with nothing drawn in them), and the boxes of its widgets. Its
+/// filters spread past it ([`crate::effects::filter_outset`]).
+fn layer_area(cx: &mut LayerCx, list: &[usize], sub: &Painter) -> Bounds<f32> {
+    // widgets are the kit's own nodes, not items: their boxes count
+    let widgets = list.iter().copied().filter(|&k| matches!(cx.frame.nodes[k].content, Content::Widget(_)));
+    match (boxes_area(cx, widgets), sub.extent(cx.tc)) {
+        (Some(a), Some(b)) => union(a, b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => rect(0.0, 0.0, 0.0, 0.0),
+    }
+}
+
+/// The area of the boxes of `list` (through their vector transforms), with
+/// their outlines and shadows; `None` when none has an area.
+fn boxes_area(cx: &LayerCx, list: impl IntoIterator<Item = usize>) -> Option<Bounds<f32>> {
+    let mut area: Option<Bounds<f32>> = None;
+    for k in list {
         let n = &cx.frame.nodes[k];
+        // a box with no area (a line break, an empty run: placed at 0, 0)
+        // would stretch the layer to the page's corner; what it paints is in
+        // the painted extent
+        if !n.visible || n.bounds.size.width <= 0.0 || n.bounds.size.height <= 0.0 {
+            continue;
+        }
         let c = &cx.styles[n.style];
         let mut grow = c.outline.0 + c.outline.2.max(0.0);
         for sh in c.shadows.iter().filter(|s| !s.inset) {
@@ -973,13 +1399,39 @@ fn layer_area(cx: &LayerCx, list: &[usize], fx: &crate::effects::Effects) -> Bou
             }
         }
         let b = n.bounds;
-        x0 = x0.min(b.origin.x - grow);
-        y0 = y0.min(b.origin.y - grow);
-        x1 = x1.max(b.origin.x + b.size.width + grow);
-        y1 = y1.max(b.origin.y + b.size.height + grow);
+        let grown = rect(b.origin.x - grow, b.origin.y - grow, b.size.width + 2.0 * grow, b.size.height + 2.0 * grow);
+        let mapped = map_rect(grown, &cx.mats.m[k]);
+        area = Some(area.map_or(mapped, |a| union(a, mapped)));
     }
-    let g = crate::effects::filter_outset(&fx.filter);
-    rect(x0 - g, y0 - g, (x1 - x0 + 2.0 * g).max(0.0), (y1 - y0 + 2.0 * g).max(0.0))
+    area
+}
+
+/// The smallest rectangle holding both.
+fn union(a: Bounds<f32>, b: Bounds<f32>) -> Bounds<f32> {
+    let (x0, y0) = (a.origin.x.min(b.origin.x), a.origin.y.min(b.origin.y));
+    let x1 = (a.origin.x + a.size.width).max(b.origin.x + b.size.width);
+    let y1 = (a.origin.y + a.size.height).max(b.origin.y + b.size.height);
+    rect(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// Whether layer `root` (its subtree `list`) is out of view (off the window,
+/// or outside its clip), told from its boxes before its content is painted:
+/// a long list's blurred rows cost nothing below the fold. Not when a turn
+/// or a pixel transform in it may carry what it paints past its boxes.
+fn out_of_view(cx: &LayerCx, root: usize, list: &[usize], e: &crate::effects::Effects) -> bool {
+    let turned = |k: usize| effects_of(cx.frame, cx.styles, k).is_some_and(|f| f.has_transform());
+    if list.iter().any(|&k| turned(k)) {
+        return false;
+    }
+    let Some(boxes) = boxes_area(cx, list.iter().copied()) else { return true };
+    // what its filters spread, and those of the layers in it (nested: they add up)
+    let g = list.iter().filter(|&&k| k != root).filter_map(|&k| effects_of(cx.frame, cx.styles, k))
+        .fold(crate::effects::filter_outset(&e.filter), |g, f| g + crate::effects::filter_outset(&f.filter));
+    let area = rect(boxes.origin.x - g, boxes.origin.y - g, boxes.size.width + 2.0 * g, boxes.size.height + 2.0 * g);
+    let window = rect(0.0, 0.0, cx.vp.0, cx.vp.1);
+    let seen = cx.frame.nodes[root].clip.map_or(window, |c| c.intersect(&window));
+    let visible = area.intersect(&seen);
+    visible.size.width * visible.size.height <= 0.0
 }
 
 /// Device-pixel rectangle covering `b`: (x0, y0, w, h).
@@ -1004,106 +1456,270 @@ fn paint_layer(cx: &mut LayerCx, root: usize, list: &[usize], p: &mut Painter, b
 fn paint_layer_inner(cx: &mut LayerCx, root: usize, list: &[usize], p: &mut Painter, base: f32,
                      inside: &mut Vec<(Key, u32, Bounds<f32>)>) {
     use crate::effects as fx;
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hash;
     let n = &cx.frame.nodes[root];
     let c = &cx.styles[n.style];
     let Some(e) = c.effects.as_deref().cloned() else { return };
+    // a layer no one can see is not drawn at all (it is made when it comes
+    // into view)
+    if out_of_view(cx, root, list, &e) {
+        return;
+    }
     let rel_opacity = (n.opacity / base.max(1e-6)).min(1.0);
     // the content, painted at full opacity relative to the root
     let mut sub = Painter::new();
     paint_list(cx, list, &mut sub, Some(root), n.opacity);
     inside.append(&mut sub.widgets);
+    // the clip the layer is under is applied when its image is drawn: its
+    // pixels don't depend on where it sits under it (a line gliding past the
+    // edge of a list is drawn once)
+    sub.unclip(cx.frame.nodes[root].clip);
     let n = &cx.frame.nodes[root];
     let c = &cx.styles[n.style];
     let screen = rect(-cx.vp.0, -cx.vp.1, cx.vp.0 * 3.0, cx.vp.1 * 3.0);
-    let area = layer_area(cx, list, &e).intersect(&screen);
-    let (x0, y0, w, h) = device_rect(area, cx.scale);
-    if w == 0 || h == 0 {
+    // the content's own area, and the layer's: as far as its filters spread
+    let inner = layer_area(cx, list, &sub).intersect(&screen);
+    let g = fx::filter_outset(&e.filter);
+    let area = rect(inner.origin.x - g, inner.origin.y - g, inner.size.width + 2.0 * g, inner.size.height + 2.0 * g)
+        .intersect(&screen);
+    // a wide blur keeps no detail: the layer works at a fraction of the
+    // resolution, and its image is drawn stretched (bilinear, by the renderer)
+    let scale = cx.scale / low_res(&e, cx.scale) as f32;
+    let (x0, y0, w, h) = device_rect(area, scale);
+    let (ix0, iy0, iw, ih) = device_rect(inner, scale);
+    if w == 0 || h == 0 || iw == 0 || ih == 0 {
         return;
     }
     let b = n.bounds;
     let u = Units { font_size: c.font_size, viewport: cx.vp };
-    // the transform, in device pixels about transform-origin
-    let mut m = fx::IDENTITY;
-    if e.rotate != 0.0 {
-        m = fx::mul(&m, &[e.rotate.cos(), e.rotate.sin(), -e.rotate.sin(), e.rotate.cos(), 0.0, 0.0]);
-    }
-    if let Some((sx, sy)) = e.scale2 {
-        m = fx::mul(&m, &[sx, 0.0, 0.0, sy, 0.0, 0.0]);
-    }
-    if !e.transform.is_empty() {
-        m = fx::mul(&m, &fx::matrix_of(&e.transform, b.size.width, b.size.height, &u));
-    }
-    let transformed = m != fx::IDENTITY;
-    let origin = e.origin.unwrap_or([crate::style::Pos::CENTER; 2]);
-    let (ox, oy) = ((b.origin.x + origin[0].at(b.size.width)) * cx.scale,
-                    (b.origin.y + origin[1].at(b.size.height)) * cx.scale);
-    let m_dev = {
-        let lin = [m[0], m[1], m[2], m[3], m[4] * cx.scale, m[5] * cx.scale];
-        fx::mul(&fx::mul(&[1.0, 0.0, 0.0, 1.0, ox, oy], &lin), &[1.0, 0.0, 0.0, 1.0, -ox, -oy])
+    // the root's own transform (a layer's: more than a move and a scale), about
+    // its origin as its ancestors' vector transforms placed the content
+    let outside = cx.mats.m[root];
+    let m = match fx::invert(&outside) {
+        Some(back) if outside != fx::IDENTITY => fx::mul(&fx::mul(&outside, &e.matrix(b, &u)), &back),
+        _ => e.matrix(b, &u),
     };
-    let key = {
+    let transformed = m != fx::IDENTITY;
+    let m_dev = [m[0], m[1], m[2], m[3], m[4] * scale, m[5] * scale];
+    // every stage depends on the content relative to its area only: a layer
+    // that moved is the same layer, drawn elsewhere; the raster depends on
+    // the content alone, not on how far the filters spread
+    let (ax, ay) = (area.origin.x, area.origin.y);
+    let q = quantize;
+    let content = {
         let mut hh = key_hasher();
-        sub.content_hash(&mut hh);
-        format!("{e:?}").hash(&mut hh);
-        (x0.to_bits(), y0.to_bits(), w, h, cx.scale.to_bits(), rel_opacity.to_bits(),
-         b.origin.x.to_bits(), b.origin.y.to_bits(), b.size.width.to_bits(), b.size.height.to_bits()).hash(&mut hh);
+        sub.content_hash(&mut hh, inner, inner.origin.x, inner.origin.y);
+        (scale.to_bits(), q(inner.size.width), q(inner.size.height)).hash(&mut hh);
         hh.finish()
     };
-    let blend = e.blend;
-    let emit = |p: &mut Painter, img: Arc<Image>, at: Bounds<f32>| {
-        p.opacity = 1.0;
-        p.clip = n.clip;
-        p.image(at, &img);
+    // where the raster sits in the layer (both on the same device grid)
+    let at_inner = ((ix0 - x0) as usize, (iy0 - y0) as usize);
+    let filtered = {
+        let mut hh = key_hasher();
+        content.hash(&mut hh);
+        hash_effects(&mut hh, &e, scale, &u);
+        (q(b.origin.x - ax), q(b.origin.y - ay), q(b.size.width), q(b.size.height)).hash(&mut hh);
+        if transformed {
+            // a turned layer is turned from the device grid it sits on: where its
+            // content falls between that grid's pixels (to a quarter) is its own
+            let frac = |v: f32, at: f32| ((v * scale - at) * 4.0).round() as i32;
+            (frac(inner.origin.x, ix0), frac(inner.origin.y, iy0)).hash(&mut hh);
+        }
+        hh.finish()
     };
-    if blend == fx::Blend::Normal {
-        if let Some((img, at)) = LAYERS.with(|l| l.borrow_mut().get(key)) {
-            emit(p, img, at);
-            return;
+    // a transformed image is placed where the transform puts it (absolute)
+    let (ox, oy) = if transformed { (0.0, 0.0) } else { (ax, ay) };
+    let placed = {
+        let mut hh = key_hasher();
+        filtered.hash(&mut hh);
+        if transformed {
+            (x0.to_bits(), y0.to_bits(), m.map(f32::to_bits)).hash(&mut hh);
+        }
+        hh.finish()
+    };
+    // a blend mode mixes with what is under it, which changes: never cached
+    let cached = e.blend == fx::Blend::Normal;
+    let emit = |p: &mut Painter, img: &Arc<Image>, at: Bounds<f32>| {
+        // the layer's own opacity is the image's, not its pixels': a fade
+        // draws the same layer (a blend has it in its pixels already)
+        p.opacity = if cached { rel_opacity } else { 1.0 };
+        p.clip = n.clip;
+        p.image(rect(at.origin.x + ox, at.origin.y + oy, at.size.width, at.size.height), img);
+    };
+    if cached && let Some((img, at)) = LAYERS.with(|l| l.borrow_mut().images.get(placed)) {
+        return emit(p, &img, at);
+    }
+    let from_cache = |pick: fn(&mut Caches) -> &mut Cache<Arc<fx::Argb>>, k: u64| {
+        if cached { LAYERS.with(|l| pick(&mut l.borrow_mut()).get(k)) } else { None }
+    };
+    let keep = |pick: fn(&mut Caches) -> &mut Cache<Arc<fx::Argb>>, k: u64, v: &Arc<fx::Argb>| {
+        if cached {
+            LAYERS.with(|l| pick(&mut l.borrow_mut()).put(k, v.clone()));
+        }
+    };
+    let px = match from_cache(|l| &mut l.filtered, filtered) {
+        Some(f) => f,
+        None => {
+            let raster = match from_cache(|l| &mut l.rasters, content) {
+                Some(r) => r,
+                None => {
+                    let Some(r) = sub.rasterize_argb(scale, ix0, iy0, iw, ih).map(Arc::new) else { return };
+                    fx::count_layer();
+                    keep(|l| &mut l.rasters, content, &r);
+                    r
+                }
+            };
+            // the filters spread into a transparent margin around the content
+            let padded = raster.padded(w, h, at_inner);
+            let filters = drawn_filters(&e.filter, scale);
+            let f = Arc::new(layer_effects(padded, &filters, &e, c, b, &u, (scale, x0, y0)));
+            keep(|l| &mut l.filtered, filtered, &f);
+            f
+        }
+    };
+    // a GPU window turns it on the GPU: the cached layer as a texture, drawn
+    // through the matrix (nothing turned on the CPU, nothing uploaded again)
+    if transformed && cached && p.is_gpu()
+        && gpu_turn(p, &px, filtered, (x0, y0), &m_dev, (scale, cx.scale), n.clip, rel_opacity)
+    {
+        return;
+    }
+    let (mut out, (mut tx, mut ty)) = (None, (x0, y0));
+    if transformed {
+        // a degenerate matrix draws nothing
+        let Some((t, at)) = fx::transform(&fx::Pixels::from_argb(&px), (x0, y0), &m_dev) else { return };
+        out = Some(t.to_argb());
+        (tx, ty) = at;
+    }
+    if !cached {
+        // a blend mixes the faded layer with what is under it
+        let mut faded = out.clone().unwrap_or_else(|| (*px).clone());
+        faded.fade(rel_opacity);
+        let mine = fx::Pixels::from_argb(&faded);
+        if let Some(back) = p.rasterize(scale, tx, ty, mine.w, mine.h) {
+            out = Some(fx::composite(&back, &mine, e.blend).to_argb());
         }
     }
-    let Some(mut px) = sub.rasterize(cx.scale, x0, y0, w, h) else { return };
+    let shown = out.as_ref().unwrap_or(&px);
+    let Some(img) = Image::from_argb(shown).map(Arc::new) else { return };
+    let at = rect(tx / scale - ox, ty / scale - oy, shown.w as f32 / scale, shown.h as f32 / scale);
+    if cached {
+        LAYERS.with(|l| l.borrow_mut().images.put(placed, (img.clone(), at)));
+    }
+    emit(p, &img, at);
+}
+
+/// How many times coarser than the screen a layer can be drawn: its widest
+/// blur hides detail finer than a third of its radius in device pixels (1:
+/// full resolution). Not with a clip path, a mask or a blend mode, whose
+/// edges or backdrop must stay sharp.
+fn low_res(e: &crate::effects::Effects, scale: f32) -> usize {
+    use crate::effects::{Blend, Filter, DOWNSAMPLE_FROM, SMALL_SIGMA};
+    if e.clip_path.is_some() || e.mask.as_ref().is_some_and(|m| m.image.is_some()) || e.blend != Blend::Normal {
+        return 1;
+    }
+    let sigma = e.filter.iter().filter_map(|f| match f {
+        Filter::Blur(r) => Some(r * scale),
+        _ => None,
+    }).fold(0.0, f32::max);
+    if sigma < DOWNSAMPLE_FROM { 1 } else { (sigma / SMALL_SIGMA).floor().max(1.0) as usize }
+}
+
+/// The filters as drawn at `scale`: blur radii to a quarter of a device
+/// pixel (a difference no one sees), so a radius that moves gives the same
+/// filtered layer for several frames.
+fn drawn_filters(filters: &[crate::effects::Filter], scale: f32) -> Vec<crate::effects::Filter> {
+    use crate::effects::Filter;
+    filters.iter().map(|f| match *f {
+        Filter::Blur(r) => Filter::Blur((r * scale * 4.0).round() / (4.0 * scale)),
+        ref other => other.clone(),
+    }).collect()
+}
+
+/// Feeds formatted text into a hasher: a key from `Debug` with no string made.
+struct HashWrite<'h, H: Hasher>(&'h mut H);
+
+impl<H: Hasher> std::fmt::Write for HashWrite<'_, H> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.0.write(s.as_bytes());
+        Ok(())
+    }
+}
+
+/// What of `e` its filtered layer depends on: the filters as drawn (see
+/// [`drawn_filters`]), the clip path and the mask, and the units those
+/// resolve with (`circle(1em)` is another circle at another font size).
+/// Allocates nothing.
+fn hash_effects<H: Hasher>(hh: &mut H, e: &crate::effects::Effects, scale: f32, u: &Units) {
+    use crate::effects::Filter;
+    use std::hash::Hash;
+    use std::fmt::Write;
+    let mut w = HashWrite(hh);
     for f in &e.filter {
-        fx::apply_filter(&mut px, f, cx.scale);
+        // writing to a hasher can't fail
+        let _ = match *f {
+            Filter::Blur(r) => write!(w, "blur{};", (r * scale * 4.0).round() as i32),
+            ref other => write!(w, "{other:?};"),
+        };
+    }
+    let _ = write!(w, "{:?}{:?}", e.clip_path, e.mask);
+    if e.clip_path.is_some() || e.mask.is_some() {
+        (u.font_size.to_bits(), u.viewport.0.to_bits(), u.viewport.1.to_bits()).hash(hh);
+    }
+}
+
+/// A layer's raster (with its margin) through `filters` (see
+/// [`drawn_filters`]), its clip path and mask, at `(scale, x0, y0)` (device
+/// pixels per logical one, and its top left). Its opacity is not in the
+/// pixels: the image is drawn at it. Blurs alone stay in ARGB, in integers;
+/// anything else works on floats.
+fn layer_effects(raster: crate::effects::Argb, filters: &[crate::effects::Filter], e: &crate::effects::Effects,
+                 c: &Computed, b: Bounds<f32>, u: &Units, (scale, x0, y0): (f32, f32, f32))
+                 -> crate::effects::Argb {
+    use crate::effects as fx;
+    let blurs_only = filters.iter().all(|f| matches!(f, fx::Filter::Blur(_))) && e.clip_path.is_none()
+        && e.mask.as_ref().is_none_or(|m| m.image.is_none());
+    if blurs_only {
+        let mut a = raster;
+        for f in filters {
+            if let fx::Filter::Blur(r) = f {
+                fx::blur_argb(&mut a, r * scale);
+            }
+        }
+        return a;
+    }
+    let (w, h) = (raster.w, raster.h);
+    let mut px = fx::Pixels::from_argb(&raster);
+    for f in filters {
+        fx::apply_filter(&mut px, f, scale);
     }
     if let Some((shape, edge)) = &e.clip_path {
         let mut mp = Painter::new();
-        clip_shape(&mut mp, shape, *edge, c, b, &u);
-        if let Some(mask) = mp.rasterize(cx.scale, x0, y0, w, h) {
+        clip_shape(&mut mp, shape, *edge, c, b, u);
+        if let Some(mask) = mp.rasterize(scale, x0, y0, w, h) {
             fx::apply_mask(&mut px, &mask, false);
         }
     }
     if let Some(mask) = e.mask.as_ref().filter(|m| m.image.is_some()) {
         let mut mp = Painter::new();
-        paint_source(&mut mp, mask.image.as_ref().unwrap(), b, Some(mask), cx.vp);
-        if let Some(mk) = mp.rasterize(cx.scale, x0, y0, w, h) {
+        paint_source(&mut mp, mask.image.as_ref().unwrap(), b, Some(mask), u.viewport);
+        if let Some(mk) = mp.rasterize(scale, x0, y0, w, h) {
             fx::apply_mask(&mut px, &mk, mask.luminance);
         }
     }
-    if rel_opacity < 1.0 {
-        px.px.iter_mut().for_each(|q| q.iter_mut().for_each(|v| *v *= rel_opacity));
-    }
-    let (mut px, (mut tx, mut ty)) = (px, (x0, y0));
-    if transformed {
-        match fx::transform(&px, (x0, y0), &m_dev) {
-            Some((out, at)) => {
-                px = out;
-                (tx, ty) = at;
-            }
-            None => return, // a degenerate matrix draws nothing
-        }
-    }
-    if blend != fx::Blend::Normal {
-        if let Some(back) = p.rasterize(cx.scale, tx, ty, px.w, px.h) {
-            px = fx::composite(&back, &px, blend);
-        }
-    }
-    let Some(img) = Image::from_rgba(px.w as u32, px.h as u32, &px.to_rgba8()).map(Arc::new) else { return };
-    let at = rect(tx / cx.scale, ty / cx.scale, px.w as f32 / cx.scale, px.h as f32 / cx.scale);
-    if blend == fx::Blend::Normal {
-        LAYERS.with(|l| l.borrow_mut().put(key, img.clone(), at));
-    }
-    emit(p, img, at);
+    px.to_argb()
+}
+
+/// A text item's line, as a share of its size (ascent and descent).
+const TEXT_LINE: f32 = 1.25;
+/// Room left around measured text, as a share of its size: an italic's
+/// overhang, a synthetic bold, glyphs past their advance.
+const TEXT_INK_PAD: f32 = 0.25;
+
+/// A logical-pixel value to 1/64 px, as bits: positions relative to a
+/// layer that moved round off the same.
+fn quantize(v: f32) -> i32 {
+    (v * 64.0).round() as i32
 }
 
 /// `backdrop-filter`: what's already painted under the element's border
@@ -1126,7 +1742,7 @@ fn paint_backdrop(cx: &mut LayerCx, i: usize, p: &mut Painter) {
     if let Some(mask) = mp.rasterize(cx.scale, x0, y0, w, h) {
         fx::apply_mask(&mut px, &mask, false);
     }
-    let Some(img) = Image::from_rgba(w as u32, h as u32, &px.to_rgba8()).map(Arc::new) else { return };
+    let Some(img) = Image::from_argb(&px.to_argb()).map(Arc::new) else { return };
     p.opacity = 1.0;
     p.clip = n.clip;
     p.image(rect(x0 / cx.scale, y0 / cx.scale, w as f32 / cx.scale, h as f32 / cx.scale), &img);
@@ -1323,7 +1939,10 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
                     }
                 }
             }
-            paint_scrollbars(n, p);
+            // `scrollbar-width: none`: it scrolls, with no bar
+            if c.layout.scrollbar_width > 0.0 {
+                paint_scrollbars(n, p);
+            }
         }
         _ => {}
     }
@@ -1697,7 +2316,7 @@ fn border_image_source(src: &crate::effects::ImageSource, w: f32, h: f32) -> Opt
             let area = rect(0.0, 0.0, iw as f32, ih as f32);
             gp.with_clip(area, |gp| paint_gradient(gp, g, area));
             let px = gp.rasterize(1.0, 0.0, 0.0, iw, ih)?;
-            let img = Arc::new(Image::from_rgba(iw as u32, ih as u32, &px.to_rgba8())?);
+            let img = Arc::new(Image::from_argb(&px.to_argb())?);
             GRADIENTS.with(|m| {
                 let mut m = m.borrow_mut();
                 if m.len() > 64 {

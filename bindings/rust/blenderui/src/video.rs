@@ -30,15 +30,20 @@ pub enum VideoState {
     Ended,
     /// No backend reads the file (or it is not a video).
     Error,
+    /// Playing, but there is no output to play to (none connected, the sound
+    /// server down): it plays on from where it is once one is there. Only a
+    /// [`Sound`](crate::Sound) reports it.
+    NoOutput,
 }
 
 impl VideoState {
-    const fn from_raw(s: i32) -> Self {
+    pub(crate) const fn from_raw(s: i32) -> Self {
         match s {
             sys::BK_VIDEO_LOADING => Self::Loading,
             sys::BK_VIDEO_PLAYING => Self::Playing,
             sys::BK_VIDEO_PAUSED => Self::Paused,
             sys::BK_VIDEO_ENDED => Self::Ended,
+            sys::BK_SOUND_NO_OUTPUT => Self::NoOutput,
             _ => Self::Error,
         }
     }

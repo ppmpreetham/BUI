@@ -118,7 +118,7 @@ pub fn presence<E: IntoElement>(show: bool, build: impl FnOnce() -> E) -> Option
     };
     let phase = if phase == Phase::Exiting && el.is_none() { Phase::Gone } else { phase };
     if phase != was {
-        state.update_quiet(|s| s.1 = phase);
+        state.update_untracked(|s| s.1 = phase);
     }
     el
 }

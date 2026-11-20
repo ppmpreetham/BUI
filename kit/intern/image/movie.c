@@ -18,6 +18,18 @@
 
 #include "image.h"
 
+bool imb_path_is_url(const char *path)
+{
+  const char *p = path;
+  /* the scheme: a letter, then letters, digits, '+', '-' or '.' */
+  while ((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+         (p > path && ((*p >= '0' && *p <= '9') || *p == '+' || *p == '-' || *p == '.')))
+  {
+    p++;
+  }
+  return p - path > 1 && strncmp(p, "://", 3) == 0; /* one letter: a Windows drive ("C:/") */
+}
+
 float *imb_audio_block_reserve(float **buf, size_t *cap, size_t floats)
 {
   if (floats > *cap) {

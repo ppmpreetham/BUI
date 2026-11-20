@@ -241,9 +241,12 @@ impl<T: 'static> Signal<T> {
         self.update(|v| *v = value);
     }
 
-    /// Change the value in place *without* re-rendering: for what a render
-    /// itself refreshes (a handle to a widget's state, the latest callbacks).
-    pub(crate) fn update_quiet<R>(self, f: impl FnOnce(&mut T) -> R) -> R {
+    /// Change the value in place *without* re-rendering (Leptos'
+    /// `update_untracked`): bookkeeping no view shows, such as when something
+    /// last happened, written on every event without a render each time, or
+    /// what a render itself refreshes (a handle to a widget's state, the
+    /// latest callbacks).
+    pub fn update_untracked<R>(self, f: impl FnOnce(&mut T) -> R) -> R {
         let mut v = self.take().expect("signal used after its component was dropped");
         let r = f(&mut v);
         self.put(v, false);

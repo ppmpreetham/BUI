@@ -117,6 +117,7 @@ pub(crate) mod layout;
 pub mod paint;
 pub mod shader;
 pub mod video;
+pub mod sound;
 pub(crate) mod prof;
 mod selector;
 pub(crate) mod selection;
@@ -141,6 +142,7 @@ pub use geometry::{point, px, relative, rems, size, Bounds, Length, Pixels, Poin
 pub use paint::{image_stats, set_image_budget, Animation, Image, Painter};
 pub use shader::{GpuTarget, ShaderEffect};
 pub use video::{Video, VideoState};
+pub use sound::Sound;
 pub use styled::{FontWeight, StyleBlock, Styled};
 pub use window::*;
 pub use window_kind::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions, WindowDecorations, WindowKind};
@@ -158,7 +160,6 @@ pub fn set_tailwind(on: bool) {
 /// the data isn't a font.
 pub fn add_font(family: &str, bold: bool, italic: bool, data: &[u8]) -> bool {
     let fam = std::ffi::CString::new(family).unwrap_or_default();
-    text::register_family(family);
     let flags = if bold { 1 } else { 0 } | if italic { 2 } else { 0 };
     let len = data.len().min(i32::MAX as usize) as i32;
     // SAFETY: the kit copies the bytes; both pointers are valid for the call.

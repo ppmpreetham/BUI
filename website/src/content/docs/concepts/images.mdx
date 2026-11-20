@@ -10,7 +10,8 @@ BUI reads images once, in C, for every language: the same decoders behind Rust's
 
 Three things make it fast and light:
 
-- **Decoded at the size it is drawn.** A 4K photo shown as a 120 px thumbnail is decoded for 120 px: JPEGs with DCT scaling (Blender's `imb_thumbnail_jpeg`), WebPs with libwebp's scaler, the rest with one box-filter downscale. Pixels are premultiplied `0xAARRGGBB`, the layout of the frame and of the GPU atlas, so drawing never converts.
+- **Decoded at the size it is drawn.** A 4K photo shown as a 120 px thumbnail is decoded for 120 px: JPEGs with DCT scaling (Blender's `imb_thumbnail_jpeg`), WebPs with libwebp's scaler, the rest with one box-filter downscale. The size is rounded up to a step of 2<sup>1/4</sup> (never past the file's own), so resizing a window draws the decode it has until a picture grows or shrinks by a step, and a picture never blinks out: until the new step arrives, the last one is drawn. Pixels are premultiplied `0xAARRGGBB`, the layout of the frame and of the GPU atlas, so drawing never converts.
+- **Drawn only when it changes.** A render that changes something else (a click, a hover, a counter) leaves the pictures on screen alone.
 - **Off the UI thread.** Files decode on a few worker threads, what is on screen first, then prefetches. A request scrolled away before it ran is cancelled. When an image arrives, only its rectangle redraws ([damage rendering](/docs/concepts/damage-rendering)).
 - **One cache, with a budget.** Decoded images are kept by (file, size, fit) within a memory budget (256 MiB by default); the least recently drawn go first, never what is on screen. Every byte has one owner and comes back when the cache is freed.
 
@@ -44,6 +45,9 @@ use blenderui::prelude::*;
 // <img>: the natural size comes from the file's header (no layout jump);
 // the pixels decode off the UI thread at the size drawn.
 rsx! { <img src="photos/beach.jpg" class="w-40 h-40 object-cover" alt="Beach" /> }
+// a width alone: the height follows `aspect-ratio`, else the width and
+// height attributes' ratio, else the picture's own
+rsx! { <img src="photos/beach.jpg" class="w-full aspect-square object-cover" /> }
 
 // builder syntax, and CSS background images
 img().src("photos/beach.jpg").w(px(160.0)).h(px(160.0));
@@ -142,8 +146,8 @@ imgui.image(spinner.texture, spinner.size)
 ## How it works
 
 1. **Layout** needs only the size: an `<img>`, a label image or an anchored canvas item reads the file's header once (`BK_image_info`, cached), so the page never moves when the pixels arrive. Fixed-size boxes (thumbnails, `object-fit`) don't even read it.
-2. **Drawing** looks the image up in the cache by (file, box size, fit). A miss queues a decode and draws nothing there yet; the rectangle is remembered.
-3. **Workers** (cores - 1, at most 4: `BK_image_set_threads`) take the newest visible request first, read the file, decode it at the box size, crop to what shows and hand it back. The window loop wakes (`BK_window_wake`), the result enters the cache, and the remembered rectangles redraw.
+2. **Drawing** looks the image up in the cache by (file, scale step): the whole picture at the scale the box draws it, rounded up to a step of 2<sup>1/4</sup>, and `object-fit` crops it as it is drawn. A miss queues a decode and draws the last step of that file drawn, or nothing the first time; the rectangle is remembered.
+3. **Workers** (cores - 1, at most 4: `BK_image_set_threads`) take the newest visible request first, read the file, decode it at that scale and hand it back. The window loop wakes (`BK_window_wake`), the result enters the cache, and the remembered rectangles redraw.
 4. **Cancellation**: a pending image whose rectangle is redrawn without being asked for again (it scrolled away) loses its waiter; with none left, the request is dropped before it runs.
 5. **Eviction**: at the start of a drawn frame, while the cache is over budget, the least recently drawn images go, but never ones drawn in the last two frames.
 

@@ -1292,9 +1292,11 @@ Blender's:
 - **Windows' GDI text** is opt-in (`-DBUI_TEXT_GDI=ON`, Rust feature
   `gdi-text`): ClearType-style hinting and system fonts, without Slug.
 
-Limits worth knowing: no per-glyph font fallback yet (missing characters show
-as boxes), IME on Windows only (X11 and macOS are coming), right-to-left text is
-reordered but not shaped, no OpenType features. Font fallback is coming soon. More:
+Characters the font lacks (Hangul, kana, Han, Thai, Indic, symbols) are drawn
+glyph by glyph from the rest of the `font-family` list, then the system's font
+for the script, and installed fonts are found by their own family names. Limits
+worth knowing: IME on Windows only (X11 and macOS are coming), right-to-left
+text is reordered but not shaped, no OpenType features. More:
 [Text and fonts](https://bui.preetham.top/docs/concepts/text-and-fonts/).
 
 ## 23. Themes: dark and light
@@ -1594,6 +1596,7 @@ All 26 run headless (`bui-lua --headless app.lua`) for CI and documentation scre
 | [Qt syntax](docs/qt.md)                            | Classes, signals, layouts, painting, coverage                                                                                        |
 | [Components](docs/components.md)                   | The `bui.components` reference                                                                                                       |
 | [Rust](docs/rust.md)                               | `rsx!`, hooks, HTML, CSS and Tailwind coverage, effects, animations, events, headless tests                                          |
+| [Effects performance](docs/effects-performance.md) | Blur, CSS animations and scale: what they cost, the algorithms, the benchmark                                                         |
 | [JavaScript, React, Svelte and Vue](docs/javascript.md) | `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue`, adding a framework, how changes cross to the UI thread, performance |
 | [Dear ImGui](docs/imgui.md)                        | Dear ImGui on BUI from C++, C, Python and Rust; the Blender-widgets build; coverage                                                  |
 | [C API](docs/c-api.md)                             | The C kit (`BUI_kit.h`)                                                                                                              |
@@ -2112,9 +2115,7 @@ ship. The tables below have the details.
   the platform's accessibility APIs (UI Automation on Windows, AT-SPI on Linux,
   NSAccessibility on macOS), so screen readers can't see them. Don't use it for
   software that has to be accessible. Accessibility is planned.
-- **Text.** Blender's bundled Inter font only (system fonts only with the
-  Windows GDI option). No per-glyph font fallback (missing characters show as
-  boxes), input methods (IME) on Windows only, right-to-left text is
+- **Text.** Input methods (IME) on Windows only, right-to-left text is
   reordered but not shaped, and no OpenType features.
 - **It doesn't look native.** BUI looks like Blender: its Dark and Light themes
   (other Blender theme files can't be loaded yet). It doesn't follow your
@@ -2166,7 +2167,7 @@ ship. The tables below have the details.
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Qt syntax (~24%)                                       | Model/view classes, docks, toolbars, splitters, Qt stylesheets ([details](docs/qt.md#coverage))                                                                                                                                                           |
 | CSS (261 of 745 W3C properties render, 129 more parse) | 3D transforms, OpenType font features, multi-column layout; hit testing ignores 2D transforms. Most of the remaining W3C list is drafts, speech, print and SVG ([breakdown](docs/rust.md#coverage))                                                       |
-| Text                                                   | No text wrapping around floats; right-to-left text is reordered (bidi) but not shaped (Arabic joining); no OpenType features; no per-glyph font fallback yet (characters missing from the font show as boxes); IME on Windows only                        |
+| Text                                                   | No text wrapping around floats; right-to-left text is reordered (bidi) but not shaped (Arabic joining); no OpenType features; IME on Windows only                                                                                                                       |
 | Rust components                                        | No async resources (`use_resource`); no generic components                                                                                                                                                                                                |
 | Dear ImGui                                             | Python and safe Rust skip the `va_list`, `void*` and C-callback functions (reachable from C and the Rust FFI); with Blender widgets, window title bars, tooltips, plain popups, tables and the color picker keep ImGui's drawing                          |
 | JavaScript / React packages                            | npm packages are prebuilt for Windows x64, Linux x64 (glibc 2.35+) and macOS (elsewhere, build the addon from source); events reach JavaScript after BUI handled them (no native `preventDefault`), and `event.target` is the deepest _listening_ element |
@@ -2179,7 +2180,7 @@ ship. The tables below have the details.
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **WebAssembly**                      | The kit in the browser: the raster blits to `<canvas>`, DOM events feed the kit; `@blender-ui/react` and the DOM-like API on top, unchanged                 |
 | **egui**                             | BUI panels inside egui, plus a Blender-styled theme                                                                                                         |
-| **More from Blender's source**       | Per-glyph font fallback (BLF), IME on X11 and macOS, search-as-you-type popups, units in number fields, widget drag and drop                                |
+| **More from Blender's source**       | IME on X11 and macOS, search-as-you-type popups, units in number fields, widget drag and drop                                |
 | **macOS GPU and JavaScript windows** | The GPU renderer on Metal (or the OpenGL backend), and Node windows on the main thread                                                                      |
 | **More GPU backends**                | Vulkan / WebGPU drawing the same instance stream as Direct3D 11 and OpenGL                                                                                  |
 | **Accessibility**                    | Screen-reader support through UI Automation (Windows), AT-SPI (Linux) and NSAccessibility (macOS)                                                           |

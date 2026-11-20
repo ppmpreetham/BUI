@@ -331,7 +331,7 @@ pub fn use_spring(source: impl Into<Value>, t: impl Into<Vars>) -> MotionValue {
     // a new target: spring to it from where it is
     let last = crate::hooks::use_signal(f32::NAN);
     if last.get().to_bits() != target.to_bits() {
-        last.update_quiet(|l| *l = target);
+        last.update_untracked(|l| *l = target);
         drop(mv.animate(target, v));
     }
     mv

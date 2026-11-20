@@ -147,6 +147,35 @@ variable_list(&cards)
     })
 ```
 
+For a hover highlight, `on_item_hover` gets the item under the pointer, or `None` when the pointer leaves the list or is over its scrollbar. Change your look's state in it (`list.style` is your `ItemPainter`): the list is only repainted, not rendered or laid out again. `on_copy` returns the text <Kbd keys="Ctrl+C" /> puts on the clipboard (`None`: nothing to copy).
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <div class="w-full h-full">
+        {variable_list(&self.cards)
+            .on_item_hover(|i, list| list.style.hovered = i)
+            .on_copy(|state| state.style.selected_text())}
+    </div>
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+div().size_full().child(
+    variable_list(&self.cards)
+        .on_item_hover(|i, list| list.style.hovered = i)
+        .on_copy(|state| state.style.selected_text()),
+)
+```
+
+</Tab>
+</Tabs>
+
 `hit` runs on the frame that is on screen, with the same rectangle, record and wrapped lines the item was painted with. Nothing is measured again, and an item that was not measured yet (a skeleton) reports part 0.
 
 <Callout type="note" title="Items are painted, not built from elements">

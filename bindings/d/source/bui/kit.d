@@ -253,6 +253,12 @@ struct BKCanvasItem {
     int fit;
     int frame;
     BKVideo* video;
+    int no_hit;
+    int effect;
+    int[8] effect_inputs; // BK_EFFECT_MAX_INPUTS
+    const(float)* effect_floats;
+    int n_effect_floats;
+    float fade = 0; // D's float default is NaN: 0 keeps the opaque default
 }
 
 struct BKCustomEvent {

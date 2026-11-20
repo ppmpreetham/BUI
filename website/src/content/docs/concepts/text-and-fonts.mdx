@@ -49,7 +49,11 @@ Inter covers the UI. When you ask for another family (a monospace editor, a bran
 1. **Fonts you registered** from code, exact style first.
 2. **A file path**: a family name ending in `.ttf`, `.otf` or `.ttc` loads that file.
 3. **`BUI_FONT`**, if set, replaces the default face (Inter).
-4. **A known generic family** (`monospace`, `serif` …), then a file called `<family>.ttf`, in the font folders below. Anything else falls back to Inter.
+4. **A known generic family** (`monospace`, `ui-monospace`, `serif` …), then **an installed font by its own family name** (`"Malgun Gothic"` finds `malgun.ttf`, `"Yu Gothic"` a face inside `YuGothM.ttc`), then a file called `<family>.ttf`, in the font folders below. Anything else falls back to Inter.
+
+A CSS family list (`font-family: "Brand", "Noto Sans JP", sans-serif`) is used whole: the first family found draws, and the others fill in the characters it lacks (up to eight of them). Spaces and quotes around each name are ignored, from C as from CSS. A generic family that isn't installed (`monospace` with no monospace font) gives way to the next family of the list. With the GDI engine (`gdi-text`), the first family of the list that is installed or registered draws, and generic names map to Segoe UI, Consolas and Times New Roman.
+
+**Finding fonts by name rarely waits.** BUI reads the font folders (only each file's name table, a few kilobytes) on a thread of its own from the moment it opens its first font, and keeps the list in your cache folder (`%LOCALAPPDATA%\bui`, `~/Library/Caches/bui` or `~/.cache/bui`) until a font folder, or a folder inside one, changes. Later runs read that list instead of the folders. A lookup by name that comes before the thread is done waits for it, and if the system can't start a thread, the first lookup reads the folders itself.
 
 **Font folders** are searched in order: `BUI_FONT_DIR` first, if set, then the system's:
 
@@ -97,20 +101,35 @@ In tkinter syntax, `font=("Arial", 18, "bold")` sets a widget's family, size and
 </Tab>
 </LangTabs>
 
+## Characters your font doesn't have
+
+When the font drawing a line lacks a character (Hangul, kana, Han, Thai, Devanagari, a symbol), BUI finds a face that has it, **glyph by glyph**, so one line can mix scripts:
+
+1. The rest of the element's `font-family` list, in order.
+2. The system's fonts for that character's script, in order, the first one installed that has the character: Malgun Gothic, Yu Gothic, Microsoft YaHei and Nirmala UI on Windows; the matching Apple and Noto fonts elsewhere.
+3. A short list of general fonts (Segoe UI, Arial, Noto Sans, DejaVu Sans …).
+
+BUI doesn't search every installed font. If a character is in a font that isn't on these lists, name that font in `font-family`, even when it's installed.
+
+Bold text gets the fallback's bold face when the system has one, and synthesized bold only when it doesn't.
+
+**Han characters follow their line.** Chinese, Japanese and Korean share Han characters but draw some of them differently. A line with kana is drawn as Japanese, a line with Hangul as Korean, and any other line as Chinese, whatever was drawn before it.
+
+**Fallback costs little.** Font files are mapped, not read: a 20 MB CJK font costs only the pages its glyphs are in, and the system can drop those under memory pressure. BUI keeps up to 240 font slots (a family at a size and weight, each fallback face included) and leaves room for a line's fallbacks before it lays the line out, so a page with many sizes of mixed-script text never draws empty boxes.
+
 ## Windows' GDI text (optional)
 
 On Windows, you can build BUI with Windows' own GDI text engine and system fonts instead: CMake `-DBUI_TEXT_GDI=ON`, or the `gdi-text` feature in Rust. Text then uses ClearType-style hinting and Windows' fonts, and the GPU renderer can't use Slug. Most apps should keep the default, which looks like Blender everywhere.
 
 ## Limits worth knowing
 
-- **No per-glyph font fallback.** Characters that Inter (or the chosen face) doesn't have show as boxes. A family list in CSS picks one face per element; it doesn't mix faces within a line.
 - **IME works on Windows only.** Input methods for Chinese, Japanese and Korean work in text fields and text areas on Windows, ported from Blender's GHOST (the candidate window follows the caret, the composition is drawn underlined at the caret). X11 and macOS aren't supported yet, and number fields and password fields take no IME, as in Blender.
 - **Right-to-left text** is reordered (bidi) but not shaped, so Arabic letters don't join.
 - **No OpenType features** (`font-feature-settings` and friends): the text engine doesn't shape, and Blender's doesn't either.
 - **Rust only:** text doesn't wrap around floats, and `text-align: justify` aligns left.
 
-<ComingSoon feature="Per-glyph font fallback and IME on X11 and macOS">
-Both are next on the list of things to port from Blender's source: BLF's fallback fonts, so missing characters find a face that has them, and input methods for the X11 and Cocoa windows (they use the same kit API as Windows).
+<ComingSoon feature="IME on X11 and macOS">
+Next on the list of things to port from Blender's source: input methods for the X11 and Cocoa windows (they use the same kit API as Windows).
 </ComingSoon>
 
 ## Troubleshooting
@@ -118,7 +137,7 @@ Both are next on the list of things to port from Blender's source: BLF's fallbac
 | Symptom | Fix |
 | --- | --- |
 | Monospace or serif text uses the UI font | Install a TrueType family such as DejaVu, Liberation or Noto, or set `BUI_FONT_DIR` to a folder that has one. Inter itself is always there. |
-| Boxes instead of characters | The face has no glyph for them, and there's no fallback yet. Use a face that covers your script with `BUI_FONT`, or register one. |
+| Boxes instead of characters | None of the fonts BUI falls back to has them (it doesn't search every installed font). Name a font that covers the script in `font-family`, whether it's installed or registered from code. Noto fonts cover almost every script. |
 | GPU text looks different from CPU text | Try `BUI_SLUG=0` to draw GPU text from the same glyph bitmaps the CPU uses. |
 
 ## Next steps

@@ -106,6 +106,17 @@ One simplification: columns are sized from their widest *single-line* content, a
 - `overflow: hidden` and `clip` clip their content.
 - `overflow: scroll` and `auto` scroll with the mouse wheel (hold <Kbd>Shift</Kbd> to scroll sideways) and show overlay scrollbars.
 - Give a scroll container an `.id(...)` and its scroll position survives re-renders. Read or set it from code with `window.scroll_offset(id)` and `window.set_scroll_offset(id, x, y)`.
+- `scrollbar-width: none` scrolls with no bar drawn and none to grab.
+- Scrolling moves the boxes that were laid out; it doesn't render your view again, and animations go on moving while it scrolls. A view that reads `window.scroll_offset` or `window.bounds_of` while it renders is rendered again when the page scrolls, so its reads stay current.
+
+### Scroll an element into view
+
+`window.scroll_into_view(id, at, glide)` scrolls the element's scroll container so the element sits at `at` of it (`0.0` the top, `0.5` the middle). It's resolved after layout in the same frame, so you don't need to read positions and render twice. `None` jumps there; `Some(seconds)` glides, eased like `cubic-bezier(0.25, 1, 0.5, 1)`. The wheel or a scrollbar drag stops a glide.
+
+```rust
+// keep the current line a third of the way down, gliding for 0.7 s
+window.scroll_into_view("current-line", 0.33, Some(0.7));
+```
 
 ### Scroll snapping
 

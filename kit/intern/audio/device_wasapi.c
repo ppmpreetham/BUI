@@ -89,6 +89,7 @@ struct BKAudioDevice {
   bool effects; /* keep the system's effects: the stream isn't RAW */
   HANDLE thread, wake; /* `wake`: the stream's buffer event (and stop) */
   volatile LONG stop;
+  volatile LONG waiting; /* the last try found no output (bk_audio_device_waiting) */
   CRITICAL_SECTION lock; /* `clock`, `base` for played() */
   IAudioClock *clock;
   UINT64 freq;
@@ -272,9 +273,11 @@ static DWORD WINAPI stream_thread(LPVOID param)
     if (!s.client) {
       if (!stream_open(d, &s) || !feed(d, &s) || FAILED(IAudioClient_Start(s.client))) {
         stream_close(d, &s);
+        InterlockedExchange(&d->waiting, 1);
         WaitForSingleObject(d->wake, 1000); /* no output now: try again in a while */
         continue;
       }
+      InterlockedExchange(&d->waiting, 0);
     }
     WaitForSingleObject(d->wake, 200);
     if (!d->stop && !feed(d, &s)) {
@@ -303,6 +306,11 @@ BKAudioDevice *bk_audio_device_open(BKAudioFill fill, void *data, int flags)
     return NULL;
   }
   return d;
+}
+
+bool bk_audio_device_waiting(BKAudioDevice *d)
+{
+  return InterlockedCompareExchange(&d->waiting, 0, 0) != 0;
 }
 
 double bk_audio_device_played(BKAudioDevice *d)

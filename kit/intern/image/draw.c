@@ -132,9 +132,24 @@ bool bk_image_ref_resolve(const BKImageRef *ref, int fit, int frame, const float
 {
   const BKImageFit target = {fit, BK_MAX(1, (int)lroundf(box[2])), BK_MAX(1, (int)lroundf(box[3])),
                              0.5f, 0.5f, BK_MAX(0, frame)};
-  if (ref->kind == BK_IMREF_SOURCE || ref->kind == BK_IMREF_VIDEO) {
-    const int rect[4] = {(int)floorf(box[0]), (int)floorf(box[1]), (int)ceilf(box[0] + box[2]),
-                         (int)ceilf(box[1] + box[3])};
+  const int rect[4] = {(int)floorf(box[0]), (int)floorf(box[1]), (int)ceilf(box[0] + box[2]),
+                       (int)ceilf(box[1] + box[3])};
+  if (ref->kind == BK_IMREF_SOURCE &&
+      bk_image_cache_scaled(ref->u.source, &target, rect, &r->ib))
+  {
+    if (!r->ib) {
+      return false;
+    }
+    /* the decode is the whole image (ib->crop of it, src_x x src_y intrinsic): the box crops */
+    float src[4];
+    bk_image_fit(&target, r->ib->src_x, r->ib->src_y, r->dst, src);
+    const float kx = r->ib->crop[2] / (float)r->ib->src_x, ky = r->ib->crop[3] / (float)r->ib->src_y;
+    r->src[0] = r->ib->crop[0] + src[0] * kx;
+    r->src[1] = r->ib->crop[1] + src[1] * ky;
+    r->src[2] = src[2] * kx;
+    r->src[3] = src[3] * ky;
+  }
+  else if (ref->kind == BK_IMREF_SOURCE || ref->kind == BK_IMREF_VIDEO) {
     r->ib = ref->kind == BK_IMREF_VIDEO ? bk_video_frame(ref->u.video, &target, rect) :
                                           bk_image_cache_get(ref->u.source, &target, rect);
     if (!r->ib) {

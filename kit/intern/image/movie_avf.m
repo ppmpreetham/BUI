@@ -35,6 +35,16 @@ typedef struct AvfMovie {
   double frame_dur;
 } AvfMovie;
 
+/* The NSURL of `path`, a url or a file (autoreleased; nil when it isn't one). */
+static NSURL *avf_url(const char *path)
+{
+  NSString *s = [NSString stringWithUTF8String:path];
+  if (!s) {
+    return nil;
+  }
+  return imb_path_is_url(path) ? [NSURL URLWithString:s] : [NSURL fileURLWithPath:s];
+}
+
 static void reader_drop(AvfMovie *m)
 {
   if (m->reader) {
@@ -98,7 +108,7 @@ static void *avf_open(const char *path, const uint8_t *mem, size_t size, BKImAni
   }
   AvfMovie *m = (AvfMovie *)MEM_callocN(sizeof(AvfMovie), "AvfMovie");
   @autoreleasepool {
-    NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
+    NSURL *url = avf_url(path);
     m->asset = url ? [[AVURLAsset alloc] initWithURL:url options:nil] : nil;
 #  pragma clang diagnostic push
 #  pragma clang diagnostic ignored "-Wdeprecated-declarations" /* the synchronous API */
@@ -289,7 +299,7 @@ static void *avf_audio_open(const char *path, int rate, int channels, int *r_rat
   s->channels = channels;
   bool ok = false;
   @autoreleasepool {
-    NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
+    NSURL *url = avf_url(path);
     s->asset = url ? [[AVURLAsset alloc] initWithURL:url options:nil] : nil;
 #  pragma clang diagnostic push
 #  pragma clang diagnostic ignored "-Wdeprecated-declarations" /* the synchronous API */
@@ -356,10 +366,26 @@ static bool avf_audio_seek(void *state, double t)
   return ok;
 }
 
+/* The asset's length in seconds; 0 when it doesn't say (a live stream). */
+static double avf_audio_duration(void *state)
+{
+  AvfSound *s = (AvfSound *)state;
+  double d = 0.0;
+  @autoreleasepool {
+#  pragma clang diagnostic push
+#  pragma clang diagnostic ignored "-Wdeprecated-declarations" /* the synchronous API */
+    const CMTime t = s->asset.duration;
+#  pragma clang diagnostic pop
+    d = CMTIME_IS_NUMERIC(t) ? CMTimeGetSeconds(t) : 0.0;
+  }
+  return d > 0.0 && d < 1e9 ? d : 0.0;
+}
+
 /** \} */
 
 const BKImAnimCodec imb_movie_avf = {"avfoundation", true, imb_is_a_movie, avf_open, avf_output,
                                      avf_next, avf_seek, avf_bytes, avf_close, avf_audio_open,
-                                     avf_audio_read, avf_audio_seek, avf_audio_close};
+                                     avf_audio_read, avf_audio_seek, avf_audio_close,
+                                     avf_audio_duration};
 
 #endif /* BUI_VIDEO_AVF */

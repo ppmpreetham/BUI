@@ -84,7 +84,15 @@ These render too, beyond solid lines:
 
 The element's subtree is drawn offscreen with the canvas' own drawing code, then filtered, clipped, masked and resampled (bilinear, like Blender's image transform), then composited back with the W3C formulas. This works the same on the CPU and GPU renderers.
 
-The result is cached by content, so **a page that doesn't change costs nothing**, however many effects it has.
+You don't have to think about the cost. BUI picks the cheapest way for each effect:
+
+- **Moves and scales are vectors.** `scale`, `translate` and transforms that only move and scale map what the element draws (text at the new size, rectangles, images) instead of drawing it into pixels. An animated `scale` costs what an animated color does.
+- **Turns and skews run on the GPU.** A `rotate`, a skew or a mirror draws the element once, and the GPU renderer turns that picture each frame. Only the matrix changes per frame; nothing is redrawn or uploaded again. The CPU renderer turns it on the CPU.
+- **Wide blurs work at their own resolution.** A `blur(64px)` can't show detail finer than about a third of its radius, so it is drawn and blurred at that resolution and stretched back, hundreds of times fewer pixels. Narrow blurs are three box blurs in integers, which the compiler vectorizes.
+- **Results are cached by stage.** The drawing, the filtered picture and the final image are kept separately, relative to the element. An element that only moves is never blurred again, a turning one only turns, a fading one only fades, and an animated blur radius reuses its drawing.
+- **What you can't see costs nothing.** Elements outside the window or their clip are skipped.
+
+So **a page that doesn't change costs nothing**, however many effects it has, and one that moves costs what moves. The full write-up, with measurements, is `docs/effects-performance.md` in the repository.
 
 <Hatch />
 
@@ -163,6 +171,8 @@ Every other property flips at the halfway point.
 ## Zero cost when still
 
 A window renders frames **only while something moves**. Finished or paused animations cost no CPU, and transitions alone don't wake anything until a value actually changes. You can check from code: `window.is_animating()` is `true` while CSS animations or transitions run.
+
+**A moving frame is only a redraw.** When an animation or transition changes only how things look (opacity, colors, shadows, filters, `transform`, `rotate`, `scale`, `translate`), each frame looks up the value and repaints the boxes that changed: no render, no cascade, no layout. That is as cheap as a [Motion](../motion/) value. 300 rows with running transitions cost about 0.6 ms of BUI's work a frame. Values that change layout (a width, a margin) still render full frames.
 
 Headless windows run on a **virtual clock** that moves only when you call `cx.advance_clock(duration)`, so tests can step animations exactly. [Headless testing](../headless-testing/#test-animations-with-a-virtual-clock) shows how.
 

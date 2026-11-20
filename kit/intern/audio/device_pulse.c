@@ -19,6 +19,7 @@
 
 #  include <dlfcn.h>
 #  include <pthread.h>
+#  include <stdatomic.h>
 #  include <stdint.h>
 #  include <string.h>
 #  include <time.h>
@@ -68,7 +69,8 @@ struct BKAudioDevice {
   void *data;
   pthread_t thread;
   pthread_mutex_t lock; /* the position below */
-  volatile int stop;
+  atomic_bool stop;
+  atomic_bool waiting; /* the last try found no server (read on the UI thread) */
   double written; /* seconds given to the server */
   double latency; /* what it held after the last write (seconds) */
   double stamp;   /* when that was (monotonic seconds) */
@@ -97,9 +99,11 @@ static void *stream_thread(void *param)
   BKAudioDevice *d = (BKAudioDevice *)param;
   float *buf = (float *)MEM_mallocN(sizeof(float) * BLOCK * CHANNELS, "pulse block");
   pa_simple *s = NULL;
-  while (!d->stop) {
-    if (!s && !(s = connect_server())) {
-      for (int i = 0; i < 10 && !d->stop; i++) {
+  while (!atomic_load(&d->stop)) {
+    const bool waiting = !s && !(s = connect_server());
+    atomic_store(&d->waiting, waiting);
+    if (waiting) {
+      for (int i = 0; i < 10 && !atomic_load(&d->stop); i++) {
         usleep(100000); /* no server now: try again in a second */
       }
       continue;
@@ -124,6 +128,11 @@ static void *stream_thread(void *param)
   }
   MEM_freeN(buf);
   return NULL;
+}
+
+bool bk_audio_device_waiting(BKAudioDevice *d)
+{
+  return atomic_load(&d->waiting);
 }
 
 BKAudioDevice *bk_audio_device_open(BKAudioFill fill, void *data, int flags)
@@ -163,7 +172,7 @@ void bk_audio_device_close(BKAudioDevice *d)
   if (!d) {
     return;
   }
-  d->stop = 1;
+  atomic_store(&d->stop, true);
   pthread_join(d->thread, NULL);
   pthread_mutex_destroy(&d->lock);
   MEM_freeN(d);

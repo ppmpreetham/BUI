@@ -129,3 +129,40 @@ fn the_background_follows_the_theme() {
     };
     assert_ne!(shot("light"), shot("dark"));
 }
+
+struct Reporting {
+    chat: Chat,
+    seen: std::rc::Rc<std::cell::RefCell<Option<std::ops::Range<usize>>>>,
+}
+
+impl Render for Reporting {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let seen = self.seen.clone();
+        body().m_0().child(div().w(px(700.0)).h(px(400.0))
+            .child(chat_list(&self.chat).on_view_change(move |info| *seen.borrow_mut() = Some(info.range.clone()))))
+    }
+}
+
+/// `on_view_change` tells the range the frame paints, in that frame: the
+/// first one too, whose size the list only learns after layout.
+#[test]
+fn the_view_change_is_the_painted_range() {
+    run("dark", |cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds { origin: point(px(0.0), px(0.0)), size: size(px(700.0), px(400.0)) })),
+            ..Default::default()
+        };
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let mut handle = None;
+        let win = cx.open_window(opts, |_, cx| {
+            let o = Options { start_at_end: true, ..Options::default() };
+            let chat = cx.new(|cx| ListState::new(ChatList::from_messages(synth::messages(0, 50), theme_palette(), 700.0, 400.0, o), cx));
+            handle = Some(chat);
+            cx.new(|_| Reporting { chat, seen: seen.clone() })
+        }).unwrap();
+        cx.draw(win.id);
+        let painted = handle.unwrap().read(cx).view_info().range;
+        assert!(!painted.is_empty(), "the first frame paints items");
+        assert_eq!(seen.borrow().clone(), Some(painted), "and reports them");
+    });
+}

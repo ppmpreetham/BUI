@@ -532,6 +532,31 @@ impl App {
         self.activation_hooks.push(Box::new(f));
     }
 
+    /// Resize a window to `size` (logical pixels), as the user dragging its
+    /// edge does: a native window asks the system, a headless one takes the
+    /// size at once (tests and benchmarks of resizing).
+    pub fn resize_window(&mut self, id: WindowId, size: Size<Pixels>) {
+        let Some(w) = self.windows.get_mut(id.0).and_then(|w| w.as_deref_mut()) else { return };
+        let (lw, lh) = (f32::from(size.width), f32::from(size.height));
+        match w.native {
+            // SAFETY: a live native window; the kit reports the new size back (BK_EV_CONFIGURE).
+            Some(n) => unsafe { sys::BK_window_set_size(n, lw.round() as c_int, lh.round() as c_int) },
+            None => {
+                let phys = ((lw * w.scale).round() as i32, (lh * w.scale).round() as i32);
+                if phys != w.phys && phys.0 > 0 && phys.1 > 0 {
+                    w.phys = phys;
+                    w.dirty = true;
+                    if !w.raster.is_null() {
+                        // SAFETY: ours; drawing makes a new one at the new size.
+                        unsafe { sys::BUI_raster_free(w.raster) };
+                        w.raster = std::ptr::null_mut();
+                    }
+                }
+            }
+        }
+        self.flush();
+    }
+
     /// Close a window (as if the user had).
     pub fn close_window(&mut self, id: WindowId) {
         if let Some(w) = self.windows.get_mut(id.0).and_then(|w| w.as_deref_mut()) {
@@ -610,7 +635,8 @@ impl App {
         }
         for id in 0..self.windows.len() {
             let Some(w) = self.windows[id].as_deref_mut() else { continue };
-            if !w.dirty && !w.scrolled && !w.motion_frame && !w.sel_repaint {
+            // a closed window draws no more frames (its animations stop with it)
+            if w.closed || (!w.dirty && !w.scrolled && !w.motion_frame && !w.sel_repaint && w.glides.is_empty()) {
                 continue;
             }
             match w.native {
@@ -661,7 +687,7 @@ impl App {
                 w.raster = sys::BUI_raster_create(pw, ph);
             }
             let target = if own { sys::BUI_raster_create(pw, ph) } else { w.raster };
-            let _s = span(Phase::Widgets);
+            let _s = span(Phase::HeadlessRaster);
             sys::BK_render(w.ctx, target, pw, ph, 1);
             // decodes this frame asked for: wait, then draw what arrived
             let mut st = sys::BKImageStats::default();
@@ -741,10 +767,16 @@ impl App {
     pub fn advance_clock(&mut self, d: std::time::Duration) {
         crate::motion::advance(d.as_secs_f64());
         for w in self.windows.iter_mut().flatten() {
+            if w.closed {
+                continue;
+            }
             w.clock.advance(d);
-            if w.caches.anim.any() {
-                w.dirty = true;
-            } else if crate::motion::active() {
+            // as a native window's next frame: a redraw (a full frame when a
+            // CSS value is more than paint)
+            if w.caches.anim.css_running() {
+                w.request_css_frame();
+            }
+            if crate::motion::active() {
                 w.request_motion_frame();
             }
         }
@@ -973,6 +1005,22 @@ unsafe extern "C" {
 
 type ViewFn = Box<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 
+/// An element asked into view: where in its scroll container, and how.
+struct Reveal {
+    key: Key,
+    at: f32,
+    glide: Option<f32>,
+}
+
+/// A scroll container gliding from one offset to another (seconds).
+struct Glide {
+    container: Key,
+    from: (f32, f32),
+    to: (f32, f32),
+    start: f64,
+    duration: f32,
+}
+
 /// A window (gpui's `Window`): its kit context, layout and interaction state.
 pub struct Window {
     id: usize,
@@ -991,6 +1039,10 @@ pub struct Window {
     scale: f32,
     view: Option<ViewFn>,
     frame: Option<Frame>,
+    /// While `emit` lends the frame to listeners: the bounds of the event's
+    /// path (the target and its ancestors), so `bounds_of` still answers for
+    /// them. Reused, so an event allocates nothing once it has grown.
+    lent_bounds: Vec<(Key, Bounds<f32>)>,
     /// Styles, text widths, images, the author sheet and the taffy tree:
     /// kept across frames.
     caches: LayoutCaches,
@@ -1012,6 +1064,12 @@ pub struct Window {
     animation_frame: bool,
     /// The next frame is Motion's values alone: a redraw (no render or layout).
     motion_frame: bool,
+    /// The redraw moves CSS animations and transitions too.
+    css_frame: bool,
+    /// The element asked into view this render ([`Window::scroll_into_view`]).
+    reveal: Option<Reveal>,
+    /// Scrolls gliding to an element.
+    glides: Vec<Glide>,
     /// CSS animation time (virtual in headless windows).
     clock: crate::anim::Clock,
     vsync: bool,
@@ -1079,6 +1137,7 @@ impl Window {
                 scale: 1.0,
                 view: None,
                 frame: None,
+                lent_bounds: Vec::new(),
                 caches: LayoutCaches::default(),
                 painter: Painter::new(),
                 state: UiState::default(),
@@ -1091,6 +1150,9 @@ impl Window {
                 frame_pending: false,
                 animation_frame: false,
                 motion_frame: false,
+                css_frame: false,
+                reveal: None,
+                glides: Vec::new(),
                 clock: crate::anim::Clock::new(!headless),
                 vsync: true,
                 closed: false,
@@ -1182,6 +1244,11 @@ impl Window {
         self.dirty = true;
     }
 
+    /// Paint the last frame again (no render, no layout): for state a painted element reads, like a hover highlight.
+    pub fn repaint(&mut self) {
+        self.sel_repaint = true;
+    }
+
     /// Content size in logical pixels.
     pub fn viewport_size(&self) -> Size<Pixels> {
         size(px(self.phys.0 as f32 / self.scale), px(self.phys.1 as f32 / self.scale))
@@ -1243,6 +1310,61 @@ impl Window {
         self.state.scroll.get(&id_key(id)).copied().unwrap_or((0.0, 0.0))
     }
 
+    /// Scroll the scroll container around the element `.id(id)` so the
+    /// element's top sits `at` of the way down it (0: at its top, 0.5: in its
+    /// middle), as `scrollIntoView` does. It is worked out after this frame's
+    /// layout, so it follows the layout the render makes: ask for it in
+    /// `render`, each render, to keep an element in place as the page changes
+    /// or the window is resized; nothing reads a placement and nothing renders
+    /// twice. `glide`: the seconds the scroll takes to get there (eased out;
+    /// its frames are scroll frames: no render), `None` jumps. A wheel or a
+    /// scrollbar drag on the container stops a glide.
+    pub fn scroll_into_view(&mut self, id: &str, at: f32, glide: Option<f32>) {
+        // validated here, at the boundary: a NaN would reach the scroll state
+        let at = if at.is_finite() { at.clamp(0.0, 1.0) } else { 0.0 };
+        let glide = glide.filter(|d| d.is_finite() && *d > 0.0);
+        self.reveal = Some(Reveal { key: id_key(id), at, glide });
+    }
+
+    /// Carry out the [`scroll_into_view`](Self::scroll_into_view) asked for
+    /// while `frame` was rendered: true when its container jumped (place the
+    /// frame again); a glide moves on in the next frames.
+    fn reveal(&mut self, frame: &crate::layout::Frame) -> bool {
+        let Some(r) = self.reveal.take() else { return false };
+        let Some(&i) = frame.by_key().get(&r.key) else { return false };
+        let nodes = &frame.nodes;
+        // the nearest container that scrolls vertically (a horizontal-only one can't place it)
+        let mut up = nodes[i].parent;
+        while let Some(k) = up.filter(|&k| nodes[k].scroll_range.1 <= 0.0) {
+            up = nodes[k].parent;
+        }
+        let Some(c) = up else { return false };
+        let (n, el) = (&nodes[c], &nodes[i]);
+        let (sx, sy) = n.scroll_pos;
+        let to = (sy + el.bounds.origin.y - n.bounds.origin.y - r.at * n.bounds.size.height).clamp(0.0, n.scroll_range.1);
+        let gliding = self.glides.iter().position(|g| g.container == n.key);
+        if gliding.is_some_and(|g| (self.glides[g].to.1 - to).abs() < 0.5) || (gliding.is_none() && (sy - to).abs() < 0.5) {
+            return false; // there, or on its way there
+        }
+        if let Some(g) = gliding {
+            self.glides.remove(g);
+        }
+        match r.glide {
+            Some(duration) => {
+                // from where it is now (a glide that was on its way included)
+                self.glides.push(Glide { container: n.key, from: (sx, sy), to: (sx, to), start: self.clock.now(),
+                                         duration });
+                self.scrolled = true;
+                self.animation_frame = true;
+                false
+            }
+            None => {
+                self.state.scroll.insert(n.key, (sx, to));
+                true
+            }
+        }
+    }
+
     pub fn set_scroll_offset(&mut self, id: &str, x: f32, y: f32) {
         self.state.scroll.insert(id_key(id), (x, y));
         self.dirty = true;
@@ -1254,8 +1376,12 @@ impl Window {
     /// keeps what it read while rendering.
     pub fn bounds_of(&self, id: &str) -> Option<Bounds<f32>> {
         self.scroll_read.set(true); // placements move with scroll
-        let f = self.frame.as_ref()?;
-        f.by_key().get(&id_key(id)).map(|&i| f.nodes[i].bounds)
+        let key = id_key(id);
+        match self.frame.as_ref() {
+            Some(f) => f.by_key().get(&key).map(|&i| f.nodes[i].bounds),
+            // inside a listener the frame is lent out: the event's path still answers
+            None => self.lent_bounds.iter().find(|(k, _)| *k == key).map(|&(_, b)| b),
+        }
     }
 
     /// Put `text` on the clipboard.
@@ -1426,6 +1552,7 @@ impl Window {
                                crate::widgets::WidgetAsk::Ensure(spec) => widgets.ensure(canvas, key, spec, scale),
                                crate::widgets::WidgetAsk::Height(w) => (0.0, widgets.height_for(key, w, scale)),
                            });
+        crate::vlist::run_after_layout(&frame, self, app);
         // CSS animations / transitions still moving: render again next frame;
         // Motion's values alone: redraw (nothing running: no frames, so an
         // idle window costs no CPU)
@@ -1456,7 +1583,14 @@ impl Window {
                 stuck = true;
             }
         }
-        self.scroll_free = !sticks && !self.scroll_read.get() && !self.caches.anim.tracks_placement();
+        // an element asked into view this render: its container scrolls, in
+        // this very frame for a jump
+        if self.reveal(&frame) {
+            crate::layout::replace(&mut frame, vp, &self.state, &mut self.caches);
+        }
+        // a scroll is a placement alone unless the view reads placements or a
+        // container sticks to its end (animations follow it: see scroll_frame)
+        self.scroll_free = !sticks && !self.scroll_read.get();
         self.present(app, frame, None);
         if stuck {
             self.dirty = true;
@@ -1466,30 +1600,62 @@ impl Window {
         if container_changed {
             self.dirty = true;
         }
+        // time alone moves what animates: redraws, not renders (a CSS value
+        // that is more than paint makes its redraw a full frame)
         if css {
-            self.request_animation_frame();
-        } else if motion || scrolled {
+            self.request_css_frame();
+        }
+        if motion || scrolled {
             self.request_motion_frame();
         }
     }
 
-    /// A frame of Motion's values alone: the last frame's elements, with
+    /// A frame of moving values alone (CSS animations', then Motion's): the last frame's elements, with
     /// their values set again and painted (no render, cascade or layout).
     fn redraw(&mut self, app: &mut App) {
-        self.motion_frame = false;
         let Some(mut frame) = self.frame.take() else { return };
-        let vp = self.viewport();
-        if !self.caches.anim.redraw_motion(&mut frame, &mut self.caches.styles, vp) {
+        let Some((css_dirty, css_running)) = self.sample_values(&mut frame) else {
             self.frame = Some(frame);
             self.dirty = true;
             return self.rebuild(app);
-        }
+        };
         // no layout ran: the widgets are the last frame's
         self.widgets.keep();
         // the boxes the values changed: only they are painted again
-        let dirty = self.caches.anim.take_redrawn();
+        let mut dirty = self.caches.anim.take_redrawn();
+        if dirty.len() != frame.nodes.len() {
+            dirty.clear();
+            dirty.resize(frame.nodes.len(), false);
+        }
+        dirty.iter_mut().zip(&css_dirty).for_each(|(d, c)| *d |= *c);
         self.present(app, frame, Some(&dirty));
+        // the marks Motion keeps are its own: drop the CSS ones
+        dirty.iter_mut().zip(&css_dirty).filter(|(_, c)| **c).for_each(|(d, _)| *d = false);
         self.caches.anim.give_redrawn(dirty);
+        self.caches.anim.give_css_dirty(css_dirty);
+        self.request_more_values(css_running);
+    }
+
+    /// The moving values of `frame` set again for now: CSS animations' first,
+    /// Motion's on top (as at a full frame). The boxes CSS changed and whether
+    /// its animations run on; `None` when a value changes layout (a render then).
+    fn sample_values(&mut self, frame: &mut Frame) -> Option<(Vec<bool>, bool)> {
+        self.motion_frame = false;
+        let css = std::mem::take(&mut self.css_frame);
+        let vp = self.viewport();
+        let moved_css = if css {
+            self.caches.anim.redraw_css(self.clock.now(), frame, &mut self.caches.styles, vp)
+        } else {
+            Some((Vec::new(), false))
+        };
+        moved_css.filter(|_| self.caches.anim.redraw_motion(frame, &mut self.caches.styles, vp))
+    }
+
+    /// Another frame of values when CSS animations (`css_running`) or Motion's run on.
+    fn request_more_values(&mut self, css_running: bool) {
+        if css_running {
+            self.request_css_frame();
+        }
         if crate::motion::active() {
             self.request_motion_frame();
         }
@@ -1512,10 +1678,38 @@ impl Window {
             self.dirty = true;
             return self.rebuild(app);
         }
-        let Some(frame) = self.frame.take() else { return };
+        let Some(mut frame) = self.frame.take() else { return };
+        // what follows placement: Motion's in-view states (a change renders
+        // next), its layout animations and the scroll-linked values (redraws).
+        // Animations alone don't: their values are in the styles placement reads
+        let (in_view, flipped) = self.caches.anim.after_layout(&frame, &self.caches.styles, vp);
+        if flipped {
+            self.caches.anim.redraw_motion(&mut frame, &mut self.caches.styles, vp);
+        }
+        if crate::motion::update_scroll(&frame) {
+            self.request_motion_frame();
+        }
+        if in_view {
+            self.dirty = true;
+        }
+        // what animates moves on under the scroll (a glide scrolls every frame for
+        // as long as it runs): this frame's values, over the new placement
+        let mut sampled = None;
+        if self.motion_frame {
+            let Some((css_dirty, css_running)) = self.sample_values(&mut frame) else {
+                self.frame = Some(frame);
+                self.dirty = true;
+                return self.rebuild(app);
+            };
+            self.caches.anim.give_css_dirty(css_dirty);
+            sampled = Some(css_running);
+        }
         self.widgets.keep(); // no layout ran: the widgets are the last frame's
         self.same_frame = true; // the same boxes: the selection's index of them stays
         self.present(app, frame, None);
+        if let Some(css_running) = sampled {
+            self.request_more_values(css_running);
+        }
     }
 
     /// Draw again on the next display refresh, for Motion's values alone.
@@ -1524,8 +1718,37 @@ impl Window {
         self.animation_frame = true;
     }
 
+    /// Draw again on the next display refresh, for CSS animations and
+    /// transitions: their values move in a redraw ([`Animations::redraw_css`](crate::anim::Animations)).
+    fn request_css_frame(&mut self) {
+        self.css_frame = true;
+        self.request_motion_frame();
+    }
+
+    /// Move the gliding scrolls on (see [`scroll_into_view`](Self::scroll_into_view)):
+    /// each frame of a glide is a scroll frame.
+    fn step_glides(&mut self) {
+        if self.glides.is_empty() {
+            return;
+        }
+        let now = self.clock.now();
+        let ease = crate::anim::Timing::Bezier(0.25, 1.0, 0.5, 1.0);
+        for g in &self.glides {
+            let t = if g.duration > 0.0 { ((now - g.start) as f32 / g.duration).clamp(0.0, 1.0) } else { 1.0 };
+            let k = ease.apply(t, false);
+            let at = (g.from.0 + (g.to.0 - g.from.0) * k, g.from.1 + (g.to.1 - g.from.1) * k);
+            self.state.scroll.insert(g.container, at);
+        }
+        self.glides.retain(|g| ((now - g.start) as f32) < g.duration);
+        self.scrolled = true;
+        if !self.glides.is_empty() {
+            self.animation_frame = true;
+        }
+    }
+
     /// Render the window when it needs it: in full, or a redraw.
     fn update(&mut self, app: &mut App) {
+        self.step_glides();
         if self.dirty {
             self.rebuild(app);
         } else if self.scrolled {
@@ -1636,6 +1859,12 @@ impl Window {
         let Some(frame) = self.frame.take() else { return };
         app.propagate = true;
         let mut cur = frame.by_key().get(&key).copied();
+        self.lent_bounds.clear();
+        let mut node = cur;
+        while let Some(i) = node {
+            self.lent_bounds.push((frame.nodes[i].key, frame.nodes[i].bounds));
+            node = frame.nodes[i].parent;
+        }
         'up: while let Some(i) = cur {
             if let Some(ls) = frame.el(i).and_then(|e| e.listeners.as_deref()) {
                 for l in pick(ls) {
@@ -1648,6 +1877,7 @@ impl Window {
             cur = frame.nodes[i].parent;
         }
         app.propagate = true;
+        self.lent_bounds.clear();
         if self.frame.is_none() {
             self.frame = Some(frame);
         }
@@ -1921,6 +2151,10 @@ impl Window {
         for key in path.iter().rev() {
             let Some(&i) = f.by_key().get(key) else { continue };
             let n = &f.nodes[i];
+            // `scrollbar-width: none`: no bar to grab
+            if self.caches.styles[n.style].layout.scrollbar_width <= 0.0 {
+                continue;
+            }
             let ry = n.scroll_range.1;
             let b = n.bounds;
             if ry <= 0.0 || x < b.origin.x + b.size.width - 10.0 || x > b.origin.x + b.size.width {
@@ -1954,6 +2188,7 @@ impl Window {
         let free = (h - th).max(1.0);
         let sy = (((y - grab - n.bounds.origin.y) / free) * ry).clamp(0.0, ry);
         let sx = n.scroll_pos.0.clamp(0.0, rx);
+        self.glides.retain(|g| g.container != key);
         self.state.scroll.insert(key, (sx, sy));
         self.scrolled = true;
     }
@@ -1973,6 +2208,8 @@ impl Window {
             };
             let (nx, ny) = snap(f, &self.caches.styles, i, (sx, sy), (nx, ny));
             if (nx, ny) != (sx, sy) {
+                // the user scrolls: a glide there stops
+                self.glides.retain(|g| g.container != *key);
                 self.state.scroll.insert(*key, (nx, ny));
                 self.scrolled = true;
                 return;

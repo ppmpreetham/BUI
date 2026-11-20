@@ -45,6 +45,9 @@ double bk_audio_device_played(BKAudioDevice *d);
 /* Stops the stream; `fill` is not called once this returns. It may wait for the device's thread
  * (a stream opening, a decoder read): bk_audio_free runs it on its own thread, never the UI's. */
 void bk_audio_device_close(BKAudioDevice *d);
+/* True while the stream has no output to play to (none connected, or the sound server is down):
+ * it keeps trying on its own. False before its first try and once it plays. */
+bool bk_audio_device_waiting(BKAudioDevice *d);
 
 /* -- the player (audio.c): one movie's sound ----------------------------------------- */
 
@@ -73,3 +76,14 @@ double bk_audio_clock(BKAudio *a);
 /* The file has an audio track that plays (false until the reader opened it,
  * and after it failed). */
 bool bk_audio_has_track(BKAudio *a);
+/* The reader could not open the track (no audio, a codec the system lacks, a
+ * file or url that doesn't answer), or a read failed mid-track and the device
+ * has played what came before it. False until it tried; true for NULL. */
+bool bk_audio_failed(BKAudio *a);
+/* The device has no output to play to now (bk_audio_device_waiting). */
+bool bk_audio_waiting(BKAudio *a);
+/* The track's length in seconds once the reader opened it; 0 when unknown. */
+double bk_audio_duration(BKAudio *a);
+/* The track played to its end, or to a read that failed (not looping), and the
+ * device has played it all. */
+bool bk_audio_ended(BKAudio *a);

@@ -185,12 +185,18 @@ typedef struct BKImAnimCodec {
   /* The next block holds `t` or starts a little before it (audio.c skips on). */
   bool (*audio_seek)(void *state, double t);
   void (*audio_close)(void *state);
+  /* The length of the audio track in seconds, <= 0 when unknown (NULL: the backend can't
+   * tell; BK_sound_duration is then 0). Optional, unlike the hooks above. */
+  double (*audio_duration)(void *state);
 } BKImAnimCodec;
 extern const BKImAnimCodec imb_gif_codec, imb_webp_codec;
 /* The audio readers' block buffer: `*buf` (`*cap` floats) grown to hold `floats` (its old
  * contents are not kept); returns it. A block is then `floats / channels` frames; a block of
  * none is skipped by the reader, not taken for the end. */
 float *imb_audio_block_reserve(float **buf, size_t *cap, size_t floats);
+/* `path` is a url ("scheme://..."), not a file: the backends that open files and urls apart
+ * (AVFoundation, GStreamer) ask. */
+bool imb_path_is_url(const char *path);
 /* Video backends (movie_*.c), each compiled when the build has it. */
 extern const BKImAnimCodec imb_movie_mf, imb_movie_avf, imb_movie_gst;
 /* Those compiled in (movie.c: the build's choice), tried in order; NULL-ended. */
@@ -289,6 +295,14 @@ double bk_image_next_due(BKContext *ctx);
  * otherwise NULL, with a decode queued (visible priority) whose arrival
  * redraws `rect` (window pixels, x0 y0 x1 y1) of the pass' context. */
 const BKImBuf *bk_image_cache_get(BKImageSource *s, const BKImageFit *target, const int rect[4]);
+/* What a box `want` decodes: the whole image (no crop) at its scale in that box, rounded up to a
+ * step of 2^(1/4) and never above intrinsic. False when the size is unknown or nothing shows. */
+bool bk_image_cache_whole(BKImageSource *s, const BKImageFit *want, BKImageFit *r_whole);
+/* bk_image_cache_get of the whole decode for `want` into `r_ib` (src_x x src_y is the intrinsic
+ * size it scales; the box crops it when drawn); while a new size decodes, the last size of it
+ * drawn. False (nothing asked) when bk_image_cache_whole is. */
+bool bk_image_cache_scaled(BKImageSource *s, const BKImageFit *want, const int rect[4],
+                           const BKImBuf **r_ib);
 void bk_image_cache_prefetch(BKImageSource *s, const BKImageFit *target);
 
 /* A private entry: one player's (a <video>), outside the shared table and

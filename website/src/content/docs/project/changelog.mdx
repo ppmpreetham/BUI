@@ -23,6 +23,11 @@ These are on `main` and will ship in the next release; the details are under **U
 - **Windows.** Resizing a window is smoother and renders far fewer frames, and a window that animates for ever no longer ignores the mouse and keyboard.
 - **Fixes.** Tailwind `text-sm` line heights and `truncate` now show the `…`; form widgets and overlays paint in the right order in Rust.
 - **Editor extensions** for `rsx!` in VS Code and Zed. See [Editor support](../../rust/editor-support/).
+- **Effects that cost almost nothing.** CSS animations and transitions of colours, opacity and transforms repaint without rendering or laying out; `scale` draws as vectors; a wide blur works at a fraction of the resolution and is cached, so a turning 64 px blurred cover went from 5 s to 2 ms a frame. Turns and skews run on the GPU. See [Effects and animations](../../rust/effects-and-animations/).
+- **Sound without a picture.** `BK_sound_*` (Rust `blenderui::Sound`) plays an audio file or url, with play, pause, seek and volume. See [Video](../../concepts/video/).
+- **Fonts for every script.** A CSS family list is used whole, glyphs a font lacks come from the rest of the list, then from the system's fallback fonts for their script when one is installed, and installed fonts are found by their own names. See [Text and fonts](../../concepts/text-and-fonts/).
+- **Rust: `Window::scroll_into_view`**, with an eased glide, and hover and copy on painted lists. See [Virtual lists](../../rust/virtual-list/).
+- **Images** are no longer repainted at every render, and a window resize reuses their decodes instead of blinking.
 
 ## In 0.5.1
 

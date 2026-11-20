@@ -237,6 +237,18 @@ static IMFSourceReader *open_reader(const char *path, bool video)
   return reader;
 }
 
+/* The length of the file a reader reads, in seconds; 0 when the source doesn't say. */
+static double reader_duration(IMFSourceReader *reader)
+{
+  PROPVARIANT dur;
+  memset(&dur, 0, sizeof(dur)); /* VT_UI8: nothing to clear */
+  return SUCCEEDED(IMFSourceReader_GetPresentationAttribute(
+             reader, (DWORD)MF_SOURCE_READER_MEDIASOURCE, &MF_PD_DURATION, &dur)) &&
+                 dur.vt == VT_UI8 ?
+             (double)dur.uhVal.QuadPart / 1e7 :
+             0.0;
+}
+
 static void *mf_open(const char *path, const uint8_t *mem, size_t size, BKImAnimInfo *r_info)
 {
   (void)mem;
@@ -280,14 +292,7 @@ static void *mf_open(const char *path, const uint8_t *mem, size_t size, BKImAnim
   m->interlaced = interlace != MFVideoInterlace_Progressive;
   const UINT32 rn = (UINT32)(rate >> 32), rd = (UINT32)rate;
   m->frame_dur = rn && rd ? (double)rd / rn : 1.0 / 30.0;
-  PROPVARIANT dur;
-  memset(&dur, 0, sizeof(dur)); /* VT_UI8: nothing to clear */
-  r_info->duration =
-      SUCCEEDED(IMFSourceReader_GetPresentationAttribute(
-          m->reader, (DWORD)MF_SOURCE_READER_MEDIASOURCE, &MF_PD_DURATION, &dur)) &&
-              dur.vt == VT_UI8 ?
-          (double)dur.uhVal.QuadPart / 1e7 :
-          0.0;
+  r_info->duration = reader_duration(m->reader);
   r_info->src_w = src_w;
   r_info->src_h = src_h;
   r_info->loops = 1;
@@ -462,6 +467,11 @@ static void mf_audio_close(void *state)
   MEM_freeN(s);
 }
 
+static double mf_audio_duration(void *state)
+{
+  return reader_duration(((MFSound *)state)->reader);
+}
+
 /* Float out, at `rate` and `channels` when they are given (the reader's
  * resampler), else at the track's own. */
 static bool set_audio_output(IMFSourceReader *reader, int rate, int channels)
@@ -585,7 +595,7 @@ static bool mf_audio_seek(void *state, double t)
 
 const BKImAnimCodec imb_movie_mf = {"mf", true, imb_is_a_movie, mf_open, mf_output, mf_next,
                                     mf_seek, mf_bytes, mf_close, mf_audio_open, mf_audio_read,
-                                    mf_audio_seek, mf_audio_close};
+                                    mf_audio_seek, mf_audio_close, mf_audio_duration};
 
 /** \} */
 

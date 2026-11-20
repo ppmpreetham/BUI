@@ -345,7 +345,7 @@ fn error(slot: Div, e: &dyn std::fmt::Display) -> Div {
 
 fn table_region<T: Send + Sync + 'static>(slot: Div, link: Rc<Link<T>>) -> Div {
     let (state, handle) = (link.state, link.handle);
-    handle.ops.update_quiet(|o| *o = Some(Rc::clone(&link) as Rc<dyn Ops>));
+    handle.ops.update_untracked(|o| *o = Some(Rc::clone(&link) as Rc<dyn Ops>));
     let listener = Rc::clone(&link);
     let table = TableElement::new(&state).on_event(move |e, w, cx| listener.on_event(e, w, cx));
     let menu = handle.menu.get().map(|m| {

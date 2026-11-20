@@ -364,7 +364,7 @@ impl IntoElement for VirtualList {
                     state
                 }
             };
-            handle.ops.update_quiet(|o| *o = Some(Rc::new(ListLink { state })));
+            handle.ops.update_untracked(|o| *o = Some(Rc::new(ListLink { state })));
             let select = |i: usize, list: &mut RowList| {
                 let id = list.source.id_at(i);
                 list.style.selected = if list.style.selected == id { None } else { id };
@@ -430,13 +430,13 @@ impl IntoElement for ChatList {
             let fresh = shown.with(|s| s.as_ref().is_none_or(|s| !Arc::ptr_eq(s, &messages)));
             let existing = slot.get().filter(|_| !fresh);
             let state = existing.unwrap_or_else(|| {
-                shown.update_quiet(|s| *s = Some(Arc::clone(&messages)));
+                shown.update_untracked(|s| *s = Some(Arc::clone(&messages)));
                 let list = ChatCore::from_messages(messages.to_vec(), theme_palette(), 400.0, 300.0, options);
                 let state = cx.new(|cx| ListState::new(list, cx));
                 slot.set(Some(state));
                 state
             });
-            handle.ops.update_quiet(|o| *o = Some(Rc::new(ListLink { state })));
+            handle.ops.update_untracked(|o| *o = Some(Rc::new(ListLink { state })));
             let taken = std::mem::replace(el, Div::new("div"));
             *el = taken.child(chat_list(&state).on_view_change(view_changed(handle, on_range_change)));
         })
