@@ -1,0 +1,7 @@
+/tmp/
+/ext/bui/csrc/
+/lib/bui/*.so
+/lib/bui/*.bundle
+/lib/bui/*/
+/*.gem
+/Gemfile.lock

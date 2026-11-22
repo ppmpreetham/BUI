@@ -3,7 +3,8 @@ so the published crate is self-contained. Run before `cargo package` / `cargo pu
 
     python bindings/rust/scripts/vendor_c.py
 
-`csrc/` is git-ignored; inside the repo, build.rs uses the repo itself.
+`csrc/` is git-ignored; inside the repo, build.rs uses the repo itself. The Ruby gem vendors
+the same sources into its own folder (`--dest bindings/ruby/ext/bui/csrc`, its `rake vendor`).
 
 What build.rs configures (BUI_BUILD_TESTS / EXAMPLES / PYTHON_BINDINGS / UI / QT_BACKEND
 off) needs: the top CMakeLists.txt (+ the version in bindings/python/bui/_version.py),
@@ -15,13 +16,14 @@ and tests/bui_png.h, which the C API includes). Test directories, generators and
 are left out. The script checks that every source the CMake files name is present.
 """
 
+import argparse
 import re
 import shutil
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-DEST = ROOT / "bindings" / "rust" / "blenderui-sys" / "csrc"
+DEST = ROOT / "bindings" / "rust" / "blenderui-sys" / "csrc"  # --dest moves it
 DIRS = ["core", "types", "gpu", "compat", "kit", "api", "bindings/imgui"]
 FILES = ["CMakeLists.txt", "features.json", "features.cmake", "LICENSE", "bindings/python/bui/_version.py", "ui/CMakeLists.txt"]
 # relative directories (from ROOT) never needed by the crate's CMake configuration
@@ -75,8 +77,15 @@ def ship_licenses() -> list[str]:
 
 
 def main() -> None:
-    shipped = ship_licenses()
-    print(f"license files copied into {len(shipped)} crates: {', '.join(shipped)}")
+    global DEST
+    parser = argparse.ArgumentParser(description="Copy BUI's C sources into a package.")
+    parser.add_argument("--dest", type=Path, help="where to (default: the Rust crate's csrc/)")
+    dest = parser.parse_args().dest
+    if dest:
+        DEST = dest.resolve()  # another package (the Ruby gem): the crates' licenses are not its business
+    else:
+        shipped = ship_licenses()
+        print(f"license files copied into {len(shipped)} crates: {', '.join(shipped)}")
     if DEST.exists():
         shutil.rmtree(DEST)
     for d in DIRS:

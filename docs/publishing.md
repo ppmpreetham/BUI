@@ -144,6 +144,11 @@ One-time setup:
   `bindings/lua/blenderui-<version>-1.rockspec`; the rock itself is built from the tag by whoever runs
   `luarocks install blenderui` (it needs CMake and a C compiler). The first upload creates the package.
 - **PyPI:** no secret, see above.
+- **RubyGems:** not in `release.yml` yet: the gem is published by hand. `cd bindings/ruby && rake gem`
+  copies the kit's C sources into `ext/bui/csrc/` (`vendor_c.py --dest`) and builds
+  `blenderui-<version>.gem`, which builds the kit wherever it is installed (it needs CMake and a C and
+  C++20 compiler); `gem push blenderui-<version>.gem`, logged in as the gem's owner. The version is
+  `bindings/ruby/lib/bui/version.rb`, which `tools/bump_version.py` moves with the others.
 
 Try it without publishing: Actions > release > Run workflow, enter the tag and leave
 "publish" unticked. That runs the checks and the CI suite, then `cargo publish --dry-run` and

@@ -23,6 +23,7 @@ Where the version lives (one source of truth per registry, all moved together):
 * npm (only with `--npm`): every already-published package in `bindings/package.json`'s workspaces
   moves to the same version; a package not on npm yet keeps its own first version. All of them
   follow `@blender-ui/native` in their dependency range. npm versions are otherwise independent of the tag.
+* Ruby: `VERSION` in `bindings/ruby/lib/bui/version.rb` (the gem reads it).
 * LuaRocks: `bindings/lua/blenderui-<version>-1.rockspec` (its version, its source tag and its file
   name move; the old file is removed, as a rename).
 * `CHANGELOG.md`: `[Unreleased]` becomes a dated section and a fresh `[Unreleased]` opens.
@@ -145,6 +146,9 @@ def plan_edits(new: str, npm: str | None) -> tuple[dict[Path, str], list[Path]]:
                 line = re.sub(r'(version\s*=\s*")[^"]+(")', rf"\g<1>{new}\g<2>", line)
             out.append(line)
         put(toml, "".join(out))
+
+    gem = ROOT / "bindings" / "ruby" / "lib" / "bui" / "version.rb"
+    put(gem, re.sub(r'(VERSION\s*=\s*")[^"]+(")', rf"\g<1>{new}\g<2>", read(gem), count=1))
 
     # LuaRocks: the version is in the file name too, so the rockspec is renamed
     (rock,) = rockspecs()

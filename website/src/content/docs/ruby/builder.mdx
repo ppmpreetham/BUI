@@ -1,0 +1,102 @@
+---
+title: Build with blocks
+description: BUI::Builder makes a tree of Blender widgets from Ruby blocks. Containers take their children in a block, widgets take their handler, and every call returns the node it made.
+section: Ruby
+order: 20
+languages: ["ruby"]
+sources: ["bindings/ruby/lib/bui/builder.rb", "bindings/ruby/lib/bui/node.rb", "bindings/ruby/lib/bui.rb", "bindings/ruby/examples/counter.rb", "bindings/ruby/examples/todos.rb", "bindings/ruby/test/test_builder.rb", "kit/intern/kit_core.c"]
+---
+
+**`BUI::Builder` turns nested Ruby blocks into a tree of Blender widgets.** A container's block builds its children; a widget's block is its handler. Each call returns the `BUI::Node` it made, so a handler can change another widget later.
+
+```ruby title="counter.rb"
+require "bui"
+
+BUI.app do
+  window "Counter", width: 300, height: 120 do
+    count = 0
+    column padding: 16, spacing: 8 do
+      shown = label "0", text_align: "center", bold: true
+      row spacing: 4 do
+        button("Decrement") { shown.text = (count -= 1).to_s }
+        button("Increment") { shown.text = (count += 1).to_s }
+      end
+    end
+  end
+end
+```
+
+`window`'s block builds into the window's root, a column. `BUI::Builder.new(node).build { ... }` builds into any node you have.
+
+## Containers
+
+`column`, `row`, `box`, `grid`, `scroll` and `frame` take their children in a block. `panel(title, open: true)` is a Blender panel, with its header and open and close animation. `node(type)` makes any other node type, children and all.
+
+The children of a `frame` are placed with Tk's layout managers:
+
+```ruby
+frame do
+  button("Back").pack(side: :left)
+  button("Next").pack(side: :right)
+  label("Page 2").pack(expand: true, fill: :both)
+end
+```
+
+## Widgets and their blocks
+
+| Method | Node | The block gets |
+| --- | --- | --- |
+| `label(text)` | `"label"` | |
+| `button(text)` | `"button"` | the event, on each click |
+| `checkbox(text, value: false)`, `toggle(text)` | `"checkbox"`, `"toggle"` | `true` or `false`, and the event |
+| `slider(label, value:, min:, max:)`, `number(label, ...)` | `"slider"`, `"number"` | the new Float, and the event |
+| `text_field(value, placeholder:)`, `text_area(value)` | `"text"`, `"textarea"` | the text as it is typed, and the event |
+| `dropdown(items, value: 0)` | `"dropdown"` | the index, the item, and the event |
+| `menu_button(text, items)` | `"menubutton"` | (each item's `action:` runs) |
+| `progress(value)`, `separator`, `image(path)`, `canvas`, `tree` | | |
+
+Return in a text field is `node.on_submit { ... }`. Menu items are Hashes: `{ text: "Open", shortcut: "Ctrl O", action: -> { open } }`, with `nil` for a separator and `items:` for a submenu.
+
+## Options are properties
+
+Keyword options are the kit's properties by name, so anything a node has is one keyword away: `padding:`, `spacing:`, `enabled: false`, `description:` (the tooltip), `weight: 0` (keep the natural width instead of sharing the row), `bold: true`, `text_align: "center"`. A key the node doesn't have raises `ArgumentError`, and the half-made widget is freed.
+
+## Self inside the blocks
+
+A block without arguments runs with the builder as `self`, which is what lets you write `button` instead of `ui.button`. Your own methods and instance variables aren't reachable from there. When you need them, take the builder as an argument and `self` stays yours:
+
+```ruby
+class Counter
+  def initialize(ui)
+    @count = 0
+    ui.column do |col|
+      @shown = col.label "0"
+      col.button("Increment") { increment }
+    end
+  end
+
+  def increment
+    @shown.text = (@count += 1).to_s
+  end
+end
+```
+
+## Changing the tree later
+
+Blocks run once, when the tree is built. After that you change nodes directly: set `text`, `value` or any property, add rows with `<<`, and `free` the ones you don't need. A handler may free its own node, so a "Delete" button can remove the row it sits in:
+
+```ruby
+row = BUI::Node.new("row")
+list << row
+BUI::Builder.new(row).build do
+  checkbox(title)
+  button("Delete", weight: 0) { row.free }
+end
+```
+
+## Next steps
+
+<CardGrid>
+  <Card title="BUI for Ruby" href="docs/ruby/overview/" icon="arrow-right">Nodes, events, windows, threads and headless tests.</Card>
+  <Card title="Blender's widgets" href="docs/concepts/blender-widgets/" icon="squares-four">What each widget does, and how it feels to use.</Card>
+</CardGrid>

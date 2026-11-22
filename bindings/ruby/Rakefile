@@ -1,0 +1,44 @@
+# frozen_string_literal: true
+
+# rake compile   builds the extension into lib/bui/ (BUI_SANITIZE=address for AddressSanitizer)
+# rake test      compiles, then runs test/ (headless: no window needed)
+# rake vendor    copies BUI's C sources into ext/bui/csrc/ (for the published gem)
+# rake gem       vendors, then builds blenderui-<version>.gem
+#
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+require "rake/testtask"
+require "rbconfig"
+
+BUILD = File.join("tmp", RUBY_PLATFORM, RUBY_VERSION)
+EXT = "bui_ext.#{RbConfig::CONFIG['DLEXT']}".freeze
+
+desc "Build the extension into lib/bui/"
+task :compile do
+  mkdir_p BUILD
+  Dir.chdir(BUILD) do
+    ruby File.expand_path("ext/bui/extconf.rb", __dir__)
+    # RubyInstaller's devkit has make; MSYS2's own Ruby has mingw32-make
+    make = ENV["MAKE"] || %w[make mingw32-make].find { |m| system(m, "--version", out: File::NULL, err: File::NULL) }
+    sh make || "make"
+  end
+  cp File.join(BUILD, EXT), "lib/bui/#{EXT}"
+end
+
+Rake::TestTask.new(test: :compile) do |t|
+  t.libs << "lib" << "test"
+  t.test_files = FileList["test/test_*.rb"]
+  t.warning = true
+end
+
+desc "Copy BUI's C sources into ext/bui/csrc/"
+task :vendor do
+  sh ENV.fetch("PYTHON", "python3"), "../rust/scripts/vendor_c.py", "--dest", "ext/bui/csrc"
+end
+
+desc "Build the gem (with the vendored C sources)"
+task gem: :vendor do
+  sh "gem", "build", "blenderui.gemspec"
+end
+
+task default: :test

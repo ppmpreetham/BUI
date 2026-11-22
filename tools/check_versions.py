@@ -61,6 +61,9 @@ def main() -> int:
     found["bindings/lua rockspec: version"] = re.search(r'^version\s*=\s*"([^"]+)-\d+"', rock, re.M).group(1)
     found["bindings/lua rockspec: source tag"] = re.search(r'tag\s*=\s*"v([^"]+)"', rock).group(1)
 
+    found["bindings/ruby/lib/bui/version.rb"] = re.search(
+        r'VERSION\s*=\s*"([^"]+)"', read(ROOT / "bindings" / "ruby" / "lib" / "bui" / "version.rb")).group(1)
+
     # the DUB package and its hand-written copies of the kit version
     found["bindings/d/dub.json"] = json.loads(read(D / "dub.json"))["version"]
     dkit = read(D / "source" / "bui" / "kit.d")

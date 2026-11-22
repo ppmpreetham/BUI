@@ -4,7 +4,7 @@
     python tools/gen_doc_images.py --site     # website/public/images/shots/, dark + light,
                                               # every language (see INDEX.md there)
     python tools/gen_doc_images.py --site --only python      # one producer:
-          python | rust | js | imgui | c   (--theme dark|light for one theme)
+          python | rust | js | imgui | c | lua | ruby   (--theme dark|light for one theme)
 
 The site shots are 2x (BUI_UI_SCALE=2, crisp on high-DPI screens), in Blender's
 dark and light themes (BUI_THEME), and losslessly recompressed (tools/pngopt.py).
@@ -16,6 +16,7 @@ when their toolchain or build is missing:
 * imgui: the C++ examples from the CMake build (BUI_BUILD_DIR, built with
          BUI_BUILD_EXAMPLES=ON BUI_BUILD_IMGUI=ON) and the Python bindings
 * c:     bui_site_kit_app from the same build
+* ruby:  ruby bindings/ruby/examples/counter.rb --screenshot (after `rake compile` there)
 
 Set BUIPY_BUILD_DIR to the build's bindings/python and BUI_BUILD_DIR to the
 CMake build directory.
@@ -218,6 +219,19 @@ def site_lua(theme):
             print("  ->", out_png)
 
 
+def site_ruby(theme):
+    """Ruby shots: the counter example with --screenshot (needs `rake compile` in bindings/ruby)."""
+    ruby = shutil.which("ruby")
+    lib = os.path.join(ROOT, "bindings", "ruby", "lib")
+    if not ruby or not any(f.startswith("bui_ext.") for f in os.listdir(os.path.join(lib, "bui"))):
+        print("ruby: no ruby, or the extension is not built (rake compile in bindings/ruby), skipped")
+        return
+    for name, script in (("ruby-counter", "counter.rb"),):
+        out = os.path.join(SITE_OUT, "%s-%s.png" % (name, theme))
+        run([ruby, "-I", lib, os.path.join(ROOT, "bindings", "ruby", "examples", script), "--screenshot", out],
+            env=child_env(theme))
+
+
 def site(only, themes, example=None):
     os.makedirs(SITE_OUT, exist_ok=True)
     before = set(os.listdir(SITE_OUT))
@@ -237,6 +251,8 @@ def site(only, themes, example=None):
             site_native(theme, "c")
         if only in (None, "lua"):
             site_lua(theme)
+        if only in (None, "ruby"):
+            site_ruby(theme)
     # lossless recompression of what other toolchains wrote
     import pngopt
     for f in sorted(os.listdir(SITE_OUT)):
@@ -253,7 +269,7 @@ def site(only, themes, example=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--site", action="store_true")
-    ap.add_argument("--only", choices=("python", "rust", "js", "imgui", "c", "lua"))
+    ap.add_argument("--only", choices=("python", "rust", "js", "imgui", "c", "lua", "ruby"))
     ap.add_argument("--theme", choices=THEMES)
     ap.add_argument("--example", help="with --only rust: just this example (e.g. site_data_table)")
     ap.add_argument("--site-python", choices=THEMES, help=argparse.SUPPRESS)

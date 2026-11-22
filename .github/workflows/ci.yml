@@ -1,6 +1,6 @@
 # Build and test on every platform: the C/C++ project with ctest (C kit, GPU parity,
 # window smoke, Dear ImGui, the Python bindings' suites), the Rust crates, the D
-# binding, and a packaging check of the published Rust crates. macOS runs on Apple
+# binding, the Ruby gem, and a packaging check of the published Rust crates. macOS runs on Apple
 # Silicon (macos-15) and Intel (macos-15-intel; GitHub retired the macos-13 images).
 #
 # Wheels are built by wheels.yml.
@@ -179,6 +179,63 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev
       - name: Build and run the D test suite
         run: dub run --config=test --compiler=ldc2
+
+  # bindings/ruby: the gem's extension builds the kit with CMake and Ruby's own compiler
+  # (RubyInstaller's MSYS2 gcc on Windows). On Linux the window tests run on Xvfb; the
+  # asan leg builds with AddressSanitizer (Ruby is not instrumented: the runtime is
+  # preloaded) and the package leg installs the packed gem, which builds from its
+  # vendored C sources alone.
+  ruby:
+    name: ruby (${{ matrix.os }}, ${{ matrix.leg }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, leg: test }
+          - { os: windows-latest, leg: test }
+          - { os: macos-15, leg: test }
+          - { os: ubuntu-latest, leg: asan }
+          - { os: ubuntu-latest, leg: package }
+    defaults:
+      run:
+        working-directory: bindings/ruby
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: bindings/ruby
+      - name: X11 headers and Xvfb (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev xvfb
+      - name: rake test (with native windows on Xvfb)
+        if: matrix.leg == 'test' && runner.os == 'Linux'
+        run: BUI_TEST_WINDOWS=1 xvfb-run -a bundle exec rake test
+      - name: rake test (headless)
+        if: matrix.leg == 'test' && runner.os != 'Linux'
+        run: bundle exec rake test
+      - name: rake test under AddressSanitizer
+        if: matrix.leg == 'asan'
+        run: |
+          BUI_SANITIZE=address bundle exec rake compile
+          # Ruby and ASan both want the alternate signal stack; Ruby's own exit leaks are not ours
+          BUI_TEST_WINDOWS=1 xvfb-run -a env LD_PRELOAD="$(gcc -print-file-name=libasan.so)" \
+            ASAN_OPTIONS=use_sigaltstack=0:detect_leaks=0:halt_on_error=1 \
+            ruby -Ilib -Itest -e 'Dir["test/test_*.rb"].each { |f| require_relative f }'
+      - uses: actions/setup-python@v5
+        if: matrix.leg == 'package'
+        with:
+          python-version: "3.12"
+      - name: Pack the gem, install it, require it
+        if: matrix.leg == 'package'
+        run: |
+          bundle exec rake gem
+          gem install --local ./blenderui-*.gem
+          cd "$RUNNER_TEMP"
+          ruby -e 'require "bui"; root = BUI::Node.new("column"); root << BUI::Node.new("button").set(text: "OK"); BUI::Context.open(root) { |c| c.render(BUI::Raster.new(64, 32), full: true) }; root.free; puts "blenderui #{BUI::VERSION}, kit #{BUI::KIT_VERSION}"'
 
   # The crates.io package of blenderui-sys builds from its vendored sources alone.
   package:
