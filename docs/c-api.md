@@ -74,7 +74,7 @@ int main(void)
 
 | Concept | API |
 |---|---|
-| **Nodes** | `BK_node_new(type)`, `BK_node_add(parent, child, index)`, `BK_node_remove`, `BK_node_child(_count)`, `BK_node_parent`, `BK_node_rect`, `BK_node_natural`, `BK_node_invalidate`, `BK_node_relayout`, `BK_node_free` |
+| **Nodes** | `BK_node_new(type)`, `BK_node_add(parent, child, index)` (0 for a node under itself), `BK_node_remove`, `BK_node_child(_count)`, `BK_node_parent`, `BK_node_rect`, `BK_node_natural`, `BK_node_invalidate`, `BK_node_relayout`, `BK_node_free` |
 | **Properties** | `BK_set_num / BK_set_str / BK_set_color / BK_set_strs` and `BK_get_*`, by name (`"value"`, `"text"`, `"label"`, `"min"`, `"items"`, `"enabled"` ...). `"set_value"` sets a value *and* notifies. |
 | **Geometry** | `BK_geom_set_manager(node, BK_GEOM_PACK / GRID / PLACE)`, `BK_geom_set(node, key, v)` (`side`, `fill`, `expand`, `anchor`, `padx0`..., `row`, `column`, `sticky`, `x`, `relx`, `reqwidth` ...), `BK_frame_grid_weight`. Children of `frame` and `canvas` nodes. |
 | **Context** | `BK_context_new(root)`: input state, popups, focus, undo. Input goes in with `BK_press`, `BK_release`, `BK_motion`, `BK_wheel`, `BK_key`, `BK_key_release`, `BK_button`, `BK_context_menu` (input methods: `BK_ime_event`, `BK_ime_state`, see below); frames come out of `BK_render(ctx, raster, w, h, full)`, which returns the number of redrawn regions (0 means nothing changed). `BK_configure(ctx, w, h)` reports a new window size (`BK_EV_CONFIGURE`) without drawing, so a host whose handlers rebuild the tree (the Rust binding) can do that before the first draw at the new size; `BK_render` calls it itself. |

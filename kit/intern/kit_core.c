@@ -309,6 +309,11 @@ int BK_node_add(BKNode *parent, BKNode *child, int index)
   if (!parent || !child || child == parent) {
     return 0;
   }
+  for (const BKNode *p = parent->parent; p; p = p->parent) {
+    if (p == child) {
+      return 0; /* under itself: the tree would be a cycle */
+    }
+  }
   if (child->parent) {
     void *ref = child->ref;
     bk_retain(ref); /* keep alive across the move */

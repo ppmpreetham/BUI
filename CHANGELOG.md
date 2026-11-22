@@ -92,6 +92,8 @@ All notable changes to **blenderui** (BUI). The format follows
   audio track plays and each video with sound owns one stream and thread.
 
 ### Fixed
+- **C API: a node can no longer be added under itself.** `BK_node_add` of a node to one of its own descendants made the tree a cycle, which every walk over it then followed for ever; it returns 0 now, as it does for a node added to itself.
+- **C API: menu items only go to menu buttons.** `BK_menubutton_set_items` on another kind of node wrote a menu into that node's own data (a list's, a canvas's), and leaked it on a node with none; it does nothing now.
 - **Rust: Tailwind `text-sm` / `text-xs` / `text-lg` line heights.** A unitless `calc()` line height (`calc(1.25 / 0.875)`, what the Tailwind theme sets) was read as pixels (1.4 px), so the text sat about 9 px above its box and a parent with `overflow: hidden` (`truncate`) cut it. It is now a factor of the font size, like a number.
 - **Rust: `text-overflow: ellipsis` on a clipping block.** A `nowrap` text in a block with `overflow: hidden` (`truncate`) was laid out as line-box words, so it was clipped without the `…`. A block holding only text now lays it out as one measured run whatever its `overflow` (except scrolling ones), clips it to the content box and ends it with `…`; `text-overflow` takes effect only when `overflow-x` is not `visible`, as in CSS.
 - **Windows window exposure and resizing:** a window dragged back from outside the screen, restored from minimize or uncovered

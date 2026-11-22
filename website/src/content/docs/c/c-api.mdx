@@ -112,7 +112,7 @@ BK_node_add(root, panel, -1);       /* index -1 appends */
 | Function | What it does |
 | --- | --- |
 | `BK_node_new(type)`, `BK_node_free(node)` | Create and free |
-| `BK_node_add(parent, child, index)`, `BK_node_remove(parent, child)` | Change the tree |
+| `BK_node_add(parent, child, index)`, `BK_node_remove(parent, child)` | Change the tree (`BK_node_add` moves a child that has a parent, and returns 0 for a node under itself) |
 | `BK_node_child_count`, `BK_node_child`, `BK_node_parent` | Walk it |
 | `BK_node_rect(node, rect)`, `BK_node_natural(node, size)` | Where it is, and the size it wants |
 | `BK_node_invalidate(node)` | Redraw it |

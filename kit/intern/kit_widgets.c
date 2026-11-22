@@ -3209,6 +3209,9 @@ BKMenuSpec *bk_menuspec_copy(const BKMenuSpec *items, int n);
 
 void BK_menubutton_set_items(BKNode *n, const BKMenuSpec *items, int count)
 {
+  if (!n || n->cls != &bk_cls_menubutton) {
+    return; /* n->ext is another class's data (or none, which nothing would free) */
+  }
   MenuButtonData *d = (MenuButtonData *)n->ext;
   if (!d) {
     d = (MenuButtonData *)calloc(1, sizeof(MenuButtonData));
